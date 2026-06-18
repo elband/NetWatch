@@ -29,6 +29,8 @@ export default function SuratKeluar() {
   const [previewHtml, setPreviewHtml] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const ZOOM_STEPS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+  const [zoomIdx, setZoomIdx] = useState(5); // default 0.85
 
   // Hasilkan HTML dokumen LKP lengkap (sama persis dengan cetak dari IncidentReportModal).
   // Settings menyimpan dengan field: kepala_jabatan/nama/nip, fasilitas — akses via cast any.
@@ -122,6 +124,23 @@ export default function SuratKeluar() {
     if (!win) return;
     win.focus();
     win.print();
+  }
+
+  function applyZoom(z: number) {
+    const body = iframeRef.current?.contentDocument?.body;
+    if (body) body.style.zoom = String(z);
+  }
+
+  function zoomIn() {
+    const next = Math.min(zoomIdx + 1, ZOOM_STEPS.length - 1);
+    setZoomIdx(next);
+    applyZoom(ZOOM_STEPS[next]);
+  }
+
+  function zoomOut() {
+    const prev = Math.max(zoomIdx - 1, 0);
+    setZoomIdx(prev);
+    applyZoom(ZOOM_STEPS[prev]);
   }
 
   async function openInWindow(s: Surat, autoPrint = false) {
@@ -274,7 +293,7 @@ export default function SuratKeluar() {
   }
 
   // Gabungkan Nota Dinas (hal.1) + LKP form (hal.2) + Lampiran (hal.3) dalam 1 HTML.
-  function buildCombinedIncidentDoc(s: Surat, notaQr: string, inc: Incident, lkpQr: string): string {
+  function buildCombinedIncidentDoc(s: Surat, notaQr: string, inc: Incident, lkpQr: string, kasiQr = ''): string {
     const report = inc.report;
     const cfg = lkp as Record<string, string>;
     const esc = (v: unknown) => String(v || '-').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
@@ -297,7 +316,12 @@ export default function SuratKeluar() {
     const notaIsi = s.body?.trim() || `Dengan ini disampaikan ${s.hal} dan mohon persetujuannya guna proses lebih lanjut.`;
     const notaQrBlock = notaQr ? `<div style="margin:6px auto;width:120px"><img src="${notaQr}" style="width:104px;height:104px"><div style="font-size:8px;color:#0a0">✔ TTE Koordinator</div><div style="font-size:8px;color:#444">${esc(s.sign_token || '')}</div></div>` : '<br><br><br>';
     const lkpQrBlock = lkpQr ? `<div style="margin:6px auto;width:120px"><img src="${lkpQr}" style="width:108px;height:108px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:8px;color:#444">Token: ${esc(report?.sign_token || '')}</div><div style="font-size:7px;color:#666">Pindai untuk verifikasi</div></div>` : `<div style="margin:14px 0;font-size:10px;color:#999">(Belum disahkan TTE koordinator)</div>`;
-    const sigBlock = `<table class="sig"><tr><td style="width:50%;vertical-align:top;padding:4px 8px;font-family:Arial,sans-serif;font-size:12px;text-align:center">Diperiksa Oleh :<br><b>${esc(cfg.kepala_jabatan || cfg.kasie_jabatan)}</b><br>${esc(cfg.kantor)}<br><br><br><br><u><b>${esc(cfg.kepala_nama || cfg.kasie_nama)}</b></u><br>NIP. ${esc(cfg.kepala_nip || cfg.kasie_nip)}</td><td style="width:50%;vertical-align:top;padding:4px 8px;font-family:Arial,sans-serif;font-size:12px;text-align:center">${esc(cfg.kota)}, ${dmy(report?.signed_at || tgl)}<br>Dibuat Oleh :<br><b>${esc(cfg.koord_jabatan)}</b><br>${esc(cfg.kantor)}${lkpQrBlock}<u><b>${esc(signerNama)}</b></u><br>NIP. ${esc(signerNip)}</td></tr></table>`;
+    const kasiQrBlock = kasiQr && s.kasi_status === 'disetujui'
+      ? `<div style="margin:6px auto;width:120px"><img src="${kasiQr}" style="width:108px;height:108px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:8px;color:#444">Token: ${esc(s.kasi_sign_token || '')}</div><div style="font-size:7px;color:#666">Pindai untuk verifikasi</div></div>`
+      : '<br><br><br>';
+    const kasiNama = s.kasi_signer_name || cfg.kepala_nama || cfg.kasie_nama;
+    const kasiNip = s.kasi_signer_nip || cfg.kepala_nip || cfg.kasie_nip;
+    const sigBlock = `<table class="sig"><tr><td style="width:50%;vertical-align:top;padding:4px 8px;font-family:Arial,sans-serif;font-size:12px;text-align:center">Diperiksa Oleh :<br><b>${esc(cfg.kepala_jabatan || cfg.kasie_jabatan)}</b><br>${esc(cfg.kantor)}${kasiQrBlock}<u><b>${esc(kasiNama)}</b></u><br>NIP. ${esc(kasiNip)}</td><td style="width:50%;vertical-align:top;padding:4px 8px;font-family:Arial,sans-serif;font-size:12px;text-align:center">${esc(cfg.kota)}, ${dmy(report?.signed_at || tgl)}<br>Dibuat Oleh :<br><b>${esc(cfg.koord_jabatan)}</b><br>${esc(cfg.kantor)}${lkpQrBlock}<u><b>${esc(signerNama)}</b></u><br>NIP. ${esc(signerNip)}</td></tr></table>`;
 
     return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.jenis)} ${esc(s.nomor)}</title><style>
       *{box-sizing:border-box}
@@ -375,7 +399,9 @@ export default function SuratKeluar() {
         let lkpQr = '';
         const lkpToken = inc.report?.sign_token || '';
         if (lkpToken) { try { lkpQr = await QRCode.toDataURL(`${location.origin}/verify-tte?token=${lkpToken}`, { width: 150, margin: 1 }); } catch { lkpQr = ''; } }
-        return buildCombinedIncidentDoc(s, notaQr, inc, lkpQr);
+        let kasiQr = '';
+        if (s.kasi_sign_token) { try { kasiQr = await QRCode.toDataURL(`${location.origin}/verify-tte?token=${s.kasi_sign_token}`, { width: 150, margin: 1 }); } catch { kasiQr = ''; } }
+        return buildCombinedIncidentDoc(s, notaQr, inc, lkpQr, kasiQr);
       } catch (err) {
         console.error('[SuratKeluar] Gagal fetch incident untuk preview LKP:', err);
       }
@@ -479,21 +505,26 @@ export default function SuratKeluar() {
       )}
 
       {detail && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setDetail(null)}>
-          <div className="bg-surface border border-border rounded-xl w-full max-w-4xl p-5 max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center overflow-y-auto p-4" onClick={() => setDetail(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-5xl p-5 flex flex-col" style={{ height: 'calc(100vh - 2rem)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3 shrink-0">
               <h3 className="text-sm font-bold">👁️ Detail Dokumen</h3>
               <button onClick={() => setDetail(null)} className="text-text2 hover:text-white text-lg leading-none">×</button>
             </div>
 
-            <div className="grid lg:grid-cols-[1fr_360px] gap-4 flex-1 min-h-0 overflow-hidden">
+            <div className="flex gap-4 flex-1 min-h-0">
             {/* Pratinjau dokumen (PDF/render) */}
-            <div className="bg-[#525659] rounded-lg border border-border overflow-hidden flex flex-col min-h-[300px]">
-              <div className="px-3 py-1.5 text-[10px] text-white/70 border-b border-black/20 flex items-center justify-between">
-                <span>📄 Pratinjau Dokumen</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => openInWindow(detail)} disabled={busy} className="text-white/80 hover:text-white" title="Buka dokumen lengkap di tab baru">🔗 Buka di Tab Baru</button>
-                  <button onClick={() => openInWindow(detail, true)} disabled={busy} className="text-white/80 hover:text-white">🖨️ Cetak / PDF</button>
+            <div className="flex-1 min-h-0 bg-[#525659] rounded-lg border border-border overflow-hidden flex flex-col">
+              <div className="px-3 py-1.5 text-[10px] text-white/70 border-b border-black/20 flex items-center justify-between gap-2">
+                <span className="shrink-0">📄 Pratinjau</span>
+                <div className="flex items-center gap-1">
+                  <button onClick={zoomOut} disabled={zoomIdx === 0} className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/20 disabled:opacity-30 text-white font-bold text-sm leading-none" title="Perkecil">−</button>
+                  <span className="w-9 text-center select-none">{Math.round(ZOOM_STEPS[zoomIdx] * 100)}%</span>
+                  <button onClick={zoomIn} disabled={zoomIdx === ZOOM_STEPS.length - 1} className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/20 disabled:opacity-30 text-white font-bold text-sm leading-none" title="Perbesar">+</button>
+                </div>
+                <div className="flex items-center gap-2 ml-auto">
+                  <button onClick={() => openInWindow(detail)} disabled={busy} className="text-white/80 hover:text-white shrink-0" title="Buka dokumen lengkap di tab baru">🔗 Tab Baru</button>
+                  <button onClick={() => openInWindow(detail, true)} disabled={busy} className="text-white/80 hover:text-white shrink-0">🖨️ Cetak</button>
                 </div>
               </div>
               {previewHtml
@@ -501,8 +532,10 @@ export default function SuratKeluar() {
                     ref={iframeRef}
                     title="preview"
                     srcDoc={previewHtml}
-                    className="flex-1 w-full bg-white"
+                    className="flex-1 min-h-0 w-full bg-white"
                     onLoad={() => {
+                      applyZoom(ZOOM_STEPS[zoomIdx]);
+                      iframeRef.current?.contentWindow?.scrollTo(0, 0);
                       if (autoPrintRef.current) {
                         autoPrintRef.current = false;
                         setTimeout(() => printFromIframe(), 200);
@@ -512,7 +545,7 @@ export default function SuratKeluar() {
                 : <div className="flex-1 flex items-center justify-center text-white/50 text-xs">Memuat dokumen…</div>}
             </div>
 
-            <div className="space-y-2 text-xs overflow-y-auto pr-1">
+            <div className="w-[380px] shrink-0 space-y-2 text-xs overflow-y-auto pr-1 min-h-0">
               <Row label="Jenis" value={detail.jenis} />
               <Row label="Nomor" value={detail.nomor} mono />
               <Row label="Hal / Perihal" value={detail.hal} />
