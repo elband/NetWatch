@@ -43,18 +43,18 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="grid grid-cols-5 gap-3.5 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-5 nw-stagger">
         {stats.map((s, i) => (
-          <div key={s.label} className="bg-surface border border-border rounded-[10px] p-4">
+          <div key={s.label} className="nw-card bg-surface border border-border rounded-[10px] p-4">
             <div className="text-[10px] text-text2 uppercase tracking-wider mb-1.5">{s.label}</div>
-            <div className={`text-[26px] font-bold mb-0.5 ${STAT_COLORS[i]}`}>{s.value}</div>
+            <div className={`nw-fluid-num mb-0.5 ${STAT_COLORS[i]}`}>{s.value}</div>
             <div className="text-[10px] text-text2">{s.sub}</div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-5">
-        <div className="bg-surface border border-border rounded-[10px] overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5 nw-stagger">
+        <div className="nw-card bg-surface border border-border rounded-[10px] overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex justify-between items-center">
             <span className="text-[13px] font-semibold">🚨 Insiden Aktif</span>
             <Link to="/incidents" className="text-xs text-text2 hover:text-white">Semua →</Link>
@@ -73,7 +73,7 @@ export default function Dashboard() {
           </table>
         </div>
 
-        <div className="bg-surface border border-border rounded-[10px] overflow-hidden">
+        <div className="nw-card bg-surface border border-border rounded-[10px] overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex justify-between items-center">
             <span className="text-[13px] font-semibold">⚠️ Perangkat Bermasalah</span>
             <Link to="/devices" className="text-xs text-text2 hover:text-white">Semua →</Link>
@@ -93,14 +93,14 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="bg-surface border border-border rounded-[10px] overflow-hidden">
+      <div className="nw-card bg-surface border border-border rounded-[10px] overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex justify-between items-center">
           <span className="text-[13px] font-semibold">🏆 Performa Teknisi</span>
           <Link to="/performa" className="text-xs text-text2 hover:text-white">Detail →</Link>
         </div>
-        <div className="p-3.5 grid grid-cols-4 gap-3">
+        <div className="p-3.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 nw-stagger">
           {performa.map((p) => (
-            <div key={p.techId} className="bg-surface2 border border-border rounded-lg p-3 text-center">
+            <div key={p.techId} className="nw-card bg-surface2 border border-border rounded-lg p-3 text-center">
               <div className="text-2xl mb-1">{p.emoji}</div>
               <div className="text-xs font-semibold">{p.name.split(' ')[0]}</div>
               <div className="text-[10px] text-text2 mb-2">{p.jabatan}</div>

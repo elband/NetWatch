@@ -67,6 +67,7 @@ async function migrate() {
 
   await addColumnIfMissing(conn, env.db.database, 'users', 'pin_hash', 'VARCHAR(255) DEFAULT NULL AFTER password_hash');
   await addColumnIfMissing(conn, env.db.database, 'users', 'roles', 'JSON DEFAULT NULL AFTER role');
+  await addColumnIfMissing(conn, env.db.database, 'users', 'avatar_url', "VARCHAR(255) DEFAULT NULL AFTER emoji");
   await conn.query('UPDATE users SET roles = JSON_ARRAY(role) WHERE roles IS NULL');
 
   // Data personil untuk Laporan Bulanan (format resmi Kemenhub).

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import path from 'path';
+import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { env } from './config/env.js';
@@ -27,6 +28,8 @@ import diklatRoutes from './routes/diklatRoutes.js';
 import dokumenRoutes from './routes/dokumenRoutes.js';
 import kegiatanNrRoutes from './routes/kegiatanNrRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import { setNotifyIo } from './services/notify.js';
 import { attachSshNamespace } from './services/sshBridge.js';
 import { startCoordWatcher } from './services/coordWatcher.js';
 import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
@@ -66,6 +69,7 @@ app.use('/api/leave', leaveRoutes);
 app.use('/api/diklat', diklatRoutes);
 app.use('/api/dokumen', dokumenRoutes);
 app.use('/api/kegiatan-nr', kegiatanNrRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);
@@ -75,8 +79,16 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: env.corsOrigin } });
 app.set('io', io); // agar route biasa bisa emit (mis. notifikasi maintenance selesai)
+setNotifyIo(io); // Notification Center: kirim notifikasi real-time per-user
 
 io.on('connection', (socket) => {
+  // Klien mengirim JWT-nya → join room user:{id} agar notifikasi tersampaikan ke user yang tepat.
+  socket.on('notif:auth', (token) => {
+    try {
+      const u = jwt.verify(String(token || ''), env.jwtSecret);
+      if (u?.id) socket.join(`user:${u.id}`);
+    } catch { /* token tidak valid — abaikan */ }
+  });
   socket.on('disconnect', () => {});
 });
 

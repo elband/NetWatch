@@ -1,5 +1,6 @@
 import { pool } from '../db/pool.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
+import { createNotification } from './notify.js';
 import { COORD_SLA_MINUTES, REMIND_MINUTES, getOnDutyTechIds } from '../config/shifts.js';
 
 // Kirim WA pengingat ke teknisi on-duty agar insiden segera diambil.
@@ -15,6 +16,7 @@ export async function remindOnDutyTechs(inc, { manual = false, by = null } = {})
       message: `🔔 PENGINGAT — SEGERA AMBIL INSIDEN (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit belum diambil. Mohon segera ditangani di aplikasi NetWatch.`,
       relatedIncidentId: inc.id,
     });
+    await createNotification({ userId: uid, type: 'ticket_sla', priority: 'warning', title: `Reminder SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit — segera tangani.`, refId: inc.id, refType: 'incident', link: '/my-incidents' });
   }
   await pool.query('UPDATE incidents SET tech_reminded = 1 WHERE id = ?', [inc.id]);
   const label = manual ? `Pengingat manual dikirim${by ? ` oleh ${by}` : ''}` : 'Pengingat otomatis dikirim';
@@ -66,6 +68,7 @@ export async function checkUnclaimedIncidents(io) {
         message: `⏰ INSIDEN BELUM DIAMBIL (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit tanpa teknisi. Mohon koordinasikan penanganan.`,
         relatedIncidentId: inc.id,
       });
+      await createNotification({ userId: c.id, type: 'ticket_sla', priority: 'kritis', title: `Tiket melewati SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit (>${COORD_SLA_MINUTES} mnt). Perlu koordinasi.`, refId: inc.id, refType: 'incident', link: '/coord-dashboard' });
     }
     io?.emit('incident:escalated', { id: inc.id, device: inc.device_name });
   }

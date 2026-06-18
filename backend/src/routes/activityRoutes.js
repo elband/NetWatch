@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
+import { createNotification, notifyRoles } from '../services/notify.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -68,6 +69,7 @@ router.post('/', upload.single('bukti'), async (req, res) => {
       message: `📋 PENGAJUAN KEGIATAN — ${TYPE_LABEL[t]}\n${title.trim()}\nOleh: ${req.user.name}\nWaktu: ${fmtWhen(act)}${detail?.trim() ? `\n${detail.trim()}` : ''}${buktiUrl ? '\n📎 Ada bukti dukung terlampir.' : ''}\nMohon persetujuan di aplikasi NetWatch.`,
     });
   }
+  await notifyRoles(['koordinator', 'admin'], { type: 'approval_pending', title: `Persetujuan menunggu: ${TYPE_LABEL[t]}`, message: `${title.trim()} — oleh ${req.user.name}`, refId: act.id, refType: 'activity', link: '/coord-dashboard' });
   res.status(201).json({ activity: act });
 });
 

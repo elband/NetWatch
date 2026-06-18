@@ -21,6 +21,7 @@ function toPublicUser(u) {
     roles,             // semua peran yang dimiliki
     jabatan: u.jabatan,
     emoji: u.emoji,
+    avatar_url: u.avatar_url ?? null,
     active: !!u.active,
     perms: typeof u.perms === 'string' ? JSON.parse(u.perms) : u.perms,
   };
@@ -91,8 +92,10 @@ export async function updateProfile(req, res) {
     for (const o of others) { if (await bcrypt.compare(String(pin), o.pin_hash)) return res.status(400).json({ error: 'PIN sudah digunakan akun lain, pilih yang lain.' }); }
     pinHash = await bcrypt.hash(String(pin), 10);
   }
-  await pool.query('UPDATE users SET name=?, email=?, phone=?, jabatan=?, pin_hash=? WHERE id=?',
-    [newName, newEmail || u.email, phone ?? u.phone, jabatan ?? u.jabatan, pinHash, id]);
+  // Foto profil opsional (multipart, field 'photo'); removePhoto=1 → kembali ke emoji.
+  const avatarUrl = req.file ? `/uploads/avatars/${req.file.filename}` : (req.body.removePhoto === '1' ? null : u.avatar_url);
+  await pool.query('UPDATE users SET name=?, email=?, phone=?, jabatan=?, pin_hash=?, avatar_url=? WHERE id=?',
+    [newName, newEmail || u.email, phone ?? u.phone, jabatan ?? u.jabatan, pinHash, avatarUrl, id]);
   const [updated] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
   res.json({ token: signToken(updated[0]), user: toPublicUser(updated[0]) });
 }

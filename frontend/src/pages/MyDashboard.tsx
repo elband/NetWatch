@@ -136,12 +136,12 @@ export default function MyDashboard() {
   const donutDeg = devices.length ? Math.round((onlineCount / devices.length) * 360) : 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 nw-stagger">
       {/* ===== Absensi hari ini ===== */}
       <AbsenCard />
 
       {/* ===== Performa bulan ini ===== */}
-      <div className="bg-gradient-to-br from-accent/10 to-accent2/8 border border-accent/25 rounded-xl p-5">
+      <div className="nw-card bg-gradient-to-br from-accent/10 to-accent2/8 border border-accent/25 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <span className="text-[13px] font-bold">📊 Performa Bulan Ini · {monthLabel}</span>
           <div className="flex items-center gap-3">
@@ -498,7 +498,7 @@ export default function MyDashboard() {
 // ===================== sub-komponen =====================
 function StatCard({ label, value, sub, color, accent, icon, purple }: { label: string; value: number | string; sub: string; color: string; accent: string; icon: string; purple?: boolean }) {
   return (
-    <div className={`bg-surface border ${accent} rounded-xl p-4`}>
+    <div className={`nw-card bg-surface border ${accent} rounded-xl p-4`}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] text-text2 uppercase font-semibold">{label}</span>
         <span className="text-base">{icon}</span>
@@ -511,7 +511,7 @@ function StatCard({ label, value, sub, color, accent, icon, purple }: { label: s
 
 function Metric({ label, value, color, spark, sparkColor, extra }: { label: string; value: number | string; color: string; spark?: number[]; sparkColor?: string; extra?: ReactNode }) {
   return (
-    <div className="bg-surface/60 border border-border rounded-lg px-3 py-2">
+    <div className="nw-card bg-surface/60 border border-border rounded-lg px-3 py-2">
       <div className={`text-lg font-extrabold ${color}`}>{value}</div>
       <div className="text-[10px] text-text2 uppercase mt-0.5">{label}</div>
       {spark && <div className="mt-1 -mb-0.5"><Spark data={spark} color={sparkColor} /></div>}
@@ -522,7 +522,7 @@ function Metric({ label, value, color, spark, sparkColor, extra }: { label: stri
 
 function Panel({ title, right, badge, children }: { title: string; right?: ReactNode; badge?: string; children: ReactNode }) {
   return (
-    <div className="bg-surface border border-border rounded-xl p-4">
+    <div className="nw-card bg-surface border border-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <span className="text-[12px] font-bold tracking-wide flex items-center gap-2">
           {title}

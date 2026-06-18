@@ -10,9 +10,25 @@ export interface User {
   roles: Role[];
   jabatan: string | null;
   emoji: string;
+  avatar_url?: string | null;
   active: boolean;
   perms: string[];
   has_pin?: boolean;
+}
+
+export type NotifPriority = 'kritis' | 'warning' | 'selesai' | 'info';
+export interface AppNotification {
+  id: number;
+  user_id: number;
+  title: string;
+  message: string | null;
+  type: string;
+  priority: NotifPriority;
+  reference_id: string | null;
+  reference_type: string | null;
+  link: string | null;
+  is_read: number;
+  created_at: string;
 }
 
 export type DeviceStatus = 'online' | 'warning' | 'offline';

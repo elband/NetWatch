@@ -42,7 +42,7 @@ function Gauge({ score, grade, label }: { score: number; grade: string; label: s
 function StatCard({ label, value, tone, icon }: { label: string; value: number; tone: 'good' | 'warn' | 'bad' | 'neutral'; icon: string }) {
   const c = tone === 'good' ? '#22c55e' : tone === 'warn' ? '#eab308' : tone === 'bad' ? '#ef4444' : '#60a5fa';
   return (
-    <div className="rounded-xl border p-3.5 bg-[#0f1729]" style={{ borderColor: `${c}30` }}>
+    <div className="nw-card rounded-xl border p-3.5 bg-[#0f1729]" style={{ borderColor: `${c}30` }}>
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-slate-400">{label}</span>
         <span className="text-sm">{icon}</span>
@@ -115,7 +115,7 @@ export default function Performa() {
       {!data || !s ? (
         <div className="text-center text-slate-500 py-20 text-sm">Memuat data performa…</div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4 nw-stagger">
           {s.vpnFlag && (
             <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 px-4 py-3 text-[12px] font-semibold">
               ⚠️ Penalti aktif: terdeteksi {s.vpnDays} hari absensi memakai VPN / lokasi tidak sesuai. Skor performa bulan ini dikurangi 50% (dari {s.scoreBeforePenalty} → {s.score}).
@@ -123,12 +123,12 @@ export default function Performa() {
           )}
           {/* Baris 1: Gauge + Stat cards */}
           <div className="grid lg:grid-cols-[300px_1fr] gap-4">
-            <div className="rounded-2xl border border-slate-800 bg-[#0b1220] p-5 flex flex-col items-center justify-center">
+            <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] p-5 flex flex-col items-center justify-center">
               <div className="text-[12px] text-slate-400 mb-2 font-semibold">{s.emoji} {s.name}</div>
               <Gauge score={s.score} grade={s.grade} label={s.gradeLabel} />
               <button onClick={() => setDetailFor(s.techId)} className="mt-3 text-[11px] text-sky-300 hover:underline">🔍 Rincian perhitungan skor</button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 content-start">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 content-start nw-stagger">
               <StatCard label="Tiket Selesai" value={s.done} tone="good" icon="✅" />
               <StatCard label="Tepat SLA" value={s.onTime} tone="good" icon="⏱️" />
               <StatCard label="Pelanggaran SLA" value={s.breaches} tone={s.breaches > 0 ? 'bad' : 'neutral'} icon="🚫" />
@@ -142,12 +142,12 @@ export default function Performa() {
 
           {/* Baris 2: Trend 30 hari + SLA bulanan */}
           <div className="grid lg:grid-cols-[1fr_360px] gap-4">
-            <div className="rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
               <div className="text-[12px] font-semibold text-slate-300 mb-1">📈 Trend Performa 30 Hari <span className="text-slate-500 font-normal">(poin bersih harian)</span></div>
               <AreaChart data={data.trend30} />
               <div className="flex justify-between text-[9px] text-slate-500 mt-1"><span>{data.trend30[0]?.date.slice(5)}</span><span>{data.trend30[data.trend30.length - 1]?.date.slice(5)}</span></div>
             </div>
-            <div className="rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
               <div className="text-[12px] font-semibold text-slate-300 mb-3">📊 SLA Bulanan</div>
               <div className="flex items-end justify-between gap-2 h-[130px]">
                 {data.slaMonthly.map((m) => {
@@ -167,7 +167,7 @@ export default function Performa() {
 
           {/* Baris 3: AI Insight + Top5 teknisi + Top5 layanan */}
           <div className="grid lg:grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
               <div className="text-[12px] font-semibold text-slate-300 mb-3">🤖 AI Insight & Rekomendasi</div>
               <div className="space-y-2">
                 {data.insight.map((ins, i) => (
@@ -177,7 +177,7 @@ export default function Performa() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
               <div className="text-[12px] font-semibold text-slate-300 mb-3">🏆 Top 5 Teknisi Terbaik</div>
               <div className="space-y-1.5">
                 {data.top5.map((r, i) => (
@@ -191,7 +191,7 @@ export default function Performa() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
+            <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] p-4">
               <div className="text-[12px] font-semibold text-slate-300 mb-3">🖥️ Top 5 Layanan Ditangani</div>
               <div className="space-y-2">
                 {data.topServices.map((sv) => {
@@ -212,7 +212,7 @@ export default function Performa() {
           </div>
 
           {/* Ranking lengkap */}
-          <div className="rounded-2xl border border-slate-800 bg-[#0b1220] overflow-x-auto">
+          <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] overflow-x-auto">
             <div className="text-[12px] font-semibold text-slate-300 px-4 pt-4 pb-2">📋 Ranking Teknisi</div>
             <table className="w-full text-xs">
               <thead><tr className="text-slate-500 uppercase text-[10px] border-b border-slate-800">

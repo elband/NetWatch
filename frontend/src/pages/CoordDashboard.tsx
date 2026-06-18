@@ -139,7 +139,7 @@ export default function CoordDashboard() {
   const donutDeg = devices.length ? Math.round((onlineCount / devices.length) * 360) : 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 nw-stagger">
       {toast && <div className="bg-accent2/10 border border-accent2/30 rounded-md px-3 py-2 text-[11px] text-accent2">🔔 {toast}</div>}
 
       {/* Persetujuan kegiatan teknisi — di atas */}
@@ -181,7 +181,7 @@ export default function CoordDashboard() {
       </Panel>
 
       {/* Performa koordinator */}
-      <div className="bg-gradient-to-br from-accent/10 to-accent2/8 border border-accent/25 rounded-xl p-5">
+      <div className="nw-card bg-gradient-to-br from-accent/10 to-accent2/8 border border-accent/25 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <span className="text-[13px] font-bold">🎯 Performa Koordinator · {monthLabel}</span>
           <div className="flex items-center gap-3">
@@ -451,7 +451,7 @@ function Line({ data, color }: { data: number[]; color: string }) {
 
 function Metric({ label, value, color, spark, sparkColor, extra }: { label: string; value: number | string; color: string; spark?: number[]; sparkColor?: string; extra?: ReactNode }) {
   return (
-    <div className="bg-surface/60 border border-border rounded-lg px-3 py-2">
+    <div className="nw-card bg-surface/60 border border-border rounded-lg px-3 py-2">
       <div className={`text-lg font-extrabold ${color}`}>{value}</div>
       <div className="text-[10px] text-text2 uppercase mt-0.5">{label}</div>
       {spark && <div className="mt-1 -mb-0.5"><Spark data={spark} color={sparkColor} /></div>}
@@ -462,7 +462,7 @@ function Metric({ label, value, color, spark, sparkColor, extra }: { label: stri
 
 function Panel({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
   return (
-    <div className="bg-surface border border-border rounded-xl p-4">
+    <div className="nw-card bg-surface border border-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <span className="text-[12px] font-bold tracking-wide">{title}</span>
         {right}

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
+import { notifyRoles } from '../services/notify.js';
 import { audit } from '../services/audit.js';
 
 const router = Router();
@@ -204,7 +205,10 @@ router.patch('/:id/status', async (req, res) => {
     }
   } finally { conn.release(); }
   await audit(req.user, `knr_${next}`, 'kegiatan', id, `${d.nomor} · ${d.judul}`);
-  if (next === 'diajukan') await notifyCoords(`📝 *Kegiatan Non-Rutin Baru*\n${d.petugas_nama}: ${d.judul}\nNo. ${d.nomor}\nMohon ditinjau.`);
+  if (next === 'diajukan') {
+    await notifyCoords(`📝 *Kegiatan Non-Rutin Baru*\n${d.petugas_nama}: ${d.judul}\nNo. ${d.nomor}\nMohon ditinjau.`);
+    await notifyRoles(['koordinator', 'admin'], { type: 'knr_new', title: `Kegiatan non-rutin baru: ${d.judul}`, message: `${d.petugas_nama} · ${d.nomor} — mohon ditinjau.`, refId: id, refType: 'kegiatan', link: '/kegiatan-nr' });
+  }
   if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) { try { await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Kegiatan "${d.judul}" (${d.nomor}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ } }
   const [u] = await pool.query('SELECT * FROM kegiatan_non_rutin WHERE id=?', [id]);
   res.json({ kegiatan: (await withDetail(u))[0] });

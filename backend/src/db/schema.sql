@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   roles JSON DEFAULT NULL,
   jabatan VARCHAR(120) DEFAULT NULL,
   emoji VARCHAR(10) DEFAULT '👤',
+  avatar_url VARCHAR(255) DEFAULT NULL,
   active TINYINT(1) NOT NULL DEFAULT 1,
   perms JSON NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -589,4 +590,23 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance (
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Notification Center: notifikasi per-user, dikirim real-time via Socket.IO.
+CREATE TABLE IF NOT EXISTS notifications (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  title VARCHAR(160) NOT NULL,
+  message VARCHAR(400) DEFAULT NULL,
+  type VARCHAR(40) NOT NULL,
+  priority ENUM('kritis','warning','selesai','info') NOT NULL DEFAULT 'info',
+  reference_id VARCHAR(40) DEFAULT NULL,
+  reference_type VARCHAR(40) DEFAULT NULL,
+  link VARCHAR(200) DEFAULT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_notif_user_read (user_id, is_read),
+  INDEX idx_notif_user_cursor (user_id, id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

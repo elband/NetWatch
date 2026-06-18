@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification, queueWaRaw } from '../jobs/waQueue.js';
+import { notifyRoles } from '../services/notify.js';
 import { snapshotAndNotifyOnDuty } from '../controllers/incidentController.js';
 
 const normPhone = (p) => { const d = String(p || '').replace(/[^\d]/g, ''); return d.length >= 8 ? d : null; };
@@ -53,6 +54,7 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
     await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?,0,?)', [incId, `Laporan fasilitas via QR (${b.room_code || '-'}): ${b.detail}`]);
     await conn.query('UPDATE public_reports SET incident_id=? WHERE id=?', [incId, id]);
     try { await snapshotAndNotifyOnDuty(conn, { id: incId, priority: prio, deviceName, issue }); } catch { /* abaikan */ }
+    try { await notifyRoles(['koordinator', 'admin'], { type: b.urgensi === 'kritis' ? 'public_critical' : 'public_new', title: `Laporan publik${b.urgensi === 'kritis' ? ' KRITIS' : ''}: ${b.judul.trim()}`, message: `${id} · ${ruang || gedung || 'Umum'} — ${b.jenis}`, refId: id, refType: 'public_report', link: '/pelaporan-qr' }); } catch { /* abaikan */ }
     // Notifikasi WA ke pelapor (bila menyertakan nomor HP) — narasi + tautan lacak.
     const reporterPhone = normPhone(b.hp);
     if (reporterPhone) {

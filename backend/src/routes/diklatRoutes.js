@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
+import { createNotification, notifyRoles } from '../services/notify.js';
 import { audit } from '../services/audit.js';
 
 const router = Router();
@@ -173,9 +174,13 @@ router.patch('/:id/status', async (req, res) => {
   await logHistory(id, req.user, next, note);
   await audit(req.user, `diklat_${next}`, 'diklat', id, `${d.nomor_pengajuan} · ${d.nama_diklat}`);
   // Notifikasi
-  if (next === 'diajukan') await notifyCoords(`📚 *Pengajuan Diklat Baru*\n${d.pegawai_nama}: ${d.nama_diklat}\nNo. ${d.nomor_pengajuan}\nMohon ditinjau.`);
+  if (next === 'diajukan') {
+    await notifyCoords(`📚 *Pengajuan Diklat Baru*\n${d.pegawai_nama}: ${d.nama_diklat}\nNo. ${d.nomor_pengajuan}\nMohon ditinjau.`);
+    await notifyRoles(['koordinator', 'admin'], { type: 'diklat_new', title: `Pengajuan diklat baru: ${d.nama_diklat}`, message: `${d.pegawai_nama} · ${d.nomor_pengajuan} — mohon ditinjau.`, refId: id, refType: 'diklat', link: '/diklat' });
+  }
   if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) {
     try { await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Pengajuan diklat "${d.nama_diklat}" (${d.nomor_pengajuan}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ }
+    await createNotification({ userId: d.created_by, type: next === 'ditolak' ? 'diklat_rejected' : 'diklat_approved', title: `Diklat ${next}: ${d.nama_diklat}`, message: `${d.nomor_pengajuan}${note ? ` — ${note}` : ''}`, refId: id, refType: 'diklat', link: '/diklat' });
   }
   const [u] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
   res.json({ diklat: (await withDetail(u))[0] });

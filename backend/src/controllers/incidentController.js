@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { pool } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
+import { createNotification, notifyRoles } from '../services/notify.js';
 import { getOnDutyTechIds, getDutyStatus } from '../config/shifts.js';
 import { remindOnDutyTechs } from '../services/coordWatcher.js';
 
@@ -38,6 +39,7 @@ async function notifyCoordinators(conn, incident, message, type = 'alert') {
 
 async function notifyCoordinatorsDone(conn, incident, duration) {
   await notifyCoordinators(conn, incident, `✅ PERALATAN NORMAL KEMBALI\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nDurasi: ${duration} menit`, 'done');
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_done', title: `Insiden selesai: ${incident.device_name}`, message: `${incident.id} ditangani dalam ${duration} menit`, refId: incident.id, refType: 'incident', link: '/reports' });
 }
 
 // Snapshot teknisi on-duty saat insiden masuk + kirim notifikasi ke mereka.
@@ -47,6 +49,7 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
   for (const uid of onDutyIds) {
     await conn.query('INSERT IGNORE INTO incident_duty (incident_id, user_id) VALUES (?, ?)', [id, uid]);
   }
+  const prio = priority === 'kritis' ? 'kritis' : 'warning';
   for (const uid of onDutyIds) {
     await queueWaNotification({
       type: 'alert',
@@ -54,7 +57,10 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
       message: `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nSegera AMBIL di aplikasi NetWatch.`,
       relatedIncidentId: id,
     });
+    await createNotification({ userId: uid, type: 'ticket_assigned', priority: prio, title: `Tiket baru: ${deviceName}`, message: issue, refId: id, refType: 'incident', link: '/my-incidents' });
   }
+  // Koordinator & admin: tiket helpdesk baru masuk.
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: '/incidents' });
   return onDutyIds.length;
 }
 
