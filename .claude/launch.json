@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "netwatch-fe",
+      "runtimeExecutable": "C:\\laragon\\bin\\nodejs\\node-v22\\node.exe",
+      "runtimeArgs": ["frontend/node_modules/vite/bin/vite.js", "frontend", "--config", "frontend/vite.config.ts"],
+      "port": 5173,
+      "autoPort": true
+    }
+  ]
+}

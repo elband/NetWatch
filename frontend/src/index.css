@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0d1117;
+  --color-surface: #161b22;
+  --color-surface2: #1c2128;
+  --color-border: #2a313c;
+  --color-text: #e6edf3;
+  --color-text2: #8b949e;
+  --color-accent: #00d4aa;
+  --color-accent2: #58a6ff;
+  --color-danger: #f85149;
+  --color-success: #3fb950;
+  --color-warn: #d29922;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ===== Login background motion ===== */
+@keyframes grid-pan {
+  0% { background-position: 0 0; }
+  100% { background-position: 60px 60px; }
+}
+@keyframes blob-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -40px) scale(1.08); }
+  66% { transform: translate(-25px, 25px) scale(0.95); }
+}
+@keyframes sweep {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dev-inp {
+  width: 100%;
+  background: var(--color-surface2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-text);
+  outline: none;
+}
+.dev-inp:focus { border-color: var(--color-accent); }
+
+.login-grid {
+  background-image:
+    linear-gradient(to right, rgba(88, 166, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(88, 166, 255, 0.08) 1px, transparent 1px);
+  background-size: 60px 60px;
+  animation: grid-pan 6s linear infinite;
+}
+.login-blob { animation: blob-float 14s ease-in-out infinite; }
+.login-card { animation: fade-up 0.6s ease both; }
+.login-sweep { animation: sweep 2.4s ease-in-out infinite; }
