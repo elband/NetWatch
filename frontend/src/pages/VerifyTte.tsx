@@ -91,8 +91,8 @@ export default function VerifyTte() {
             <div className="flex items-center gap-3 px-6 py-4 border-b border-white/10">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-lg" style={{ background: 'linear-gradient(135deg,#3b82f6,#22d3ee)' }}>📡</div>
               <div>
-                <div className="text-[15px] font-bold text-white tracking-tight">NetWatch · Verifikasi TTE</div>
-                <div className="text-[10px] text-slate-400">Tanda Tangan Elektronik · Unit Elektronika Bandara</div>
+                <div className="text-[15px] font-bold text-white tracking-tight">NetWatch ERP · Verifikasi TTE</div>
+                <div className="text-[10px] text-slate-400">Enterprise Resource Planning for Airport Technology Operations</div>
               </div>
             </div>
 

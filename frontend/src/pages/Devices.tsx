@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { getSocket } from '../api/socket';
 import { useAuth } from '../context/AuthContext';
@@ -197,6 +198,15 @@ export default function Devices() {
                       <button onClick={() => createIncident(d.id)} className="bg-danger/10 text-danger border border-danger/30 rounded px-2 py-0.5 text-[10px]">
                         ⚠️ Insiden
                       </button>
+                    )}
+                    {d.ssh_username && d.ip && (
+                      <Link
+                        to={`/ssh?device=${d.id}`}
+                        className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/40 rounded px-2 py-0.5 text-[10px] hover:bg-emerald-500/20 transition-colors"
+                        title={`Remote SSH ke ${d.ssh_host || d.ip}`}
+                      >
+                        🖥️ SSH
+                      </Link>
                     )}
                     {canEdit && (
                       <button onClick={() => openEdit(d)} title="Edit perangkat" className="bg-accent2/10 text-accent2 border border-accent2/40 rounded px-2 py-0.5 text-[10px]">

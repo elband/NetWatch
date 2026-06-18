@@ -65,17 +65,22 @@ router.get('/', requireRole('koordinator', 'admin'), async (req, res) => {
 
 // Buat surat keluar baru (mis. Nota Dinas umum). Nomor otomatis + lampiran bukti dukung (opsional).
 router.post('/', requireRole('koordinator', 'admin'), upload.array('files', 10), async (req, res) => {
-  const { jenis, hal, tujuan, body, report_month } = req.body;
+  const { jenis, hal, tujuan, body, report_month, incident_id: rawIncId } = req.body;
   if (!hal?.trim()) return res.status(400).json({ error: 'Hal/perihal surat wajib diisi.' });
+  const incId = rawIncId?.trim() || null;
+  if (incId) {
+    const [ch] = await pool.query('SELECT id FROM incidents WHERE id = ?', [incId]);
+    if (!ch[0]) return res.status(400).json({ error: `Insiden ${incId} tidak ditemukan.` });
+  }
   const conn = await pool.getConnection();
   try {
     const { nomor, seq, bulan, tahun } = await nextNomor(conn);
     const tanggal = new Date().toISOString().slice(0, 10);
     const rm = /^\d{4}-\d{2}$/.test(report_month || '') ? report_month : null;
     const [r] = await conn.query(
-      `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, tujuan, body, tanggal, created_by, creator_name, report_month)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [(jenis || 'Nota Dinas').trim(), nomor, seq, bulan, tahun, hal.trim(), tujuan?.trim() || null, body?.trim() || null, tanggal, req.user.id, req.user.name, rm]
+      `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, tujuan, body, tanggal, created_by, creator_name, report_month, incident_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [(jenis || 'Nota Dinas').trim(), nomor, seq, bulan, tahun, hal.trim(), tujuan?.trim() || null, body?.trim() || null, tanggal, req.user.id, req.user.name, rm, incId]
     );
     for (const f of req.files || []) {
       await conn.query('INSERT INTO surat_lampiran (surat_id, file_url, filename, mimetype) VALUES (?, ?, ?, ?)',
@@ -86,6 +91,21 @@ router.post('/', requireRole('koordinator', 'admin'), upload.array('files', 10),
   } finally {
     conn.release();
   }
+});
+
+// Tautkan / lepas tautan insiden (dan LKP-nya) dari sebuah surat.
+router.patch('/:id/incident', requireRole('koordinator', 'admin'), async (req, res) => {
+  const id = Number(req.params.id);
+  const incId = String(req.body.incident_id || '').trim() || null;
+  if (incId) {
+    const [ch] = await pool.query('SELECT id FROM incidents WHERE id = ?', [incId]);
+    if (!ch[0]) return res.status(404).json({ error: `Insiden ${incId} tidak ditemukan.` });
+  }
+  const [s] = await pool.query('SELECT id FROM nota_dinas WHERE id = ?', [id]);
+  if (!s[0]) return res.status(404).json({ error: 'Surat tidak ditemukan.' });
+  await pool.query('UPDATE nota_dinas SET incident_id = ? WHERE id = ?', [incId, id]);
+  const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
+  res.json({ surat: (await withLampiran(rows))[0] });
 });
 
 // Tambah lampiran bukti dukung ke surat yang sudah ada.

@@ -152,8 +152,8 @@ export default function Ttd() {
         <div className="flex items-center gap-3 mb-5 text-white">
           <div className="w-11 h-11 rounded-xl flex items-center justify-center text-2xl shadow-lg" style={{ background: 'linear-gradient(135deg,#3b82f6,#22d3ee)' }}>🖊️</div>
           <div>
-            <div className="text-base font-bold tracking-tight">NetWatch · Tanda Tangan Elektronik</div>
-            <div className="text-[11px] text-slate-400">Persetujuan Kepala Seksi · Unit Elektronika Bandara</div>
+            <div className="text-base font-bold tracking-tight">NetWatch ERP · Tanda Tangan Elektronik</div>
+            <div className="text-[11px] text-slate-400">Enterprise Resource Planning for Airport Technology Operations</div>
           </div>
         </div>
 

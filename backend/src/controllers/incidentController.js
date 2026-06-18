@@ -99,6 +99,13 @@ async function attachNotes(incidents) {
   }));
 }
 
+export async function getIncident(req, res) {
+  const id = req.params.id;
+  const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  res.json({ incident: (await attachNotes(rows))[0] });
+}
+
 export async function listIncidents(req, res) {
   const { status, techId, unassigned } = req.query;
   let sql = 'SELECT * FROM incidents WHERE 1=1';
@@ -430,26 +437,36 @@ export async function signIncidentReport(req, res) {
     `UPDATE incident_reports SET signed_by=?, signer_name=?, signer_nip=?, signed_at=?, sign_token=? WHERE incident_id=?`,
     [req.user.id, name, nip, signedAt, token, id]
   );
+
+  // Otomatis masuk Surat Keluar dan sahkan nota_dinas sekaligus.
+  const nd = await ensureNotaDinasSurat(id, req.user);
+  if (nd && !nd.nota.sign_token) {
+    const spayload = `SURAT|${nd.nota.nomor}|${nd.nota.hal}|${req.user.id}|${name}|${signedAt.toISOString()}`;
+    const stoken = 'NS' + crypto.createHmac('sha256', env.jwtSecret).update(spayload).digest('hex').slice(0, 22).toUpperCase();
+    await pool.query(
+      `UPDATE nota_dinas SET signed_by=?, signer_name=?, signer_nip=?, signed_at=?, sign_token=? WHERE id=?`,
+      [req.user.id, name, nip, signedAt, stoken, nd.nota.id]
+    );
+  }
+
   const [updated] = await pool.query('SELECT * FROM incident_reports WHERE incident_id = ?', [id]);
   res.json({ report: updated[0] });
 }
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
-// Buat (atau ambil) Nota Dinas pengantar untuk laporan kerusakan sebuah insiden.
-// Nomor otomatis berurut per bulan: {seq}/{kode}/{bulan-romawi}/{tahun}.
-export async function createNotaDinas(req, res) {
-  const id = req.params.id;
+// Pastikan ada entry nota_dinas untuk insiden ini. Kalau sudah ada, kembalikan
+// yang lama. Dipakai oleh signIncidentReport (auto) dan createNotaDinas (manual).
+async function ensureNotaDinasSurat(incidentId, user) {
+  const [exist] = await pool.query('SELECT * FROM nota_dinas WHERE incident_id = ? ORDER BY id DESC LIMIT 1', [incidentId]);
+  if (exist[0]) return { nota: exist[0], reused: true };
+
   const [incRows] = await pool.query(
     'SELECT i.*, d.loc AS device_loc FROM incidents i LEFT JOIN devices d ON d.id = i.device_id WHERE i.id = ?',
-    [id]
+    [incidentId]
   );
   const incident = incRows[0];
-  if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
-
-  // Sudah ada untuk insiden ini → pakai yang lama (nomor tidak berubah).
-  const [exist] = await pool.query('SELECT * FROM nota_dinas WHERE incident_id = ? ORDER BY id DESC LIMIT 1', [id]);
-  if (exist[0]) return res.json({ nota: exist[0], reused: true });
+  if (!incident) return null;
 
   const [sRows] = await pool.query("SELECT setting_value FROM settings WHERE setting_key = 'lkp'");
   let lkp = {};
@@ -466,12 +483,44 @@ export async function createNotaDinas(req, res) {
   const tanggal = now.toISOString().slice(0, 10);
 
   const [r] = await pool.query(
-    `INSERT INTO nota_dinas (nomor, seq, bulan, tahun, incident_id, hal, tanggal, created_by, creator_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [nomor, seq, bulan, tahun, id, hal, tanggal, req.user.id, req.user.name]
+    `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, incident_id, hal, tanggal, created_by, creator_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ['LKP', nomor, seq, bulan, tahun, incidentId, hal, tanggal, user.id, user.name]
   );
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [r.insertId]);
-  res.status(201).json({ nota: rows[0] });
+  return { nota: rows[0], reused: false };
+}
+
+// Buat (atau ambil) Nota Dinas pengantar untuk laporan kerusakan sebuah insiden.
+export async function createNotaDinas(req, res) {
+  const id = req.params.id;
+  const [incCheck] = await pool.query('SELECT id FROM incidents WHERE id = ?', [id]);
+  if (!incCheck[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+
+  const result = await ensureNotaDinasSurat(id, req.user);
+  if (!result) return res.status(500).json({ error: 'Gagal membuat nota dinas' });
+
+  // Jika LKP sudah di-TTE tapi nota_dinas belum disahkan, auto-sahkan sekarang.
+  if (!result.nota.sign_token) {
+    const [rptRows] = await pool.query(
+      'SELECT signed_by, signer_name, signer_nip, signed_at FROM incident_reports WHERE incident_id = ? AND sign_token IS NOT NULL LIMIT 1',
+      [id]
+    );
+    if (rptRows[0]) {
+      const rpt = rptRows[0];
+      const ts = new Date(rpt.signed_at);
+      const spayload = `SURAT|${result.nota.nomor}|${result.nota.hal}|${rpt.signed_by}|${rpt.signer_name}|${ts.toISOString()}`;
+      const stoken = 'NS' + crypto.createHmac('sha256', env.jwtSecret).update(spayload).digest('hex').slice(0, 22).toUpperCase();
+      await pool.query(
+        `UPDATE nota_dinas SET signed_by=?, signer_name=?, signer_nip=?, signed_at=?, sign_token=? WHERE id=?`,
+        [rpt.signed_by, rpt.signer_name, rpt.signer_nip, ts, stoken, result.nota.id]
+      );
+      const [upd] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [result.nota.id]);
+      result.nota = upd[0];
+    }
+  }
+
+  res.status(result.reused ? 200 : 201).json(result);
 }
 
 // Verifikasi publik TTE via token (tanpa auth). Dipakai saat QR dipindai.

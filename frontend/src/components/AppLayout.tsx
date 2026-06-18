@@ -79,8 +79,8 @@ export default function AppLayout() {
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded-[7px] flex items-center justify-center text-[15px] bg-gradient-to-br from-accent to-accent2">📡</div>
           <div className="hidden sm:block leading-tight">
-            <div className="text-sm font-bold">NetWatch</div>
-            <div className="text-[9px] text-text2 uppercase tracking-wider">ERP v2.0</div>
+            <div className="text-sm font-bold">NetWatch <span className="text-accent">ERP</span></div>
+            <div className="text-[9px] text-text2 uppercase tracking-wider">Airport Technology Operations</div>
           </div>
         </div>
         <div className="flex-1 min-w-0">

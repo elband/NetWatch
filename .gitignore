@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Build output
+frontend/dist/
+
+# Environment — NEVER commit these
+.env
+backend/.env
+frontend/.env*
+*.local
+
+# Uploads (user-generated content, managed outside git)
+backend/uploads/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# PM2
+.pm2/

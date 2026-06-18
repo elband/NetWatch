@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import PanduanModal from '../components/PanduanModal';
 
 const QUICK_LOGINS = [
   { label: 'Admin', pin: '111111', emoji: '👑' },
@@ -21,6 +22,7 @@ export default function Login() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPanduan, setShowPanduan] = useState(false);
   const { loginPin } = useAuth();
   const navigate = useNavigate();
 
@@ -79,7 +81,7 @@ export default function Login() {
               <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl bg-gradient-to-br from-accent to-accent2 shadow-lg shadow-accent/30">📡</div>
               <div>
                 <div className="text-xl font-extrabold tracking-tight">NetWatch <span className="text-accent">ERP</span></div>
-                <div className="text-[10px] text-text2 uppercase tracking-[0.2em]">Network Operations Center</div>
+                <div className="text-[10px] text-text2 uppercase tracking-[0.2em]">Enterprise Resource Planning for Airport Technology Operations</div>
               </div>
             </div>
             <div className="mt-9 space-y-4">
@@ -94,12 +96,20 @@ export default function Login() {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-text2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
-            </span>
-            Sistem operasional · v2.0
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[11px] text-text2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
+              </span>
+              Sistem operasional · v2.0
+            </div>
+            <button
+              onClick={() => setShowPanduan(true)}
+              className="flex items-center gap-1.5 text-[11px] text-text2 hover:text-white border border-border/60 hover:border-accent/50 rounded-lg px-3 py-1.5 transition-all hover:bg-accent/10"
+            >
+              📖 Panduan
+            </button>
           </div>
         </div>
 
@@ -143,9 +153,19 @@ export default function Login() {
                 </button>
               ))}
             </div>
+
+            {/* Panduan button — visible on mobile (md:hidden for desktop, covered by left panel) */}
+            <button
+              onClick={() => setShowPanduan(true)}
+              className="md:hidden mt-4 w-full flex items-center justify-center gap-2 border border-border/60 rounded-lg px-3 py-2 text-[12px] text-text2 hover:border-accent/50 hover:text-white hover:bg-accent/10 transition-all"
+            >
+              📖 Panduan Penggunaan
+            </button>
           </div>
         </div>
       </div>
+
+      {showPanduan && <PanduanModal onClose={() => setShowPanduan(false)} />}
     </div>
   );
 }
