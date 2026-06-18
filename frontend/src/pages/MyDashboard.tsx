@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import ProgressUpdateModal from '../components/ProgressUpdateModal';
+import InviteCollabModal from '../components/InviteCollabModal';
 import PerformaDetailModal from '../components/PerformaDetailModal';
 import ActivityModal, { activityStatusBadge } from '../components/ActivityModal';
 import LocationMap from '../components/LocationMap';
@@ -47,6 +48,7 @@ export default function MyDashboard() {
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState<string | null>(null);
   const [progressFor, setProgressFor] = useState<Incident | null>(null);
+  const [inviteFor, setInviteFor] = useState<Incident | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [showActivity, setShowActivity] = useState(false);
@@ -354,6 +356,9 @@ export default function MyDashboard() {
                       <Link to={`/ssh?device=${i.device_id}&incident=${i.id}`} title="Remote SSH Virtual" className="text-center border border-accent2/40 text-accent2 rounded px-2 py-1 text-[11px] font-semibold hover:bg-accent2/10">🖥️ SSH</Link>
                     )}
                     <Link to="/my-incidents" className="flex-1 text-center border border-border rounded px-2 py-1 text-[11px] text-text2 hover:text-white">Detail</Link>
+                    {i.tech_id === user?.id && i.status !== 'selesai' && (
+                      <button title="Ajak teknisi lain (kerjakan bersama)" className="border border-accent2/40 text-accent2 rounded px-2 py-1 text-[11px] font-semibold hover:bg-accent2/10" onClick={() => setInviteFor(i)}>👥</button>
+                    )}
                     {i.tech_id ? (
                       <button title={`Lanjut ke: ${nextLabel}`} className="flex-1 bg-accent text-bg rounded px-2 py-1 text-[11px] font-semibold disabled:opacity-50" onClick={() => setProgressFor(i)}>
                         {`▶ ${nextLabel}`}
@@ -489,6 +494,7 @@ export default function MyDashboard() {
       </div>
 
       {progressFor && <ProgressUpdateModal incident={progressFor} onClose={() => setProgressFor(null)} onDone={load} />}
+      {inviteFor && <InviteCollabModal incident={inviteFor} onClose={() => setInviteFor(null)} onDone={load} />}
       {showDetail && user && <PerformaDetailModal techId={user.id} month={month} onClose={() => setShowDetail(false)} />}
       {showActivity && <ActivityModal onClose={() => setShowActivity(false)} onDone={load} />}
     </div>

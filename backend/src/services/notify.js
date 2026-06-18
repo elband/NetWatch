@@ -12,6 +12,7 @@ const TYPE_META = {
   ticket_assigned: { priority: 'info', link: '/my-incidents' },
   ticket_sla: { priority: 'kritis', link: '/incidents' },
   ticket_done: { priority: 'selesai', link: '/reports' },
+  ticket_collab: { priority: 'info', link: '/my-dashboard' },
   diklat_new: { priority: 'info', link: '/diklat' },
   diklat_approved: { priority: 'selesai', link: '/diklat' },
   diklat_rejected: { priority: 'warning', link: '/diklat' },

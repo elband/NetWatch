@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +35,15 @@ export default function Diklat() {
   const [editId, setEditId] = useState<number | null>(null);
   const [detail, setDetail] = useState<PengajuanDiklat | null>(null);
   const years = Array.from({ length: 5 }, (_, i) => String(new Date().getFullYear() - i));
+  const [searchParams] = useSearchParams();
+  const lastFocus = useRef<string | null>(null);
+  // Buka detail otomatis bila diarahkan dari notifikasi (?focus=<id>).
+  useEffect(() => {
+    const f = searchParams.get('focus');
+    if (!f || !rows.length || lastFocus.current === f) return;
+    const d = rows.find((x) => String(x.id) === f);
+    if (d) { setDetail(d); lastFocus.current = f; }
+  }, [rows, searchParams]);
 
   function load() {
     const p = new URLSearchParams(); if (year) p.set('year', year); if (status) p.set('status', status); if (q) p.set('q', q);

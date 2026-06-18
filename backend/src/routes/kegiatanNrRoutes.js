@@ -207,7 +207,7 @@ router.patch('/:id/status', async (req, res) => {
   await audit(req.user, `knr_${next}`, 'kegiatan', id, `${d.nomor} · ${d.judul}`);
   if (next === 'diajukan') {
     await notifyCoords(`📝 *Kegiatan Non-Rutin Baru*\n${d.petugas_nama}: ${d.judul}\nNo. ${d.nomor}\nMohon ditinjau.`);
-    await notifyRoles(['koordinator', 'admin'], { type: 'knr_new', title: `Kegiatan non-rutin baru: ${d.judul}`, message: `${d.petugas_nama} · ${d.nomor} — mohon ditinjau.`, refId: id, refType: 'kegiatan', link: '/kegiatan-nr' });
+    await notifyRoles(['koordinator', 'admin'], { type: 'knr_new', title: `Kegiatan non-rutin baru: ${d.judul}`, message: `${d.petugas_nama} · ${d.nomor} — mohon ditinjau.`, refId: id, refType: 'kegiatan', link: `/kegiatan-nr?focus=${id}` });
   }
   if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) { try { await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Kegiatan "${d.judul}" (${d.nomor}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ } }
   const [u] = await pool.query('SELECT * FROM kegiatan_non_rutin WHERE id=?', [id]);

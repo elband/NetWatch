@@ -1,30 +1,70 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { IncidentStatusBadge, PriorityBadge } from '../components/StatusBadge';
 import IncidentReportModal from '../components/IncidentReportModal';
 import ProgressUpdateModal from '../components/ProgressUpdateModal';
+import InviteCollabModal from '../components/InviteCollabModal';
+import IncidentDetailModal from '../components/IncidentDetailModal';
 import { downtimeMs, fmtDowntime, downtimeColor } from '../utils/downtime';
-import { stepLabels as stepLabelsFor, maxStep as maxStepFor } from '../utils/steps';
 import type { Incident } from '../types';
+
+type SortKey = 'id' | 'device_name' | 'priority' | 'downtime' | 'created_at' | 'status';
+type SortDir = 'asc' | 'desc';
+
+const PRIORITY_ORDER: Record<string, number> = { kritis: 0, tinggi: 1, sedang: 2 };
+const STATUS_ORDER: Record<string, number> = { aktif: 0, proses: 1, selesai: 2 };
 
 export default function Incidents() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('created_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Incident | null>(null);
   const [reportFor, setReportFor] = useState<Incident | null>(null);
   const [progressFor, setProgressFor] = useState<Incident | null>(null);
+  const [inviteFor, setInviteFor] = useState<Incident | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [searchParams] = useSearchParams();
+  const focusId = searchParams.get('focus');
+  const lastFocus = useRef<string | null>(null);
 
   function load() {
     api.get('/incidents').then((res) => {
       setIncidents(res.data.incidents);
       setSelected((cur) => (cur ? res.data.incidents.find((i: Incident) => i.id === cur.id) || null : cur));
+      setLoading(false);
     });
   }
-  useEffect(load, []);
+
+  useEffect(() => { load(); }, []);
+
+  // Downtime ticker every 30s
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(t);
+  }, []);
+
+  // Auto-refresh data every 30s
+  useEffect(() => {
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Auto-open incident from notification link (?focus=INC-…)
+  useEffect(() => {
+    if (!focusId || !incidents.length || lastFocus.current === focusId) return;
+    const inc = incidents.find((i) => i.id === focusId);
+    if (inc) { setSelected(inc); lastFocus.current = focusId; }
+  }, [incidents, focusId]);
+
+  // Close modal on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setSelected(null); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   async function resolve(id: string) {
@@ -33,103 +73,238 @@ export default function Incidents() {
     setSelected(null);
   }
 
-  const filtered = filter === 'all' ? incidents : incidents.filter((i) => i.status === filter);
-  const stepLabels = selected ? stepLabelsFor(selected) : [];
-  const maxStep = selected ? maxStepFor(selected) : 0;
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  }
+
+  // Stats
+  const active = incidents.filter((i) => i.status === 'aktif').length;
+  const inProgress = incidents.filter((i) => i.status === 'proses').length;
+  const done = incidents.filter((i) => i.status === 'selesai').length;
+  const kritis = incidents.filter((i) => i.priority === 'kritis' && i.status !== 'selesai').length;
+
+  // Filter + search + sort
+  const q = search.trim().toLowerCase();
+  const filtered = incidents
+    .filter((i) => filter === 'all' || i.status === filter)
+    .filter((i) => !q || i.id.toLowerCase().includes(q) || i.device_name.toLowerCase().includes(q) || i.issue.toLowerCase().includes(q))
+    .sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === 'id') cmp = a.id.localeCompare(b.id);
+      else if (sortKey === 'device_name') cmp = a.device_name.localeCompare(b.device_name);
+      else if (sortKey === 'priority') cmp = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
+      else if (sortKey === 'status') cmp = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
+      else if (sortKey === 'downtime') cmp = downtimeMs(a, now) - downtimeMs(b, now);
+      else if (sortKey === 'created_at') cmp = a.created_at.localeCompare(b.created_at);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+  function SortIcon({ k }: { k: SortKey }) {
+    if (sortKey !== k) return <span className="text-text2 opacity-30 ml-1">↕</span>;
+    return <span className="text-accent ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  }
+
+  function Th({ label, k }: { label: string; k?: SortKey }) {
+    if (!k) return <th className="px-3.5 py-2.5 text-left">{label}</th>;
+    return (
+      <th
+        className="px-3.5 py-2.5 text-left cursor-pointer hover:text-white select-none"
+        onClick={() => toggleSort(k)}
+      >
+        {label}<SortIcon k={k} />
+      </th>
+    );
+  }
+
+  const rowTint: Record<string, string> = {
+    kritis: 'bg-danger/[0.04] hover:bg-danger/[0.08]',
+    tinggi: 'bg-warn/[0.03] hover:bg-warn/[0.06]',
+    sedang: 'hover:bg-white/[0.03]',
+  };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      {/* ===== Header ===== */}
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
           <div className="text-[17px] font-bold">🚨 Manajemen Insiden</div>
-          <div className="text-[11px] text-text2 mt-0.5">{incidents.filter((i) => i.status !== 'selesai').length} insiden aktif</div>
+          <div className="text-[11px] text-text2 mt-0.5">{active + inProgress} insiden aktif</div>
         </div>
-        <select className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="all">Semua</option><option value="aktif">Aktif</option><option value="proses">Dalam Proses</option><option value="selesai">Selesai</option>
-        </select>
-      </div>
-      <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead><tr className="text-text2 uppercase text-[10px] border-b border-border">
-            {['ID', 'Perangkat', 'Masalah', 'Prioritas', 'Terputus', 'Waktu', 'Status', 'Aksi'].map((h) => <th key={h} className="px-3.5 py-2.5 text-left">{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {filtered.map((i) => (
-              <tr key={i.id} className="border-b border-border/50">
-                <td className="px-3.5 py-2.5 font-mono text-accent2 text-[10px]">{i.id}</td>
-                <td className="px-3.5 py-2.5"><strong>{i.device_name}</strong><br /><span className="text-[10px] text-text2 font-mono">{i.ip}</span></td>
-                <td className="px-3.5 py-2.5 text-text2 max-w-[160px]">{i.issue}</td>
-                <td className="px-3.5 py-2.5"><PriorityBadge priority={i.priority} /></td>
-                <td className={`px-3.5 py-2.5 font-mono font-semibold ${downtimeColor(i, downtimeMs(i, now))}`}>⏱️ {fmtDowntime(downtimeMs(i, now))}</td>
-                <td className="px-3.5 py-2.5 text-text2 font-mono text-[10px]">{i.created_at}</td>
-                <td className="px-3.5 py-2.5"><IncidentStatusBadge status={i.status} /></td>
-                <td className="px-3.5 py-2.5">
-                  <div className="flex gap-1.5">
-                    <button className="text-text2 hover:text-white border border-border rounded px-2 py-0.5" onClick={() => setSelected(i)}>Detail →</button>
-                    <button className={`border rounded px-2 py-0.5 ${i.report ? 'text-success border-success/40' : 'text-accent2 border-accent2/40'}`} onClick={() => setReportFor(i)}>
-                      {i.report ? '📝 Laporan ✓' : '📝 Laporan'}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <button
+          onClick={() => { setLoading(true); load(); }}
+          className="text-xs text-text2 hover:text-white border border-border rounded px-2.5 py-1 flex items-center gap-1.5"
+        >
+          {loading ? <span className="animate-spin">⟳</span> : '⟳'} Muat Ulang
+        </button>
       </div>
 
-      {selected && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]" onClick={() => setSelected(null)}>
-          <div className="bg-surface border border-border rounded-xl p-6 w-[560px] max-w-[95vw] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-[15px] font-bold">{selected.id} — {selected.device_name}</span>
-              <button onClick={() => setSelected(null)} className="text-text2 hover:text-white">✕</button>
-            </div>
-            <div className="flex gap-2 items-center mb-3.5 flex-wrap">
-              <PriorityBadge priority={selected.priority} />
-              <IncidentStatusBadge status={selected.status} />
-              <span className="text-[11px] text-text2">{selected.created_at}</span>
-            </div>
-            <div className="bg-surface2 border border-border rounded-lg p-3 mb-3.5 text-xs">
-              <strong>Masalah:</strong> {selected.issue}<br />
-              <span className="text-text2">IP: {selected.ip || '-'}</span><br />
-              <span className={downtimeColor(selected, downtimeMs(selected, now))}>
-                ⏱️ Jam terputus: <strong>{fmtDowntime(downtimeMs(selected, now))}</strong>{selected.status !== 'selesai' && ' (berjalan)'}
-              </span>
-              {selected.resolved_at && <><br /><span className="text-success">Selesai: {selected.resolved_at} · Durasi: {selected.duration_min} menit</span></>}
-            </div>
-            <div className="flex gap-1 mb-1.5">
-              {stepLabels.slice(1).map((_, idx) => (
-                <div key={idx} className={`flex-1 h-1.5 rounded ${idx + 1 < selected.step ? 'bg-success' : idx + 1 === selected.step ? 'bg-warn' : 'bg-border'}`} />
-              ))}
-            </div>
-            <div className="text-[10px] text-text2 mb-3.5">Langkah {selected.step}/{maxStep} — {stepLabels[selected.step]}</div>
-            <div className="text-xs font-semibold mb-2">📋 Kronologi</div>
-            <div className="border-l-2 border-border pl-3.5 mb-3.5">
-              {selected.notes.map((n) => (
-                <div key={n.id} className="mb-2.5">
-                  <div className="text-[10px] text-accent font-mono">{n.created_at} · {stepLabels[n.step] || `Step ${n.step}`}</div>
-                  <div className="text-[11px] text-text2">{n.note}</div>
-                  {n.doc_url && (
-                    <a href={n.doc_url} target="_blank" rel="noreferrer" className="inline-block mt-1">
-                      <img src={n.doc_url} alt="dokumentasi" className="max-h-24 rounded border border-border object-contain" />
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {selected.status !== 'selesai' && (
-                <>
-                  <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-medium" onClick={() => setProgressFor(selected)}>▶ {stepLabels[Math.min(selected.step + 1, maxStep)]}</button>
-                  <button className="bg-success/10 text-success border border-success/30 rounded-md px-3 py-1.5 text-xs font-medium" onClick={() => resolve(selected.id)}>✅ Tutup Insiden</button>
-                </>
-              )}
-              <button className="bg-accent2/10 text-accent2 border border-accent2/30 rounded-md px-3 py-1.5 text-xs font-medium" onClick={() => setReportFor(selected)}>
-                {selected.report ? '📝 Lihat/Edit Laporan' : '📝 Laporan Kerusakan & Perbaikan'}
-              </button>
-            </div>
-          </div>
+      {/* ===== Stats cards ===== */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <StatCard label="AKTIF" value={active} color="text-danger" accent="border-danger/30" dot="bg-danger" onClick={() => setFilter('aktif')} active={filter === 'aktif'} />
+        <StatCard label="DALAM PROSES" value={inProgress} color="text-warn" accent="border-warn/30" dot="bg-warn" onClick={() => setFilter('proses')} active={filter === 'proses'} />
+        <StatCard label="KRITIS (AKTIF)" value={kritis} color="text-danger" accent="border-danger/40" dot="bg-danger" pulse onClick={() => { setFilter('all'); setSearch(''); setSortKey('priority'); setSortDir('asc'); }} active={false} />
+        <StatCard label="SELESAI" value={done} color="text-success" accent="border-success/30" dot="bg-success" onClick={() => setFilter('selesai')} active={filter === 'selesai'} />
+      </div>
+
+      {/* ===== Search + Filter bar ===== */}
+      <div className="flex gap-2 mb-3 flex-wrap">
+        <div className="relative flex-1 min-w-[180px]">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text2 text-xs">🔍</span>
+          <input
+            className="w-full bg-surface2 border border-border rounded-md pl-7 pr-3 py-2 text-xs focus:outline-none focus:border-accent placeholder-text2"
+            placeholder="Cari ID, perangkat, atau masalah…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text2 hover:text-white" onClick={() => setSearch('')}>✕</button>
+          )}
         </div>
+        <select
+          className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        >
+          <option value="all">Semua Status</option>
+          <option value="aktif">Aktif</option>
+          <option value="proses">Dalam Proses</option>
+          <option value="selesai">Selesai</option>
+        </select>
+        {(filter !== 'all' || search) && (
+          <button
+            className="text-xs text-text2 hover:text-white border border-border rounded px-2.5 py-1"
+            onClick={() => { setFilter('all'); setSearch(''); }}
+          >
+            Reset ✕
+          </button>
+        )}
+      </div>
+
+      {/* ===== Table ===== */}
+      <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
+        {loading ? (
+          <div className="py-16 text-center text-text2 text-xs animate-pulse">Memuat data insiden…</div>
+        ) : filtered.length === 0 ? (
+          <div className="py-16 text-center text-text2 text-xs">
+            {search ? `Tidak ada hasil untuk "${search}"` : 'Tidak ada insiden.'}
+          </div>
+        ) : (
+          <table className="w-full text-xs" style={{ minWidth: '860px' }}>
+            <thead>
+              <tr className="text-text2 uppercase text-[10px] border-b border-border">
+                <Th label="ID" k="id" />
+                <Th label="Perangkat" k="device_name" />
+                <Th label="Masalah" />
+                <Th label="Prioritas" k="priority" />
+                <Th label="Terputus" k="downtime" />
+                <Th label="Waktu" k="created_at" />
+                <Th label="Status" k="status" />
+                <Th label="Aksi" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((i) => (
+                <tr
+                  key={i.id}
+                  className={`border-b border-border/50 cursor-pointer transition-colors ${rowTint[i.priority] || 'hover:bg-white/[0.03]'}`}
+                  onClick={() => setSelected(i)}
+                >
+                  {/* ID */}
+                  <td className="px-3.5 py-2.5 font-mono text-accent2 text-[10px] whitespace-nowrap">
+                    <span className="flex items-center gap-1.5">
+                      {i.id}
+                      {i.status === 'aktif' && (
+                        <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-danger opacity-75" />
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-danger" />
+                        </span>
+                      )}
+                    </span>
+                  </td>
+
+                  {/* Perangkat — fixed width, satu baris truncate + tooltip */}
+                  <td className="px-3.5 py-2.5" style={{ maxWidth: '180px', width: '180px' }}>
+                    <div className="truncate font-semibold" title={i.device_name}>{i.device_name}</div>
+                    <div className="truncate text-[10px] text-text2 font-mono mt-0.5" title={i.ip || '—'}>{i.ip || '—'}</div>
+                  </td>
+
+                  {/* Masalah — satu baris truncate + tooltip */}
+                  <td className="px-3.5 py-2.5 text-text2" style={{ maxWidth: '180px', width: '180px' }}>
+                    <div className="truncate" title={i.issue}>{i.issue}</div>
+                  </td>
+
+                  {/* Prioritas */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap">
+                    <PriorityBadge priority={i.priority} />
+                  </td>
+
+                  {/* Terputus — teks murni, tanpa emoji besar */}
+                  <td className={`px-3.5 py-2.5 font-mono font-semibold whitespace-nowrap ${downtimeColor(i, downtimeMs(i, now))}`}>
+                    {fmtDowntime(downtimeMs(i, now))}
+                  </td>
+
+                  {/* Waktu */}
+                  <td className="px-3.5 py-2.5 text-text2 font-mono text-[10px] whitespace-nowrap">{i.created_at}</td>
+
+                  {/* Status */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap">
+                    <IncidentStatusBadge status={i.status} />
+                  </td>
+
+                  {/* Aksi */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex gap-1.5">
+                      <button
+                        className="text-text2 hover:text-white border border-border rounded px-2 py-0.5 hover:border-accent/40 transition-colors"
+                        onClick={() => setSelected(i)}
+                      >
+                        Detail →
+                      </button>
+                      <button
+                        className={`border rounded px-2 py-0.5 transition-colors ${i.report ? 'text-success border-success/40 hover:bg-success/10' : 'text-accent2 border-accent2/40 hover:bg-accent2/10'}`}
+                        onClick={() => setReportFor(i)}
+                      >
+                        {i.report ? 'Laporan ✓' : 'Laporan'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* ===== Result count ===== */}
+      {!loading && filtered.length > 0 && (
+        <div className="text-[10px] text-text2 mt-2 text-right">
+          {filtered.length} dari {incidents.length} insiden ditampilkan
+        </div>
+      )}
+
+      {/* ===== Modals ===== */}
+      {selected && (
+        <IncidentDetailModal
+          incident={selected}
+          now={now}
+          onClose={() => setSelected(null)}
+          onProgress={() => setProgressFor(selected)}
+          onReport={() => setReportFor(selected)}
+          onInvite={() => setInviteFor(selected)}
+          onResolve={() => resolve(selected.id)}
+        />
+      )}
+
+      {inviteFor && (
+        <InviteCollabModal
+          incident={inviteFor}
+          onClose={() => setInviteFor(null)}
+          onDone={(inc) => {
+            setIncidents((prev) => prev.map((i) => (i.id === inc.id ? { ...i, collaborators: inc.collaborators } : i)));
+            setSelected((s) => (s && s.id === inc.id ? { ...s, collaborators: inc.collaborators } : s));
+          }}
+        />
       )}
 
       {reportFor && (
@@ -151,5 +326,28 @@ export default function Incidents() {
         />
       )}
     </div>
+  );
+}
+
+function StatCard({
+  label, value, color, accent, dot, pulse, onClick, active,
+}: {
+  label: string; value: number; color: string; accent: string; dot: string;
+  pulse?: boolean; onClick: () => void; active: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-left bg-surface border rounded-xl p-4 transition-all hover:scale-[1.02] ${active ? `${accent} shadow-sm` : 'border-border hover:border-border/80'}`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`relative flex h-2 w-2 flex-shrink-0`}>
+          {pulse && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${dot} opacity-75`} />}
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${dot}`} />
+        </span>
+        <span className="text-[10px] text-text2 uppercase font-semibold tracking-wide">{label}</span>
+      </div>
+      <div className={`text-2xl font-extrabold ${color}`}>{value}</div>
+    </button>
   );
 }

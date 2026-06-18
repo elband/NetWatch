@@ -610,3 +610,17 @@ CREATE TABLE IF NOT EXISTS notifications (
   INDEX idx_notif_user_cursor (user_id, id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+-- Kolaborasi insiden ("Kerjakan Bersama"): teknisi pemilik job mengajak teknisi
+-- lain untuk diberi tahu & bisa melihat insiden (read-only).
+CREATE TABLE IF NOT EXISTS incident_collaborators (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  incident_id VARCHAR(20) NOT NULL,
+  user_id INT NOT NULL,
+  invited_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_collab (incident_id, user_id),
+  FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;

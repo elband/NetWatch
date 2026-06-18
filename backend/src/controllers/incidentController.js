@@ -39,7 +39,7 @@ async function notifyCoordinators(conn, incident, message, type = 'alert') {
 
 async function notifyCoordinatorsDone(conn, incident, duration) {
   await notifyCoordinators(conn, incident, `✅ PERALATAN NORMAL KEMBALI\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nDurasi: ${duration} menit`, 'done');
-  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_done', title: `Insiden selesai: ${incident.device_name}`, message: `${incident.id} ditangani dalam ${duration} menit`, refId: incident.id, refType: 'incident', link: '/reports' });
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_done', title: `Insiden selesai: ${incident.device_name}`, message: `${incident.id} ditangani dalam ${duration} menit`, refId: incident.id, refType: 'incident', link: `/incidents?focus=${incident.id}` });
 }
 
 // Snapshot teknisi on-duty saat insiden masuk + kirim notifikasi ke mereka.
@@ -60,7 +60,7 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
     await createNotification({ userId: uid, type: 'ticket_assigned', priority: prio, title: `Tiket baru: ${deviceName}`, message: issue, refId: id, refType: 'incident', link: '/my-incidents' });
   }
   // Koordinator & admin: tiket helpdesk baru masuk.
-  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: '/incidents' });
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: `/incidents?focus=${id}` });
   return onDutyIds.length;
 }
 
@@ -75,6 +75,10 @@ async function attachNotes(incidents) {
     `SELECT * FROM incident_reports WHERE incident_id IN (?)`,
     [ids]
   );
+  const [collabs] = await pool.query(
+    `SELECT c.incident_id, c.user_id, u.name, u.emoji FROM incident_collaborators c JOIN users u ON u.id = c.user_id WHERE c.incident_id IN (?)`,
+    [ids]
+  );
   const byIncident = {};
   for (const n of notes) {
     (byIncident[n.incident_id] ||= []).push(n);
@@ -83,10 +87,15 @@ async function attachNotes(incidents) {
   for (const r of reports) {
     reportByIncident[r.incident_id] = r;
   }
+  const collabByIncident = {};
+  for (const c of collabs) {
+    (collabByIncident[c.incident_id] ||= []).push({ user_id: c.user_id, name: c.name, emoji: c.emoji });
+  }
   return incidents.map((i) => ({
     ...i,
     notes: byIncident[i.id] || [],
     report: reportByIncident[i.id] || null,
+    collaborators: collabByIncident[i.id] || [],
   }));
 }
 
@@ -115,14 +124,57 @@ export async function incidentQueue(req, res) {
       'SELECT * FROM incidents WHERE tech_id = ? ORDER BY created_at DESC',
       [req.user.id]
     );
+    // Insiden yang saya diajak (kolaborasi, read-only) — bukan milik saya.
+    const [collabRows] = await conn.query(
+      `SELECT i.* FROM incidents i JOIN incident_collaborators c ON c.incident_id = i.id
+        WHERE c.user_id = ? AND (i.tech_id IS NULL OR i.tech_id <> ?) ORDER BY i.created_at DESC`,
+      [req.user.id, req.user.id]
+    );
     res.json({
       duty,
       pool: await attachNotes(poolRows),
       mine: await attachNotes(mineRows),
+      collab: await attachNotes(collabRows),
     });
   } finally {
     conn.release();
   }
+}
+
+// Daftar teknisi aktif (untuk pemilih "Ajak Teknisi").
+export async function listTeknisi(req, res) {
+  const [rows] = await pool.query("SELECT id, name, emoji FROM users WHERE active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"')) ORDER BY name");
+  res.json({ teknisi: rows });
+}
+
+// "Kerjakan Bersama": teknisi pemilik job (atau koordinator/admin) mengajak teknisi lain.
+// Teknisi yang diajak diberi tahu (WA + notifikasi sistem) & bisa melihat insiden.
+export async function inviteCollaborators(req, res) {
+  const id = req.params.id;
+  const techIds = Array.isArray(req.body.techIds) ? req.body.techIds.map(Number).filter(Boolean) : [];
+  const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
+  const incident = rows[0];
+  if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  const roles = req.user.roles?.length ? req.user.roles : [req.user.role];
+  const isManager = roles.some((r) => r === 'admin' || r === 'koordinator');
+  if (incident.tech_id !== req.user.id && !isManager) return res.status(403).json({ error: 'Hanya teknisi pemilik job (atau koordinator/admin) yang bisa mengajak teknisi lain.' });
+  if (!techIds.length) return res.status(400).json({ error: 'Pilih minimal satu teknisi.' });
+
+  const invited = [];
+  for (const uid of techIds) {
+    if (uid === incident.tech_id) continue;
+    const [r] = await pool.query('INSERT IGNORE INTO incident_collaborators (incident_id, user_id, invited_by) VALUES (?, ?, ?)', [id, uid, req.user.id]);
+    if (!r.affectedRows) continue;
+    invited.push(uid);
+    await queueWaNotification({ type: 'other', toUserId: uid, relatedIncidentId: id, message: `👥 DIAJAK KERJAKAN BERSAMA\n${id} | ${incident.device_name}\nMasalah: ${incident.issue}\nAnda diajak oleh ${req.user.name} untuk membantu menangani insiden ini. Lihat di aplikasi NetWatch.` });
+    await createNotification({ userId: uid, type: 'ticket_collab', priority: incident.priority === 'kritis' ? 'kritis' : 'info', title: `Diajak kerjakan bersama: ${incident.device_name}`, message: `${id} — diajak oleh ${req.user.name}. ${incident.issue}`, refId: id, refType: 'incident', link: '/my-dashboard' });
+  }
+  if (invited.length) {
+    const [names] = await pool.query('SELECT name FROM users WHERE id IN (?)', [invited]);
+    await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [id, incident.step || 0, `👥 ${req.user.name} mengajak ${names.map((n) => n.name).join(', ')} untuk kerjakan bersama.`]);
+  }
+  const [updated] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
+  res.json({ incident: (await attachNotes(updated))[0], invited: invited.length });
 }
 
 export async function dutyStatus(req, res) {
@@ -457,6 +509,10 @@ export async function resolveIncident(req, res) {
   const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
   const incident = rows[0];
   if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai.' });
+  // Wajib dibuktikan dengan dokumentasi: minimal 1 foto bukti pada kronologi.
+  const [[doc]] = await pool.query('SELECT COUNT(*) c FROM incident_notes WHERE incident_id = ? AND doc_url IS NOT NULL', [id]);
+  if (!doc.c) return res.status(400).json({ error: 'Unggah dokumentasi (foto bukti) penyelesaian terlebih dahulu — gunakan "Update Progress" dan lampirkan foto sebelum menutup insiden.' });
   const finalStep = FINAL_STEP;
 
   // Durasi = lama perangkat terputus (created_at → sekarang), dihitung otomatis.

@@ -7,9 +7,17 @@ import { COORD_SLA_MINUTES, REMIND_MINUTES, getOnDutyTechIds } from '../config/s
 // Dipakai oleh auto-reminder (coordWatcher) maupun tombol manual koordinator.
 // Mengembalikan jumlah teknisi yang diingatkan.
 export async function remindOnDutyTechs(inc, { manual = false, by = null } = {}) {
-  const onDutyIds = await getOnDutyTechIds(pool);
+  let targetIds = await getOnDutyTechIds(pool);
+  // Fallback: bila tidak ada teknisi on-duty, ingatkan SEMUA teknisi aktif
+  // agar pengingat tetap sampai (WA + notifikasi sistem).
+  let fallback = false;
+  if (!targetIds.length) {
+    const [techs] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"'))");
+    targetIds = techs.map((t) => t.id);
+    fallback = true;
+  }
   const mins = Math.max(1, Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000));
-  for (const uid of onDutyIds) {
+  for (const uid of targetIds) {
     await queueWaNotification({
       type: 'alert',
       toUserId: uid,
@@ -22,11 +30,11 @@ export async function remindOnDutyTechs(inc, { manual = false, by = null } = {})
   const label = manual ? `Pengingat manual dikirim${by ? ` oleh ${by}` : ''}` : 'Pengingat otomatis dikirim';
   await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [
     inc.id, inc.step || 0,
-    onDutyIds.length
-      ? `🔔 ${label} ke ${onDutyIds.length} teknisi on-duty (insiden belum diambil).`
-      : `🔔 ${label}, namun tidak ada teknisi on-duty saat ini.`,
+    targetIds.length
+      ? `🔔 ${label} ke ${targetIds.length} teknisi${fallback ? ' aktif (tidak ada yang on-duty saat ini)' : ' on-duty'} (insiden belum diambil).`
+      : `🔔 ${label}, namun tidak ada teknisi aktif sama sekali.`,
   ]);
-  return onDutyIds.length;
+  return targetIds.length;
 }
 
 // Pengecekan berkala: (1) pengingat ke teknisi on-duty bila insiden belum
@@ -68,7 +76,7 @@ export async function checkUnclaimedIncidents(io) {
         message: `⏰ INSIDEN BELUM DIAMBIL (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit tanpa teknisi. Mohon koordinasikan penanganan.`,
         relatedIncidentId: inc.id,
       });
-      await createNotification({ userId: c.id, type: 'ticket_sla', priority: 'kritis', title: `Tiket melewati SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit (>${COORD_SLA_MINUTES} mnt). Perlu koordinasi.`, refId: inc.id, refType: 'incident', link: '/coord-dashboard' });
+      await createNotification({ userId: c.id, type: 'ticket_sla', priority: 'kritis', title: `Tiket melewati SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit (>${COORD_SLA_MINUTES} mnt). Perlu koordinasi.`, refId: inc.id, refType: 'incident', link: `/incidents?focus=${inc.id}` });
     }
     io?.emit('incident:escalated', { id: inc.id, device: inc.device_name });
   }

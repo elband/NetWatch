@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
@@ -31,6 +32,12 @@ export default function KegiatanNonRutin() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [detail, setDetail] = useState<number | null>(null);
+  const [searchParams] = useSearchParams();
+  // Buka detail otomatis bila diarahkan dari notifikasi (?focus=<id>).
+  useEffect(() => {
+    const f = searchParams.get('focus');
+    if (f && /^\d+$/.test(f)) setDetail(Number(f));
+  }, [searchParams]);
 
   function loadList() {
     const p = new URLSearchParams({ month }); if (status) p.set('status', status); if (kategori) p.set('kategori', kategori); if (q) p.set('q', q);

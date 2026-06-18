@@ -147,6 +147,7 @@ export interface Incident {
   created_at: string;
   notes: IncidentNote[];
   report: IncidentReport | null;
+  collaborators?: { user_id: number; name: string; emoji: string | null }[];
 }
 
 export type ShiftType = 'pagi' | 'siang' | 'malam' | 'libur';
@@ -161,6 +162,7 @@ export interface IncidentQueue {
   duty: DutyStatus;
   pool: Incident[];
   mine: Incident[];
+  collab?: Incident[];
 }
 
 export interface Shift {

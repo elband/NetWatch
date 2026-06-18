@@ -4,6 +4,8 @@ import { api } from '../api/client';
 import { IncidentStatusBadge, PriorityBadge } from '../components/StatusBadge';
 import IncidentReportModal from '../components/IncidentReportModal';
 import ProgressUpdateModal from '../components/ProgressUpdateModal';
+import InviteCollabModal from '../components/InviteCollabModal';
+import IncidentDetailModal from '../components/IncidentDetailModal';
 import { downtimeMs, fmtDowntime, downtimeColor } from '../utils/downtime';
 import { nextStepLabel } from '../utils/steps';
 import type { Incident, IncidentQueue, Device } from '../types';
@@ -12,8 +14,10 @@ const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi (05–13)', siang: 'Si
 
 export default function MyIncidents() {
   const [queue, setQueue] = useState<IncidentQueue | null>(null);
+  const [selected, setSelected] = useState<Incident | null>(null);
   const [reportFor, setReportFor] = useState<Incident | null>(null);
   const [progressFor, setProgressFor] = useState<Incident | null>(null);
+  const [inviteFor, setInviteFor] = useState<Incident | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [taking, setTaking] = useState<string | null>(null);
   const [err, setErr] = useState('');
@@ -46,6 +50,7 @@ export default function MyIncidents() {
   async function toggleSparepart(id: string, value: boolean) {
     await api.put(`/incidents/${id}/awaiting-part`, { value });
     load();
+    setSelected((cur) => cur && cur.id === id ? { ...cur, awaiting_part: value ? 1 : 0 } : cur);
   }
 
   const duty = queue?.duty;
@@ -98,14 +103,17 @@ export default function MyIncidents() {
                     <td className={`px-3.5 py-2.5 font-mono font-semibold ${downtimeColor(i, downtimeMs(i, now))}`}>⏱️ {fmtDowntime(downtimeMs(i, now))}</td>
                     <td className="px-3.5 py-2.5 text-text2 font-mono text-[10px]">{i.created_at}</td>
                     <td className="px-3.5 py-2.5">
-                      <button
-                        disabled={!duty?.onDuty || taking === i.id}
-                        title={duty?.onDuty ? '' : 'Hanya bisa saat on-duty'}
-                        className="bg-accent text-bg rounded px-2.5 py-1 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-                        onClick={() => take(i.id)}
-                      >
-                        {taking === i.id ? '…' : '✋ Ambil'}
-                      </button>
+                      <div className="flex gap-1.5">
+                        <button className="text-text2 hover:text-white border border-border rounded px-2 py-0.5 text-xs" onClick={() => setSelected(i)}>Detail →</button>
+                        <button
+                          disabled={!duty?.onDuty || taking === i.id}
+                          title={duty?.onDuty ? '' : 'Hanya bisa saat on-duty'}
+                          className="bg-accent text-bg rounded px-2.5 py-1 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                          onClick={() => take(i.id)}
+                        >
+                          {taking === i.id ? '…' : '✋ Ambil'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -137,6 +145,7 @@ export default function MyIncidents() {
                     <td className="px-3.5 py-2.5"><IncidentStatusBadge status={i.status} /></td>
                     <td className="px-3.5 py-2.5">
                       <div className="flex gap-1.5 flex-wrap">
+                        <button className="text-text2 hover:text-white border border-border rounded px-2 py-0.5" onClick={() => setSelected(i)}>Detail →</button>
                         <button className={`border rounded px-2 py-0.5 ${i.report ? 'text-success border-success/40' : 'text-accent2 border-accent2/40'}`} onClick={() => setReportFor(i)}>
                           {i.report ? '📝 Laporan ✓' : '📝 Laporan'}
                         </button>
@@ -163,6 +172,19 @@ export default function MyIncidents() {
         )}
       </div>
 
+      {selected && (
+        <IncidentDetailModal
+          incident={selected}
+          now={now}
+          devices={devices}
+          onClose={() => setSelected(null)}
+          onProgress={() => { setProgressFor(selected); setSelected(null); }}
+          onReport={() => { setReportFor(selected); setSelected(null); }}
+          onInvite={() => { setInviteFor(selected); setSelected(null); }}
+          onToggleSparepart={() => toggleSparepart(selected.id, !selected.awaiting_part)}
+        />
+      )}
+
       {reportFor && (
         <IncidentReportModal
           incident={reportFor}
@@ -176,6 +198,19 @@ export default function MyIncidents() {
           incident={progressFor}
           onClose={() => setProgressFor(null)}
           onDone={load}
+        />
+      )}
+
+      {inviteFor && (
+        <InviteCollabModal
+          incident={inviteFor}
+          onClose={() => setInviteFor(null)}
+          onDone={(inc) => {
+            setQueue((q) => q ? {
+              ...q,
+              mine: q.mine.map((i) => i.id === inc.id ? { ...i, collaborators: inc.collaborators } : i),
+            } : q);
+          }}
         />
       )}
     </div>
