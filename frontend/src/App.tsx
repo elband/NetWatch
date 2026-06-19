@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import LaporPublik from './pages/LaporPublik';
 import VerifyTte from './pages/VerifyTte';
 import Ttd from './pages/Ttd';
+import TtdPelaksana from './pages/TtdPelaksana';
 import Dashboard from './pages/Dashboard';
 import MyDashboard from './pages/MyDashboard';
 import CoordDashboard from './pages/CoordDashboard';
@@ -45,6 +46,7 @@ export default function App() {
       <Route path="/lapor" element={<LaporPublik />} />
       <Route path="/verify-tte" element={<VerifyTte />} />
       <Route path="/ttd" element={<Ttd />} />
+      <Route path="/ttd-pelaksana" element={<TtdPelaksana />} />
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<HomeRedirect />} />

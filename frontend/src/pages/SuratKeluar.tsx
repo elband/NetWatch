@@ -12,7 +12,21 @@ const LKP_DEFAULT: LkpHead = {
   kasie_jabatan: 'KEPALA SEKSI TEKNIK DAN OPERASI', kasie_nama: 'MURDOKO', kasie_nip: '19780319 200012 1 001',
   nd_yth: 'Kepala Seksi Teknik dan Operasi Penerbangan', nd_dari: 'Koordinator Elektronika Bandara',
 };
-const JENIS = ['Nota Dinas', 'Telaahan Staf', 'Surat Pengantar', 'Surat Lain'];
+const JENIS = ['Nota Dinas', 'Telaahan Staf', 'Surat Pengantar', 'Surat Pernyataan', 'Surat Lain'];
+
+interface SplFormData {
+  kasi_nama: string; kasi_nip: string; kasi_golongan: string; kasi_jabatan: string;
+  tanggal_kegiatan: string; hari_kegiatan: string; kegiatan: string;
+  durasi_jam: string;
+  dasar: string; tujuan_kegiatan: string; hasil: string;
+}
+interface SplPegawaiRow { user_id?: number; nama: string; nip: string; mulai: string; selesai: string; pelaksana_token?: string; signed_at?: string; sign_token?: string; }
+interface SplUser { id: number; name: string; nip: string | null; emoji: string | null; jabatan: string | null; }
+
+function numToId(n: number): string {
+  const w = ['Nol','Satu','Dua','Tiga','Empat','Lima','Enam','Tujuh','Delapan','Sembilan','Sepuluh','Sebelas','Dua Belas'];
+  return w[n] ?? String(n);
+}
 
 export default function SuratKeluar() {
   const navigate = useNavigate();
@@ -29,6 +43,12 @@ export default function SuratKeluar() {
   const [previewHtml, setPreviewHtml] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [splData, setSplData] = useState<SplFormData>({ kasi_nama:'', kasi_nip:'', kasi_golongan:'Pembina (IV/a)', kasi_jabatan:'Kepala Seksi Teknik dan Operasi', tanggal_kegiatan:'', hari_kegiatan:'Jumat', kegiatan:'', durasi_jam:'5', dasar:'', tujuan_kegiatan:'', hasil:'' });
+  const [splPegawai, setSplPegawai] = useState<SplPegawaiRow[]>([{ nama:'', nip:'', mulai:'18:00', selesai:'23:00' }]);
+  const [splUsers, setSplUsers] = useState<SplUser[]>([]);
+  const [showKop, setShowKop] = useState(false);
+  const [kopBusy, setKopBusy] = useState(false);
+  const kopInputRef = useRef<HTMLInputElement>(null);
   const ZOOM_STEPS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
   const [zoomIdx, setZoomIdx] = useState(5); // default 0.85
 
@@ -114,6 +134,7 @@ export default function SuratKeluar() {
   useEffect(() => {
     load();
     api.get('/settings').then((r) => { if (r.data.settings?.lkp) setLkp((l) => ({ ...l, ...r.data.settings.lkp })); }).catch(() => {});
+    api.get('/surat/users').then((r) => setSplUsers(r.data.users || [])).catch(() => {});
   }, []);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -141,6 +162,10 @@ export default function SuratKeluar() {
     const prev = Math.max(zoomIdx - 1, 0);
     setZoomIdx(prev);
     applyZoom(ZOOM_STEPS[prev]);
+  }
+
+  function defaultSplData(): SplFormData {
+    return { kasi_nama: lkp.kasie_nama || '', kasi_nip: lkp.kasie_nip || '', kasi_golongan: 'Pembina (IV/a)', kasi_jabatan: lkp.kasie_jabatan || 'Kepala Seksi Teknik dan Operasi', tanggal_kegiatan: '', hari_kegiatan: 'Jumat', kegiatan: '', durasi_jam: '5', dasar: 'Pengaduan Penumpang\nPerintah Lisan Kepala Seksi', tujuan_kegiatan: '', hasil: '' };
   }
 
   async function openInWindow(s: Surat, autoPrint = false) {
@@ -171,9 +196,19 @@ export default function SuratKeluar() {
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v); });
+      if (form.jenis === 'Surat Pernyataan') {
+        // Buang baris pegawai yang belum dipilih (nama kosong) agar tidak jadi penanda-tangan hantu.
+        const pegawaiValid = splPegawai.filter((p) => p.nama.trim());
+        if (!pegawaiValid.length) { setBusy(false); return setMsg('Pilih minimal satu pegawai pelaksana lembur.'); }
+        fd.set('body', JSON.stringify({ type: 'spl', ...splData, pegawai: pegawaiValid }));
+      }
       files.forEach((f) => fd.append('files', f));
       await api.post('/surat', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setShowForm(false); setForm({ jenis: 'Nota Dinas', hal: '', tujuan: '', body: '', incident_id: '' }); setFiles([]);
+      setShowForm(false);
+      setForm({ jenis: 'Nota Dinas', hal: '', tujuan: '', body: '', incident_id: '' });
+      setSplData(defaultSplData());
+      setSplPegawai([{ nama: '', nip: '', mulai: '18:00', selesai: '23:00' }]);
+      setFiles([]);
       load();
     } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal membuat surat.'); }
     finally { setBusy(false); }
@@ -209,6 +244,41 @@ export default function SuratKeluar() {
       } else setMsg(err);
     }
   }
+  async function notifyPelaksana(s: Surat) {
+    if (!window.confirm('Kirim notifikasi tanda tangan ke semua pelaksana lembur? Link unik akan dibuat untuk setiap pegawai.')) return;
+    try {
+      const r = await api.post(`/surat/${s.id}/notify-pelaksana`, { baseUrl: location.origin });
+      setDetail(r.data.surat); load();
+      const links = (r.data.links as { nama: string; token: string; link: string }[]) || [];
+      setMsg(`Notifikasi terkirim ke ${links.length} pelaksana. Link TTD dibuat.`);
+    } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal mengirim notifikasi.'); }
+  }
+
+  // Unggah gambar kop/letterhead → tersimpan di settings.lkp.kop_url, dipakai saat generate dokumen.
+  async function uploadKop(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setMsg('Kop harus berupa gambar (JPG/PNG/WebP/GIF).'); return; }
+    setKopBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('kop', file);
+      const r = await api.post('/surat/kop', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setLkp((l) => ({ ...l, kop_url: r.data.kop_url }));
+      setMsg('Kop surat berhasil diunggah.');
+    } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal mengunggah kop.'); }
+    finally { setKopBusy(false); if (kopInputRef.current) kopInputRef.current.value = ''; }
+  }
+  async function removeKop() {
+    if (!window.confirm('Hapus kop surat? Dokumen akan digenerate tanpa header sampai kop baru diunggah.')) return;
+    setKopBusy(true);
+    try {
+      await api.delete('/surat/kop');
+      setLkp((l) => { const n = { ...l }; delete n.kop_url; return n; });
+      setMsg('Kop surat dihapus.');
+    } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal menghapus kop.'); }
+    finally { setKopBusy(false); }
+  }
+
   async function addLampiran(s: Surat, fl: File[]) {
     if (!fl.length) return;
     try {
@@ -254,6 +324,130 @@ export default function SuratKeluar() {
       return `<div style="margin:8px 0;page-break-inside:avoid"><div style="font-size:11px;font-weight:bold">${i + 1}. ${e(l.filename || 'Lampiran')}</div>${isImg ? `<img src="${url}" style="max-width:100%;max-height:230px;border:1px solid #999;margin-top:3px">` : `<div style="font-size:10px">📄 Berkas PDF: <a href="${url}">${e(l.filename || url)}</a></div>`}</div>`;
     }).join('');
     return `<div style="page-break-before:always;margin-top:20px"><div style="text-align:center;font-weight:bold;font-size:14px;text-decoration:underline;text-transform:uppercase;margin-bottom:10px">Lampiran Bukti Dukung</div>${items}</div>`;
+  }
+
+  // Render Surat Pernyataan Lembur: 3 halaman (SPL + Dokumentasi + Laporan Hasil).
+  function suratPernyataanHtml(s: Surat, kasiQr = '', pelaksanaQr: Record<string, string> = {}): string {
+    const esc = (v: unknown) => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    let d: Record<string, unknown> = {};
+    try { d = JSON.parse(s.body || '{}'); } catch {}
+    const kasNama = String(d.kasi_nama || s.kasi_signer_name || lkp.kasie_nama || '');
+    const kasNip  = String(d.kasi_nip  || s.kasi_signer_nip  || lkp.kasie_nip  || '');
+    const kasGol  = String(d.kasi_golongan || '');
+    const kasJab  = String(d.kasi_jabatan  || lkp.kasie_jabatan || 'Kepala Seksi Teknik dan Operasi');
+    const tglKeg  = String(d.tanggal_kegiatan || '');
+    const hariKeg = String(d.hari_kegiatan   || '');
+    const kegiatan= String(d.kegiatan || '');
+    const durasi  = String(d.durasi_jam || '5');
+    const dasarList   = String(d.dasar || '').split('\n').map(x=>x.trim()).filter(Boolean);
+    const tujuanList  = String(d.tujuan_kegiatan || '').split('\n').map(x=>x.trim()).filter(Boolean);
+    const hasilList   = String(d.hasil || '').split('\n').map(x=>x.trim()).filter(Boolean);
+    // Hanya pegawai yang benar-benar dipilih (punya nama) yang ditampilkan/dihitung.
+    const pegawai = (Array.isArray(d.pegawai) ? d.pegawai : []).filter((p: SplPegawaiRow) => (p?.nama || '').trim()) as SplPegawaiRow[];
+    const dmy = (v: string) => { if (!v) return '-'; const dt = new Date(v.replace(' ','T')); return isNaN(dt.getTime()) ? v : dt.toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}); };
+    const tglSurat = dmy(s.tanggal);
+    const tglKegStr= dmy(tglKeg);
+    const kota = lkp.kota || 'Samarinda';
+
+    const kasiTtdBlock = kasiQr && s.kasi_status === 'disetujui'
+      ? `<div style="margin:4px auto;width:110px"><img src="${kasiQr}" style="width:100px;height:100px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:7px;color:#666">Token: ${esc(s.kasi_sign_token||'')}</div></div>`
+      : '<div style="height:70px"></div>';
+
+    // Kop/letterhead: pakai gambar yang diunggah (Pengaturan Kop di halaman Surat Keluar).
+    // Bila belum ada, dokumen digenerate tanpa header (sesuai permintaan).
+    const kopUrl = lkp.kop_url ? `${location.origin}${lkp.kop_url}` : '';
+    const kop = kopUrl
+      ? `<img src="${kopUrl}" alt="Kop Surat" style="display:block;width:100%;margin:0 auto 22px">`
+      : '<div style="margin-bottom:22px"></div>';
+
+
+    const page1 = `<div class="page" style="page-break-after:always;font-family:'Times New Roman',serif;color:#000;width:190mm;padding:18mm 20mm;margin:0 auto;font-size:13px;line-height:1.6">
+      ${kop}
+      <div style="text-align:center;margin-bottom:4px"><u><b>SURAT PERNYATAAN</b></u></div>
+      <div style="text-align:center;margin-bottom:20px">Nomor : ${esc(s.nomor)}</div>
+      <table style="border-collapse:collapse;margin-bottom:16px">
+        <tr><td style="width:90px;padding:1px 0">Nama</td><td style="padding:1px 6px">:</td><td>${esc(kasNama)}</td></tr>
+        <tr><td style="padding:1px 0">NIP</td><td style="padding:1px 6px">:</td><td>${esc(kasNip)}</td></tr>
+        <tr><td style="padding:1px 0">Golongan</td><td style="padding:1px 6px">:</td><td>${esc(kasGol)}</td></tr>
+        <tr><td style="padding:1px 0">Jabatan</td><td style="padding:1px 6px">:</td><td>${esc(kasJab)}</td></tr>
+      </table>
+      <p style="margin-bottom:8px">Dengan ini menyatakan bahwa :</p>
+      <ol style="padding-left:24px">
+        <li style="margin-bottom:10px;text-align:justify">Telah dilaksanakan pekerjaan lembur kegiatan ${esc(kegiatan)} setelah jam operasional bandara pada hari ${esc(hariKeg)}, tanggal ${tglKegStr} pada Unit Elektronika Bandara selama ${esc(durasi)} (${numToId(Number(durasi))}) jam sebanyak ${pegawai.length} orang.</li>
+        <li style="margin-bottom:10px">Pegawai yang melaksanakan kegiatan lembur sebagai berikut :
+          <table style="border-collapse:collapse;width:100%;margin-top:8px;font-size:12px">
+            <tr><th style="border:1px solid #000;padding:4px 8px;text-align:center;background:#f5f5f5" rowspan="2">No.</th><th style="border:1px solid #000;padding:4px 8px;text-align:center;background:#f5f5f5" rowspan="2">Nama</th><th style="border:1px solid #000;padding:4px 8px;text-align:center;background:#f5f5f5" rowspan="2">NIP</th><th style="border:1px solid #000;padding:4px 8px;text-align:center;background:#f5f5f5" colspan="2">Jam Lembur (WITA)</th></tr>
+            <tr><th style="border:1px solid #000;padding:4px 8px;text-align:center;background:#f5f5f5">Mulai</th><th style="border:1px solid #000;padding:4px 8px;text-align:center;background:#f5f5f5">Selesai</th></tr>
+            ${pegawai.map((p,i)=>`<tr><td style="border:1px solid #000;padding:3px 8px;text-align:center">${i+1}.</td><td style="border:1px solid #000;padding:3px 8px">${esc(p.nama)}</td><td style="border:1px solid #000;padding:3px 8px;text-align:center">${esc(p.nip||'-')}</td><td style="border:1px solid #000;padding:3px 8px;text-align:center">${esc(p.mulai)}</td><td style="border:1px solid #000;padding:3px 8px;text-align:center">${esc(p.selesai)}</td></tr>`).join('')}
+          </table>
+        </li>
+        <li>Dokumentasi dan data dukung terlampir.<br>
+          <p style="margin:8px 0;text-align:justify">Demikian pernyataan ini dibuat dengan sesungguhnya untuk dipergunakan sebagai dasar pemberian uang lembur pegawai bersangkutan.</p>
+        </li>
+      </ol>
+      <div style="text-align:right;margin-top:20px">
+        <div>${esc(kota)}, ${tglSurat}</div>
+        <div>${esc(kasJab)}</div>
+        ${kasiTtdBlock}
+        <div><u><b>${esc(kasNama)}</b></u></div>
+        <div>NIP. ${esc(kasNip)}</div>
+      </div>
+    </div>`;
+
+    const lampiranImgs = (s.lampiran||[]).filter(l=>(l.mimetype||'').startsWith('image'));
+    const lampiranPdfs = (s.lampiran||[]).filter(l=>l.mimetype==='application/pdf');
+    const docGrid = lampiranImgs.length
+      ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(lampiranImgs.length,3)},1fr);gap:10px;margin-top:24px">${lampiranImgs.slice(0,9).map(l=>`<div style="text-align:center"><img src="${location.origin}${l.file_url}" style="max-width:100%;max-height:200px;border:1px solid #ccc;object-fit:cover"></div>`).join('')}</div>`
+      : '<p style="text-align:center;color:#888;margin-top:40px;font-style:italic">[Foto dokumentasi kegiatan — tambahkan via Lampiran Bukti Dukung]</p>';
+
+    const page2 = `<div class="page" style="page-break-after:always;font-family:'Times New Roman',serif;color:#000;width:190mm;padding:18mm 20mm;margin:0 auto">
+      ${kop}
+      <div style="text-align:center;font-size:14px;font-weight:bold;text-decoration:underline;margin:20px 0">DOKUMENTASI KEGIATAN</div>
+      ${docGrid}
+      ${lampiranPdfs.map(l=>`<div style="margin-top:8px;font-size:11px">📄 <a href="${location.origin}${l.file_url}">${esc(l.filename||'Lampiran PDF')}</a></div>`).join('')}
+    </div>`;
+
+    const page3 = `<div class="page" style="font-family:'Times New Roman',serif;color:#000;width:190mm;padding:18mm 20mm;margin:0 auto">
+      ${kop}
+      <div style="text-align:center;font-size:14px;font-weight:bold;text-decoration:underline;margin-bottom:24px">LAPORAN HASIL KEGIATAN LEMBUR</div>
+      <div style="font-size:13px;line-height:1.8">
+        <p style="font-weight:bold;margin-bottom:4px">A. DASAR</p>
+        <ol style="margin:0 0 14px;padding-left:28px">${dasarList.map(x=>`<li style="text-align:justify">${esc(x)}</li>`).join('')||'<li>-</li>'}</ol>
+        <p style="font-weight:bold;margin-bottom:4px">B. MAKSUD DAN TUJUAN</p>
+        <ol style="margin:0 0 14px;padding-left:28px">${tujuanList.map(x=>`<li style="text-align:justify">${esc(x)}</li>`).join('')||'<li>-</li>'}</ol>
+        <p style="font-weight:bold;margin-bottom:4px">C. HASIL YANG DICAPAI</p>
+        <p style="margin:0 0 6px">Kegiatan dengan rincian sebagai berikut :</p>
+        <ol style="margin:0 0 14px;padding-left:28px">${hasilList.map(x=>`<li style="text-align:justify">${esc(x)}</li>`).join('')||'<li>-</li>'}</ol>
+      </div>
+      <div style="text-align:right;margin-top:16px;font-size:13px">${esc(kota)}, ${tglSurat}</div>
+      <table style="width:100%;margin-top:8px;font-size:12.5px;border-collapse:collapse">
+        <tr>
+          <td style="width:36%;text-align:center;vertical-align:top;padding:4px 8px">
+            Mengetahui,<br><b>${esc(kasJab)}</b>
+            ${kasiTtdBlock}
+            <u><b>${esc(kasNama)}</b></u><br>NIP. ${esc(kasNip)}
+          </td>
+          <td style="text-align:center;vertical-align:top;padding:4px 8px">
+            Pelaksana Kegiatan
+            <div style="display:flex;flex-wrap:wrap;margin-top:4px">
+              ${pegawai.map(p => {
+                const qr = p.sign_token ? pelaksanaQr[p.sign_token] : '';
+                const mark = p.sign_token
+                  ? `${qr ? `<img src="${qr}" style="width:64px;height:64px;display:block;margin:2px auto 0">` : '<div style="height:8px"></div>'}<div style="font-size:9px;color:#0a7d27;font-weight:bold">✔ Ditandatangani elektronik</div>${p.signed_at ? `<div style="font-size:8px;color:#666">${dmy(p.signed_at)}</div>` : ''}`
+                  : '<div style="height:64px"></div>';
+                const nama = p.sign_token ? `<u><b>${esc(p.nama)}</b></u>` : `<b>${esc(p.nama)}</b>`;
+                const tok = p.sign_token ? `<div style="font-size:7px;color:#888">Token: ${esc(p.sign_token)}</div>` : '';
+                return `<div style="width:50%;text-align:center;margin-top:16px">${mark}${nama}${p.nip ? `<br>NIP. ${esc(p.nip)}` : ''}${tok}</div>`;
+              }).join('')}
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>`;
+
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Surat Pernyataan ${esc(s.nomor)}</title>
+    <style>* { box-sizing:border-box;margin:0;padding:0 } body { background:#fff } .page { background:#fff } @media print { .page { page-break-after:always } }</style>
+    </head><body>${page1}${page2}${page3}</body></html>`;
   }
 
   // Tentukan periode laporan: dari report_month, atau parse dari teks Hal (cover lama).
@@ -390,6 +584,22 @@ export default function SuratKeluar() {
 
   // Bangun HTML dokumen (Nota Dinas+LKP bila ada incident_id; laporan bulanan bila cover; selain itu surat tunggal).
   async function buildDocHtml(s: Surat): Promise<string> {
+    if (s.jenis === 'Surat Pernyataan') {
+      let kasiQr = '';
+      if (s.kasi_sign_token) { try { kasiQr = await QRCode.toDataURL(`${location.origin}/verify-tte?token=${s.kasi_sign_token}`, { width: 130, margin: 1 }); } catch { kasiQr = ''; } }
+      // QR per pelaksana yang sudah TTE (token PK… di body JSON) → tautan verifikasi publik.
+      const pelaksanaQr: Record<string, string> = {};
+      try {
+        const body = JSON.parse(s.body || '{}');
+        const pegawai = Array.isArray(body.pegawai) ? body.pegawai : [];
+        for (const p of pegawai) {
+          if (p?.sign_token) {
+            try { pelaksanaQr[p.sign_token] = await QRCode.toDataURL(`${location.origin}/verify-tte?token=${p.sign_token}`, { width: 120, margin: 1 }); } catch { /* abaikan */ }
+          }
+        }
+      } catch { /* body bukan JSON valid */ }
+      return suratPernyataanHtml(s, kasiQr, pelaksanaQr);
+    }
     if (s.incident_id) {
       try {
         const { data } = await api.get<{ incident: Incident }>(`/incidents/${s.incident_id}`);
@@ -433,10 +643,43 @@ export default function SuratKeluar() {
             <button onClick={() => setFilter('tte')} className={`px-2.5 py-1 text-[11px] rounded ${filter === 'tte' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}>Ber-TTE</button>
           </div>
           <button onClick={() => navigate('/laporan-bulanan')} className="border border-accent2/50 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">📅 Laporan Bulanan</button>
-          <button onClick={() => setShowForm(true)} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Buat Surat</button>
+          <button onClick={() => setShowKop(true)} className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs font-semibold">🖼️ Kop Surat</button>
+          <button onClick={() => { setShowForm(true); setSplData(defaultSplData()); setSplPegawai([{nama:'',nip:'',mulai:'18:00',selesai:'23:00'}]); }} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Buat Surat</button>
         </div>
       </div>
       {msg && <div className="bg-accent2/10 border border-accent2/30 rounded-md px-3 py-2 text-[11px] text-accent2 mb-3">{msg}</div>}
+
+      {showKop && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowKop(false)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold">🖼️ Kop Surat (Header Dokumen)</h3>
+              <button onClick={() => setShowKop(false)} className="text-text2 hover:text-white text-lg leading-none">×</button>
+            </div>
+            <p className="text-[11px] text-text2 mb-3 leading-relaxed">
+              Unggah gambar kop/kepala surat resmi (JPG/PNG/WebP). Gambar akan tampil sebagai header di dokumen yang digenerate (mis. Surat Pernyataan Lembur). Disarankan gambar lebar penuh dengan rasio kop (mis. 1500×360 px).
+            </p>
+            <div className="border border-dashed border-border rounded-lg p-3 bg-surface2 mb-3">
+              {lkp.kop_url ? (
+                <div className="bg-white rounded p-2">
+                  <img src={`${location.origin}${lkp.kop_url}`} alt="Kop saat ini" className="w-full block" />
+                </div>
+              ) : (
+                <div className="text-center text-text2 text-[11px] py-6">Belum ada kop. Dokumen digenerate <b>tanpa header</b> sampai kop diunggah.</div>
+              )}
+            </div>
+            <input ref={kopInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => uploadKop(e.target.files?.[0])} />
+            <div className="flex gap-2">
+              <button onClick={() => kopInputRef.current?.click()} disabled={kopBusy} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
+                {kopBusy ? '⏳ Memproses…' : (lkp.kop_url ? '🔄 Ganti Kop' : '⬆️ Unggah Kop')}
+              </button>
+              {lkp.kop_url && (
+                <button onClick={removeKop} disabled={kopBusy} className="border border-danger/50 text-danger rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50">🗑️ Hapus Kop</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
         <table className="w-full text-xs">
@@ -469,8 +712,8 @@ export default function SuratKeluar() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center overflow-y-auto p-4" onClick={() => setShowForm(false)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 my-auto max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">📤 Buat Surat Keluar</h3><button onClick={() => setShowForm(false)} className="text-text2 hover:text-white text-lg leading-none">×</button></div>
             <label className="block text-[11px] text-text2 mb-1">Jenis Surat</label>
             <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={form.jenis} onChange={(e) => setForm({ ...form, jenis: e.target.value })}>{JENIS.map((j) => <option key={j} value={j}>{j}</option>)}</select>
@@ -478,8 +721,94 @@ export default function SuratKeluar() {
             <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={form.hal} onChange={(e) => setForm({ ...form, hal: e.target.value })} placeholder="mis. Permohonan Persetujuan…" />
             <label className="block text-[11px] text-text2 mb-1">Ditujukan (Yth)</label>
             <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={form.tujuan} onChange={(e) => setForm({ ...form, tujuan: e.target.value })} placeholder={lkp.nd_yth} />
+            {form.jenis !== 'Surat Pernyataan' && (<>
             <label className="block text-[11px] text-text2 mb-1">Isi Surat (opsional)</label>
             <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3 min-h-[80px]" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} placeholder="Kosongkan untuk teks standar 'Dengan ini disampaikan [hal]…'" />
+            </>)}
+
+            {form.jenis === 'Surat Pernyataan' && (
+              <div className="border border-border rounded-lg p-3 bg-surface2/40 space-y-3 mb-3">
+                <div className="text-[10px] font-semibold text-text2 uppercase tracking-wide">Data Surat Pernyataan Lembur (SPL)</div>
+
+                {/* Identitas Kasi */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="block text-[10px] text-text2 mb-1">Nama Kepala Seksi</label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={splData.kasi_nama} onChange={e=>setSplData({...splData,kasi_nama:e.target.value})} placeholder="Nama Kepala Seksi" /></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">NIP</label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={splData.kasi_nip} onChange={e=>setSplData({...splData,kasi_nip:e.target.value})} placeholder="NIP" /></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">Golongan</label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={splData.kasi_golongan} onChange={e=>setSplData({...splData,kasi_golongan:e.target.value})} /></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">Jabatan</label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={splData.kasi_jabatan} onChange={e=>setSplData({...splData,kasi_jabatan:e.target.value})} /></div>
+                </div>
+
+                {/* Detail kegiatan */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div><label className="block text-[10px] text-text2 mb-1">Tanggal Kegiatan</label>
+                  <input type="date" className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={splData.tanggal_kegiatan} onChange={e=>setSplData({...splData,tanggal_kegiatan:e.target.value})} /></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">Hari</label>
+                  <select className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={splData.hari_kegiatan} onChange={e=>setSplData({...splData,hari_kegiatan:e.target.value})}>
+                    {['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'].map(h=><option key={h}>{h}</option>)}
+                  </select></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">Durasi (jam)</label>
+                  <input type="number" min="1" max="8" className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={splData.durasi_jam} onChange={e=>setSplData({...splData,durasi_jam:e.target.value})} /></div>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-text2 mb-1">Deskripsi Kegiatan Lembur</label>
+                  <textarea className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs min-h-[60px]" value={splData.kegiatan} onChange={e=>setSplData({...splData,kegiatan:e.target.value})} placeholder="Re-lokasi Speker outdor PAS (Public Address System)…" />
+                </div>
+
+                {/* Daftar pegawai */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[10px] text-text2">Daftar Pegawai Lembur</label>
+                    <button type="button" onClick={()=>setSplPegawai([...splPegawai,{nama:'',nip:'',mulai:'18:00',selesai:'23:00'}])} className="text-[10px] text-accent2 hover:underline">+ Tambah Baris</button>
+                  </div>
+                  <div className="text-[9px] text-text2 mb-1 grid grid-cols-[2fr_52px_52px_20px] gap-1"><span>Nama Pegawai</span><span>Mulai</span><span>Selesai</span><span></span></div>
+                  {splPegawai.map((p,i)=>(
+                    <div key={i} className="mb-2">
+                      <div className="grid grid-cols-[2fr_52px_52px_20px] gap-1 items-center">
+                        <select
+                          className="bg-surface2 border border-border rounded px-2 py-1 text-xs"
+                          value={p.user_id ?? ''}
+                          onChange={e=>{
+                            const uid = Number(e.target.value);
+                            const u = splUsers.find(x=>x.id===uid);
+                            const a=[...splPegawai];
+                            a[i]={...a[i], user_id: u?.id, nama: u?.name||'', nip: u?.nip||''};
+                            setSplPegawai(a);
+                          }}
+                        >
+                          <option value="">-- Pilih Pegawai --</option>
+                          {splUsers.map(u=><option key={u.id} value={u.id}>{u.emoji||'👤'} {u.name}{u.jabatan?' · '+u.jabatan:''}</option>)}
+                        </select>
+                        <input className="bg-surface2 border border-border rounded px-2 py-1 text-xs text-center" value={p.mulai} onChange={e=>{const a=[...splPegawai];a[i]={...a[i],mulai:e.target.value};setSplPegawai(a);}} />
+                        <input className="bg-surface2 border border-border rounded px-2 py-1 text-xs text-center" value={p.selesai} onChange={e=>{const a=[...splPegawai];a[i]={...a[i],selesai:e.target.value};setSplPegawai(a);}} />
+                        <button type="button" onClick={()=>setSplPegawai(splPegawai.filter((_,j)=>j!==i))} className="text-danger text-xs leading-none">✕</button>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1 ml-1">
+                        <span className="text-[9px] text-text2 w-7 shrink-0">NIP</span>
+                        <input
+                          readOnly
+                          value={p.nip || ''}
+                          title="NIP diambil otomatis dari akun pegawai. Ubah di menu Pengguna bila kosong/salah."
+                          placeholder={p.user_id ? '⚠ NIP belum diatur di akun pegawai' : 'otomatis terisi dari akun pegawai'}
+                          className={`flex-1 bg-surface border border-border rounded px-2 py-0.5 text-[11px] cursor-not-allowed ${p.nip ? 'text-text2' : 'text-warn placeholder:text-warn/70'}`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Laporan Hasil */}
+                <div><label className="block text-[10px] text-text2 mb-1">A. Dasar <span className="font-normal">(tiap baris = 1 poin)</span></label>
+                <textarea className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs min-h-[52px]" value={splData.dasar} onChange={e=>setSplData({...splData,dasar:e.target.value})} placeholder="Pengaduan Penumpang&#10;Perintah Lisan Kepala Seksi" /></div>
+                <div><label className="block text-[10px] text-text2 mb-1">B. Maksud &amp; Tujuan <span className="font-normal">(tiap baris = 1 poin)</span></label>
+                <textarea className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs min-h-[52px]" value={splData.tujuan_kegiatan} onChange={e=>setSplData({...splData,tujuan_kegiatan:e.target.value})} placeholder="Pemindahan Speker PAS&#10;Meminimalisir area blankspot" /></div>
+                <div><label className="block text-[10px] text-text2 mb-1">C. Hasil yang Dicapai <span className="font-normal">(tiap baris = 1 poin)</span></label>
+                <textarea className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs min-h-[68px]" value={splData.hasil} onChange={e=>setSplData({...splData,hasil:e.target.value})} placeholder="Kegiatan pertama: pembongkaran speker…&#10;Kegiatan selanjutnya: penarikan kabel LAN…" /></div>
+              </div>
+            )}
             <label className="block text-[11px] text-text2 mb-1">🔗 ID Insiden Terkait (opsional — untuk sertakan LKP)</label>
             <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3 font-mono" value={form.incident_id} onChange={(e) => setForm({ ...form, incident_id: e.target.value.toUpperCase() })} placeholder="INC-001" />
             <label className="block text-[11px] text-text2 mb-1">📎 Lampiran Bukti Dukung (gambar/PDF, opsional)</label>
@@ -631,6 +960,45 @@ export default function SuratKeluar() {
                   <div className="text-text2 text-[11px]">— Belum diminta. Klik "Kirim ke Kasi (WA)" untuk meminta tanda tangan.</div>
                 )}
               </div>
+
+              {detail.jenis === 'Surat Pernyataan' && (() => {
+                let bodyParsed: Record<string, unknown> = {};
+                try { bodyParsed = JSON.parse(detail.body || '{}'); } catch {}
+                const pg = (Array.isArray(bodyParsed.pegawai) ? bodyParsed.pegawai : []).filter((p: SplPegawaiRow) => (p?.nama || '').trim()) as SplPegawaiRow[];
+                const signedCount = pg.filter(p => p.signed_at).length;
+                return (
+                  <div className="border-t border-border pt-2 mt-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-text2">✍️ TTD Pelaksana Lembur</div>
+                      <button onClick={() => notifyPelaksana(detail)} className="text-[10px] text-accent2 hover:underline">📲 Kirim Notifikasi</button>
+                    </div>
+                    {pg.length === 0 ? (
+                      <div className="text-text2 text-[11px]">Belum ada daftar pelaksana.</div>
+                    ) : (
+                      <div className="space-y-1">
+                        <div className="text-[10px] text-text2 mb-1">{signedCount}/{pg.length} sudah menandatangani</div>
+                        {pg.map((p, i) => (
+                          <div key={i} className={`flex items-center justify-between rounded-md px-2.5 py-1.5 text-[11px] ${p.signed_at ? 'bg-success/10 border border-success/30' : p.pelaksana_token ? 'bg-warn/5 border border-warn/20' : 'bg-surface2 border border-border'}`}>
+                            <div>
+                              <span className={p.signed_at ? 'text-success font-semibold' : 'text-white'}>{p.signed_at ? '🔏' : p.pelaksana_token ? '⏳' : '○'} {p.nama}</span>
+                              {p.nip && <span className="text-text2 font-mono ml-1.5 text-[9px]">{p.nip}</span>}
+                            </div>
+                            <div className="text-right">
+                              {p.signed_at ? (
+                                <div className="text-success text-[9px]">{new Date(p.signed_at).toLocaleDateString('id-ID')}</div>
+                              ) : p.pelaksana_token ? (
+                                <a href={`/ttd-pelaksana?token=${p.pelaksana_token}`} target="_blank" rel="noreferrer" className="text-accent2 text-[9px] hover:underline">Link TTD</a>
+                              ) : (
+                                <span className="text-text2 text-[9px]">Kirim notifikasi</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="border-t border-border pt-2 mt-2">
                 <div className="flex items-center justify-between mb-1.5">

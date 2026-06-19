@@ -35,7 +35,7 @@ export async function listUsers(req, res) {
 }
 
 export async function createUser(req, res) {
-  const { name, username, email, password, pin, phone, role, roles, jabatan, perms } = req.body;
+  const { name, username, email, password, pin, phone, nip, role, roles, jabatan, perms } = req.body;
   const roleList = normalizeRoles(roles, role);
   if (!name || !username || !email || roleList.length === 0) {
     return res.status(400).json({ error: 'Nama, username, email, dan minimal 1 peran wajib diisi' });
@@ -50,9 +50,9 @@ export async function createUser(req, res) {
   const emoji = EMOJI_MAP[primary] || '👤';
   try {
     const [result] = await pool.query(
-      `INSERT INTO users (name, username, email, password_hash, pin_hash, phone, role, roles, jabatan, emoji, active, perms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-      [name, username, email, hash, pinRes.hash, phone || null, primary, JSON.stringify(roleList), jabatan || null, emoji, JSON.stringify(perms || [])]
+      `INSERT INTO users (name, username, email, password_hash, pin_hash, phone, nip, role, roles, jabatan, emoji, active, perms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      [name, username, email, hash, pinRes.hash, phone || null, nip || null, primary, JSON.stringify(roleList), jabatan || null, emoji, JSON.stringify(perms || [])]
     );
     const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
     res.status(201).json({ user: withHasPin(rows[0]) });
@@ -64,7 +64,7 @@ export async function createUser(req, res) {
 
 export async function updateUser(req, res) {
   const id = Number(req.params.id);
-  const { name, username, email, password, pin, phone, role, roles, jabatan, perms, active } = req.body;
+  const { name, username, email, password, pin, phone, nip, role, roles, jabatan, perms, active } = req.body;
   const [existingRows] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
   if (!existingRows[0]) return res.status(404).json({ error: 'User tidak ditemukan' });
 
@@ -90,6 +90,7 @@ export async function updateUser(req, res) {
     username: username ?? existingRows[0].username,
     email: email ?? existingRows[0].email,
     phone: phone ?? existingRows[0].phone,
+    nip: nip ?? existingRows[0].nip,
     role: primary,
     rolesJson,
     jabatan: jabatan ?? existingRows[0].jabatan,
@@ -101,13 +102,13 @@ export async function updateUser(req, res) {
   if (password) {
     fields.password_hash = await bcrypt.hash(password, 10);
     await pool.query(
-      `UPDATE users SET name=?, username=?, email=?, phone=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=?, password_hash=? WHERE id=?`,
-      [fields.name, fields.username, fields.email, fields.phone, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, fields.password_hash, id]
+      `UPDATE users SET name=?, username=?, email=?, phone=?, nip=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=?, password_hash=? WHERE id=?`,
+      [fields.name, fields.username, fields.email, fields.phone, fields.nip, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, fields.password_hash, id]
     );
   } else {
     await pool.query(
-      `UPDATE users SET name=?, username=?, email=?, phone=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=? WHERE id=?`,
-      [fields.name, fields.username, fields.email, fields.phone, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, id]
+      `UPDATE users SET name=?, username=?, email=?, phone=?, nip=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=? WHERE id=?`,
+      [fields.name, fields.username, fields.email, fields.phone, fields.nip, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, id]
     );
   }
 

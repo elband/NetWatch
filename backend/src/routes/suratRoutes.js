@@ -9,6 +9,7 @@ import { env } from '../config/env.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaRaw } from '../jobs/waQueue.js';
 import { buildLaporanData } from './laporanRoutes.js';
+import { createNotification } from '../services/notify.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -39,13 +40,18 @@ async function withLampiran(rows) {
   return [...byId.values()];
 }
 
-async function nextNomor(conn) {
+async function nextNomor(conn, jenis = 'Nota Dinas') {
   const [sRows] = await conn.query("SELECT setting_value FROM settings WHERE setting_key = 'lkp'");
   let lkp = {};
   try { const v = sRows[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { /* default */ }
   const kode = (lkp.nd_kode || 'ELBAND/APTP').trim();
   const now = new Date();
   const bulan = now.getMonth() + 1, tahun = now.getFullYear();
+  if (jenis === 'Surat Pernyataan') {
+    const [seqRows] = await conn.query("SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE tahun=? AND jenis='Surat Pernyataan'", [tahun]);
+    const seq = seqRows[0].s;
+    return { nomor: `SPL/${String(seq).padStart(3, '0')}/TEKOPS/APTP-${tahun}`, seq, bulan, tahun };
+  }
   const [seqRows] = await conn.query('SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE bulan = ? AND tahun = ?', [bulan, tahun]);
   const seq = seqRows[0].s;
   return { nomor: `${String(seq).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`, seq, bulan, tahun };
@@ -74,7 +80,7 @@ router.post('/', requireRole('koordinator', 'admin'), upload.array('files', 10),
   }
   const conn = await pool.getConnection();
   try {
-    const { nomor, seq, bulan, tahun } = await nextNomor(conn);
+    const { nomor, seq, bulan, tahun } = await nextNomor(conn, (jenis || 'Nota Dinas').trim());
     const tanggal = new Date().toISOString().slice(0, 10);
     const rm = /^\d{4}-\d{2}$/.test(report_month || '') ? report_month : null;
     const [r] = await conn.query(
@@ -126,6 +132,49 @@ router.post('/:id/lampiran', requireRole('koordinator', 'admin'), upload.array('
 router.delete('/:id/lampiran/:lampId', requireRole('koordinator', 'admin'), async (req, res) => {
   await pool.query('DELETE FROM surat_lampiran WHERE id = ? AND surat_id = ?', [Number(req.params.lampId), Number(req.params.id)]);
   res.json({ ok: true });
+});
+
+// ---- Kop / letterhead dokumen (didefinisikan SEBELUM route '/:id' agar tidak tertangkap sebagai id) ----
+// Helper: baca & tulis objek lkp di tabel settings.
+async function readLkpRaw() {
+  const [r] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='lkp'");
+  let lkp = {};
+  try { const v = r[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { lkp = {}; }
+  return lkp;
+}
+async function writeLkpRaw(lkp) {
+  await pool.query(
+    "INSERT INTO settings (setting_key, setting_value) VALUES ('lkp', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
+    [JSON.stringify(lkp)]
+  );
+}
+
+// Unggah gambar kop/letterhead → simpan URL ke settings.lkp.kop_url (dipakai saat generate dokumen).
+router.post('/kop', requireRole('koordinator', 'admin'), upload.single('kop'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Tidak ada gambar diunggah.' });
+  if (!req.file.mimetype.startsWith('image/')) {
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch { /* abaikan */ }
+    return res.status(400).json({ error: 'Kop harus berupa gambar (JPG/PNG/WebP/GIF).' });
+  }
+  const lkp = await readLkpRaw();
+  // Hapus berkas kop lama bila ada (agar tidak menumpuk di disk).
+  if (lkp.kop_url && lkp.kop_url.startsWith('/uploads/surat/')) {
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(lkp.kop_url))); } catch { /* abaikan */ }
+  }
+  lkp.kop_url = `/uploads/surat/${req.file.filename}`;
+  await writeLkpRaw(lkp);
+  res.json({ ok: true, kop_url: lkp.kop_url, lkp });
+});
+
+// Hapus kop yang tersimpan → kembali ke dokumen tanpa header.
+router.delete('/kop', requireRole('koordinator', 'admin'), async (req, res) => {
+  const lkp = await readLkpRaw();
+  if (lkp.kop_url && lkp.kop_url.startsWith('/uploads/surat/')) {
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(lkp.kop_url))); } catch { /* abaikan */ }
+  }
+  delete lkp.kop_url;
+  await writeLkpRaw(lkp);
+  res.json({ ok: true, lkp });
 });
 
 // Hapus surat keluar (beserta lampiran & berkasnya).
@@ -190,6 +239,51 @@ router.post('/:id/request-kasi', requireRole('koordinator', 'admin'), async (req
   res.json({ surat: (await withLampiran(u))[0], link, phone, waQueued });
 });
 
+// Daftar pegawai aktif untuk picker SPL.
+router.get('/users', async (req, res) => {
+  const [rows] = await pool.query('SELECT id, name, nip, emoji, pangkat, jabatan, phone FROM users WHERE active = 1 ORDER BY name');
+  res.json({ users: rows });
+});
+
+// Kirim notifikasi TTD ke setiap pelaksana lembur (generate token per pegawai, simpan di body JSON).
+router.post('/:id/notify-pelaksana', requireRole('koordinator', 'admin'), async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
+  const s = rows[0];
+  if (!s) return res.status(404).json({ error: 'Surat tidak ditemukan.' });
+  if (s.jenis !== 'Surat Pernyataan') return res.status(400).json({ error: 'Bukan Surat Pernyataan Lembur.' });
+  let body = {};
+  try { body = JSON.parse(s.body || '{}'); } catch {}
+  const pegawai = Array.isArray(body.pegawai) ? body.pegawai : [];
+  const baseUrl = String(req.body.baseUrl || req.headers.origin || '').replace(/\/$/, '');
+  const links = [];
+  for (const p of pegawai) {
+    if (!String(p?.nama || '').trim()) continue; // lewati baris pegawai kosong (belum dipilih)
+    if (!p.pelaksana_token) {
+      const raw = `PELAKSANA|${id}|${p.user_id ?? p.nama}|${s.nomor}`;
+      p.pelaksana_token = 'PL' + crypto.createHmac('sha256', env.jwtSecret).update(raw).digest('hex').slice(0, 22).toUpperCase();
+    }
+    const link = `${baseUrl}/ttd-pelaksana?token=${p.pelaksana_token}`;
+    links.push({ nama: p.nama, token: p.pelaksana_token, link });
+    if (p.user_id) {
+      try {
+        await createNotification({ userId: p.user_id, title: `Tanda Tangan Diperlukan: ${s.hal}`, message: `Mohon tanda tangani ${s.jenis} No. ${s.nomor}. Klik untuk membuka halaman TTD.`, type: 'spl_ttd', priority: 'warning', link: `/ttd-pelaksana?token=${p.pelaksana_token}`, refId: String(id), refType: 'surat' });
+      } catch { /* abaikan */ }
+      try {
+        const [[u]] = await pool.query('SELECT phone FROM users WHERE id = ?', [p.user_id]);
+        if (u?.phone) {
+          const msg = `*Permohonan Tanda Tangan*\n\nYth. ${p.nama},\nAnda dimohon menandatangani:\n\n• ${s.jenis} No. ${s.nomor}\n• Hal: ${s.hal}\n\nSilakan buka:\n${link}\n\nTerima kasih.`;
+          await queueWaRaw({ type: 'report', toLabel: p.nama, phone: u.phone, message: msg });
+        }
+      } catch { /* abaikan */ }
+    }
+  }
+  body.pegawai = pegawai;
+  await pool.query('UPDATE nota_dinas SET body = ? WHERE id = ?', [JSON.stringify(body), id]);
+  const [updated] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
+  res.json({ surat: (await withLampiran(updated))[0], links });
+});
+
 // ---- Publik (tanpa login): halaman TTD Kepala Seksi ----
 export async function getTtdDoc(req, res) {
   const token = String(req.params.token || '').trim();
@@ -248,6 +342,46 @@ export async function submitTtd(req, res) {
   await pool.query("UPDATE nota_dinas SET kasi_status='disetujui', kasi_signer_name=?, kasi_signer_nip=?, kasi_signed_at=?, kasi_sign_token=?, kasi_note=NULL WHERE id=?",
     [name, nip, signedAt, signTok, s.id]);
   res.json({ ok: true, status: 'disetujui', kasi_sign_token: signTok });
+}
+
+// ---- Publik (tanpa login): halaman TTD Pelaksana Lembur ----
+export async function getPelaksanaSignDoc(req, res) {
+  const token = String(req.params.token || '').trim();
+  if (!token) return res.json({ valid: false });
+  const [rows] = await pool.query("SELECT * FROM nota_dinas WHERE jenis='Surat Pernyataan' AND body LIKE ? LIMIT 1", [`%${token}%`]);
+  const s = rows[0];
+  if (!s) return res.json({ valid: false });
+  let body = {};
+  try { body = JSON.parse(s.body || '{}'); } catch {}
+  const pegawai = Array.isArray(body.pegawai) ? body.pegawai : [];
+  const p = pegawai.find((x) => x.pelaksana_token === token);
+  if (!p) return res.json({ valid: false });
+  res.json({
+    valid: true,
+    doc: { nomor: s.nomor, hal: s.hal, jenis: s.jenis, tanggal: s.tanggal },
+    pelaksana: { nama: p.nama, nip: p.nip, mulai: p.mulai, selesai: p.selesai, signed_at: p.signed_at || null, sign_token: p.sign_token || null },
+  });
+}
+
+export async function submitPelaksanaSign(req, res) {
+  const token = String(req.params.token || '').trim();
+  if (!token) return res.status(400).json({ error: 'Token tidak valid.' });
+  const [rows] = await pool.query("SELECT * FROM nota_dinas WHERE jenis='Surat Pernyataan' AND body LIKE ? LIMIT 1", [`%${token}%`]);
+  const s = rows[0];
+  if (!s) return res.status(404).json({ error: 'Token tidak ditemukan.' });
+  let body = {};
+  try { body = JSON.parse(s.body || '{}'); } catch {}
+  const pegawai = Array.isArray(body.pegawai) ? body.pegawai : [];
+  const p = pegawai.find((x) => x.pelaksana_token === token);
+  if (!p) return res.status(404).json({ error: 'Token tidak valid.' });
+  if (p.signed_at) return res.status(400).json({ error: 'Sudah ditandatangani sebelumnya.' });
+  const signedAt = new Date();
+  const raw = `PLK|${s.nomor}|${p.nama}|${signedAt.toISOString()}`;
+  p.sign_token = 'PK' + crypto.createHmac('sha256', env.jwtSecret).update(raw).digest('hex').slice(0, 22).toUpperCase();
+  p.signed_at = signedAt.toISOString();
+  body.pegawai = pegawai;
+  await pool.query('UPDATE nota_dinas SET body = ? WHERE id = ?', [JSON.stringify(body), s.id]);
+  res.json({ ok: true, sign_token: p.sign_token });
 }
 
 export default router;

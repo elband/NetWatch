@@ -17,6 +17,7 @@ function toPublicUser(u) {
     username: u.username,
     email: u.email,
     phone: u.phone,
+    nip: u.nip ?? null,
     role: u.role,      // peran utama (untuk emoji/redirect)
     roles,             // semua peran yang dimiliki
     jabatan: u.jabatan,

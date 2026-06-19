@@ -6,6 +6,7 @@ export interface User {
   username: string;
   email: string;
   phone: string | null;
+  nip?: string | null;
   role: Role;
   roles: Role[];
   jabatan: string | null;

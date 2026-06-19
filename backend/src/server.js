@@ -20,7 +20,7 @@ import masterRoutes from './routes/masterRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import equipmentRoutes from './routes/equipmentRoutes.js';
 import activityRoutes from './routes/activityRoutes.js';
-import suratRoutes, { getTtdDoc, submitTtd } from './routes/suratRoutes.js';
+import suratRoutes, { getTtdDoc, submitTtd, getPelaksanaSignDoc, submitPelaksanaSign } from './routes/suratRoutes.js';
 import laporanRoutes from './routes/laporanRoutes.js';
 import attendanceRoutes from './routes/attendanceRoutes.js';
 import leaveRoutes from './routes/leaveRoutes.js';
@@ -48,6 +48,9 @@ app.get('/api/verify-tte/:token', verifyTte);
 // Halaman TTD Kepala Seksi (tanpa auth) — diakses via tautan WA.
 app.get('/api/ttd/:token', getTtdDoc);
 app.post('/api/ttd/:token', submitTtd);
+// Halaman TTD Pelaksana Lembur (tanpa auth) — diakses via tautan notifikasi/WA.
+app.get('/api/surat/pelaksana-sign/:token', getPelaksanaSignDoc);
+app.post('/api/surat/pelaksana-sign/:token', submitPelaksanaSign);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/devices', deviceRoutes);

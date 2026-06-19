@@ -549,6 +549,28 @@ export async function verifyTte(req, res) {
   );
   if (krows[0]) return res.json({ valid: true, jenis: `Pengesahan Kepala Seksi · ${krows[0].jenis || 'Surat'}`, token, ...krows[0] });
 
+  // TTD Pelaksana Lembur — token berawalan PK, tersimpan di body JSON Surat Pernyataan.
+  if (token.startsWith('PK')) {
+    const [prows] = await pool.query(
+      "SELECT nomor, hal, tanggal, jenis, body FROM nota_dinas WHERE jenis='Surat Pernyataan' AND body LIKE ? LIMIT 1",
+      [`%${token}%`]
+    );
+    if (prows[0]) {
+      let body = {};
+      try { body = JSON.parse(prows[0].body || '{}'); } catch { body = {}; }
+      const p = (Array.isArray(body.pegawai) ? body.pegawai : []).find((x) => x.sign_token === token);
+      if (p) {
+        return res.json({
+          valid: true,
+          jenis: `TTD Pelaksana Lembur · ${prows[0].jenis}`,
+          token,
+          nomor: prows[0].nomor, hal: prows[0].hal, tanggal: prows[0].tanggal,
+          signer_name: p.nama, signer_nip: p.nip || null, signed_at: p.signed_at || null,
+        });
+      }
+    }
+  }
+
   res.json({ valid: false });
 }
 

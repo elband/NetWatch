@@ -25,6 +25,7 @@ export interface LkpHead {
   koord_jabatan: string; koord_nama: string; koord_nip: string;
   kasie_jabatan: string; kasie_nama: string; kasie_nip: string;
   nd_yth: string; nd_dari: string;
+  kop_url?: string; // URL gambar kop/letterhead yang diunggah (opsional)
 }
 export interface CoverInfo {
   id?: number; nomor: string; tanggal: string; tujuan?: string | null;

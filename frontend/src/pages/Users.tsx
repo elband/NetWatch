@@ -10,7 +10,7 @@ const ALL_PERMS = [
 ];
 
 const ALL_ROLES: Role[] = ['admin', 'koordinator', 'teknisi', 'viewer'];
-const emptyForm = { name: '', username: '', email: '', pin: '', phone: '', roles: ['teknisi'] as Role[], jabatan: '', perms: [] as string[] };
+const emptyForm = { name: '', username: '', email: '', pin: '', phone: '', nip: '', roles: ['teknisi'] as Role[], jabatan: '', perms: [] as string[] };
 
 export default function Users() {
   const { user: me } = useAuth();
@@ -34,7 +34,7 @@ export default function Users() {
   function openEdit(u: User) {
     setEditId(u.id);
     setErr('');
-    setForm({ name: u.name, username: u.username, email: u.email, pin: '', phone: u.phone || '', roles: u.roles?.length ? u.roles : [u.role], jabatan: u.jabatan || '', perms: u.perms });
+    setForm({ name: u.name, username: u.username, email: u.email, pin: '', phone: u.phone || '', nip: u.nip || '', roles: u.roles?.length ? u.roles : [u.role], jabatan: u.jabatan || '', perms: u.perms });
     setOpen(true);
   }
 
@@ -102,6 +102,7 @@ export default function Users() {
               </div>
               <div className="text-[11px] text-text2">
                 @{u.username} · {u.email} · {u.jabatan}
+                {u.nip ? <span className="ml-2 text-[10px] text-text2">🆔 NIP {u.nip}</span> : <span className="ml-2 text-[10px] text-warn">🆔 NIP belum diset</span>}
                 {u.has_pin ? <span className="ml-2 text-[10px] text-success">🔐 PIN aktif</span> : <span className="ml-2 text-[10px] text-warn">🔓 PIN belum diset</span>}
               </div>
             </div>
@@ -131,6 +132,7 @@ export default function Users() {
               <input className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
               <input inputMode="numeric" maxLength={6} className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder={editId ? 'PIN baru (kosongkan = tetap)' : 'PIN login (4–6 digit) *'} value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })} />
               <input className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="No. WhatsApp" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              <input className="col-span-2 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="NIP (dipakai untuk tanda tangan surat)" value={form.nip} onChange={(e) => setForm({ ...form, nip: e.target.value })} />
               <input className="col-span-2 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="Jabatan" value={form.jabatan} onChange={(e) => setForm({ ...form, jabatan: e.target.value })} />
             </div>
             <div className="text-[11px] font-semibold text-text2 mt-3.5 mb-2">PERAN <span className="font-normal">(bisa lebih dari satu · peran pertama = utama)</span></div>
