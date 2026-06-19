@@ -651,7 +651,7 @@ export default function SuratKeluar() {
 
       {showKop && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowKop(false)}>
-          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold">🖼️ Kop Surat (Header Dokumen)</h3>
               <button onClick={() => setShowKop(false)} className="text-text2 hover:text-white text-lg leading-none">×</button>
@@ -764,12 +764,12 @@ export default function SuratKeluar() {
                     <label className="text-[10px] text-text2">Daftar Pegawai Lembur</label>
                     <button type="button" onClick={()=>setSplPegawai([...splPegawai,{nama:'',nip:'',mulai:'18:00',selesai:'23:00'}])} className="text-[10px] text-accent2 hover:underline">+ Tambah Baris</button>
                   </div>
-                  <div className="text-[9px] text-text2 mb-1 grid grid-cols-[2fr_52px_52px_20px] gap-1"><span>Nama Pegawai</span><span>Mulai</span><span>Selesai</span><span></span></div>
+                  <div className="text-[9px] text-text2 mb-1 grid grid-cols-[minmax(0,1fr)_58px_58px_18px] gap-1"><span>Nama Pegawai</span><span className="text-center">Mulai</span><span className="text-center">Selesai</span><span></span></div>
                   {splPegawai.map((p,i)=>(
                     <div key={i} className="mb-2">
-                      <div className="grid grid-cols-[2fr_52px_52px_20px] gap-1 items-center">
+                      <div className="grid grid-cols-[minmax(0,1fr)_58px_58px_18px] gap-1 items-center">
                         <select
-                          className="bg-surface2 border border-border rounded px-2 py-1 text-xs"
+                          className="min-w-0 w-full bg-surface2 border border-border rounded px-2 py-1 text-xs"
                           value={p.user_id ?? ''}
                           onChange={e=>{
                             const uid = Number(e.target.value);
@@ -782,8 +782,8 @@ export default function SuratKeluar() {
                           <option value="">-- Pilih Pegawai --</option>
                           {splUsers.map(u=><option key={u.id} value={u.id}>{u.emoji||'👤'} {u.name}{u.jabatan?' · '+u.jabatan:''}</option>)}
                         </select>
-                        <input className="bg-surface2 border border-border rounded px-2 py-1 text-xs text-center" value={p.mulai} onChange={e=>{const a=[...splPegawai];a[i]={...a[i],mulai:e.target.value};setSplPegawai(a);}} />
-                        <input className="bg-surface2 border border-border rounded px-2 py-1 text-xs text-center" value={p.selesai} onChange={e=>{const a=[...splPegawai];a[i]={...a[i],selesai:e.target.value};setSplPegawai(a);}} />
+                        <input className="w-full min-w-0 bg-surface2 border border-border rounded px-1 py-1 text-xs text-center" value={p.mulai} onChange={e=>{const a=[...splPegawai];a[i]={...a[i],mulai:e.target.value};setSplPegawai(a);}} />
+                        <input className="w-full min-w-0 bg-surface2 border border-border rounded px-1 py-1 text-xs text-center" value={p.selesai} onChange={e=>{const a=[...splPegawai];a[i]={...a[i],selesai:e.target.value};setSplPegawai(a);}} />
                         <button type="button" onClick={()=>setSplPegawai(splPegawai.filter((_,j)=>j!==i))} className="text-danger text-xs leading-none">✕</button>
                       </div>
                       <div className="flex items-center gap-1.5 mt-1 ml-1">

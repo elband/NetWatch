@@ -32,21 +32,27 @@ export default function IncidentDetailModal({
   const device = devices?.find((d) => d.id === inc.device_id);
   const remotable = !!device?.ssh_username;
 
+  const hasActions =
+    !!onReport ||
+    (inc.status !== 'selesai' && (!!onProgress || !!onResolve || !!onInvite || !!onToggleSparepart || (remotable && !!device)));
+
   return (
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]"
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200] p-4"
       onClick={onClose}
     >
       <div
-        className="bg-surface border border-border rounded-xl p-6 w-[560px] max-w-[95vw] max-h-[85vh] overflow-y-auto"
+        className="bg-surface border border-border rounded-xl w-[560px] max-w-[95vw] max-h-[90vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex justify-between items-center mb-4">
+        {/* Header — tetap terlihat */}
+        <div className="flex justify-between items-center gap-3 px-6 pt-5 pb-3 border-b border-border shrink-0">
           <span className="text-[15px] font-bold">{inc.id} — {inc.device_name}</span>
-          <button onClick={onClose} className="text-text2 hover:text-white">✕</button>
+          <button onClick={onClose} className="text-text2 hover:text-white text-lg leading-none shrink-0">✕</button>
         </div>
 
+        {/* Isi yang bisa di-scroll */}
+        <div className="px-6 py-4 overflow-y-auto flex-1">
         {/* Badges */}
         <div className="flex gap-2 items-center mb-3.5 flex-wrap">
           <PriorityBadge priority={inc.priority} />
@@ -112,8 +118,11 @@ export default function IncidentDetailModal({
           )}
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-2 flex-wrap">
+        </div>
+
+        {/* Footer aksi — tetap terlihat tanpa scroll */}
+        {hasActions && (
+        <div className="flex gap-2 flex-wrap px-6 py-3 border-t border-border shrink-0">
           {inc.status !== 'selesai' && onProgress && (
             <button
               className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-medium"
@@ -167,6 +176,7 @@ export default function IncidentDetailModal({
             </button>
           )}
         </div>
+        )}
       </div>
     </div>
   );

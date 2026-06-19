@@ -29,7 +29,7 @@ export default function InviteCollabModal({ incident, onClose, onDone }: { incid
   const candidates = techs.filter((t) => t.id !== incident.tech_id);
   return (
     <div className="fixed inset-0 z-[210] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1"><h3 className="text-sm font-bold">👥 Ajak Kerjakan Bersama</h3><button onClick={onClose} className="text-text2 hover:text-white text-lg leading-none">×</button></div>
         <div className="text-[11px] text-text2 mb-3">{incident.id} · {incident.device_name}. Teknisi yang diajak akan <b>diberi tahu (WA + notifikasi)</b> dan bisa melihat insiden ini.</div>
         <div className="max-h-[46vh] overflow-y-auto -mx-1 px-1">

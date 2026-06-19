@@ -42,7 +42,7 @@ export default function ActivityModal({ onClose, onDone }: { onClose: () => void
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-bold">📋 Ajukan Kegiatan Lain</h3>
           <button type="button" className="text-text2 hover:text-white text-lg leading-none" onClick={onClose}>×</button>

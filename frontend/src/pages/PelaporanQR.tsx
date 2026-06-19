@@ -119,7 +119,7 @@ function RoomForm({ room, onClose, onSaved }: { room: Room | null; onClose: () =
   }
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-4">🏢 {room ? 'Edit' : 'Tambah'} Ruangan</h3>
         <label className="block text-[11px] text-text2 mb-1">Kode Ruangan {room ? '' : '(kosongkan = otomatis)'}</label>
         <input className={`${inp} mb-3`} value={f.kode} disabled={!!room} onChange={(e) => setF({ ...f, kode: e.target.value })} placeholder="mis. RUANG-NOC" />
@@ -255,7 +255,7 @@ function BulkModal({ onClose, onSaved, rooms }: { onClose: () => void; onSaved: 
   }
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-2">⚡ Bulk Ruangan & QR</h3>
         <button onClick={printAll} className="w-full border border-accent2/40 text-accent2 rounded-md px-3 py-2 text-xs font-semibold mb-3">🖨️ Cetak Semua QR (1 halaman)</button>
         <div className="text-[11px] text-text2 mb-1">Tambah massal — satu ruangan per baris: <code>Nama, Gedung, Lantai, Area</code></div>

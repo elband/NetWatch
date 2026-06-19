@@ -174,7 +174,7 @@ function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: 
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-1">Inspeksi · {SLOT_LABEL[slot]}</h3>
         <p className="text-[11px] text-text2 mb-4">{dev.name} · {date}</p>
         <div className="flex gap-2 mb-3">
@@ -329,7 +329,7 @@ function CompleteMaintenanceModal({ item, onClose, onDone }: { item: Maintenance
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-1">✅ Selesaikan Maintenance</h3>
         <div className="text-[11px] text-text2 mb-4">{item.device_name} · {item.task}</div>
 
@@ -381,7 +381,7 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-4">+ Rencana Maintenance</h3>
         <label className="block text-[11px] text-text2 mb-1">Perangkat *</label>
         <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={deviceId} onChange={(e) => setDeviceId(Number(e.target.value))}>

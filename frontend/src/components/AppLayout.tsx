@@ -285,7 +285,7 @@ function ProfileModal({ onClose, onSaved }: { onClose: () => void; onSaved: (tok
   const inp = 'w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs';
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">👤 Edit Profil</h3><button onClick={onClose} className="text-text2 hover:text-white text-lg leading-none">×</button></div>
         <div className="flex items-center gap-3 mb-4">
           <div className="w-16 h-16 rounded-full overflow-hidden flex items-center justify-center text-3xl shrink-0 bg-surface2" style={{ border: `2px solid ${color}` }}>

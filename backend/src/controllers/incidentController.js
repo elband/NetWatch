@@ -253,6 +253,40 @@ export async function remindIncident(req, res) {
   if (incident.tech_id) return res.status(400).json({ error: 'Insiden sudah diambil teknisi.' });
   if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai.' });
 
+  const techId = Number(req.body.techId) || null;
+  const note = String(req.body.note || '').trim();
+
+  // Perintah penanganan ke SATU teknisi tertentu yang dipilih koordinator.
+  if (techId) {
+    const [[tech]] = await pool.query(
+      "SELECT id, name FROM users WHERE id = ? AND active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"'))",
+      [techId]
+    );
+    if (!tech) return res.status(400).json({ error: 'Teknisi tidak ditemukan / bukan teknisi aktif.' });
+    const mins = Math.max(1, Math.floor((Date.now() - new Date(incident.created_at).getTime()) / 60000));
+    const prio = incident.priority === 'kritis' ? 'kritis' : 'warning';
+    await queueWaNotification({
+      type: 'alert',
+      toUserId: techId,
+      message: `📋 PERINTAH PENANGANAN (${(incident.priority || 'sedang').toUpperCase()})\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nSudah ${mins} menit belum diambil.${note ? `\nCatatan: ${note}` : ''}\nDitugaskan oleh ${req.user.name} — mohon segera AMBIL & tangani di aplikasi NetWatch.`,
+      relatedIncidentId: incident.id,
+    });
+    await createNotification({
+      userId: techId, type: 'ticket_sla', priority: prio,
+      title: `Perintah penanganan: ${incident.device_name}`,
+      message: `${incident.id} — ditugaskan oleh ${req.user.name}.${note ? ` ${note}` : ''} Segera ambil & tangani.`,
+      refId: incident.id, refType: 'incident', link: '/my-incidents',
+    });
+    await pool.query('UPDATE incidents SET tech_reminded = 1 WHERE id = ?', [incident.id]);
+    await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [
+      incident.id, incident.step || 0,
+      `📋 Perintah penanganan dikirim ke ${tech.name} oleh ${req.user.name}.${note ? ` Catatan: ${note}` : ''}`,
+    ]);
+    const [updated] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
+    return res.json({ incident: (await attachNotes(updated))[0], remindedCount: 1, message: `Perintah dikirim ke ${tech.name}.` });
+  }
+
+  // Default: ingatkan SEMUA teknisi on-duty.
   const n = await remindOnDutyTechs(incident, { manual: true, by: req.user.name });
   const [updated] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
   res.json({

@@ -6,7 +6,7 @@ const router = Router();
 router.use(requireAuth);
 router.get('/', listDevices);
 router.post('/', requireRole('admin', 'koordinator'), createDevice);
-router.put('/:id', requireRole('admin', 'koordinator'), updateDevice);
+router.put('/:id', requireRole('admin', 'koordinator', 'teknisi'), updateDevice); // teknisi boleh edit perangkat
 router.delete('/:id', requireRole('admin', 'koordinator'), deleteDevice);
 router.post('/:id/request-alarm', requireRole('admin', 'koordinator', 'teknisi'), requestAlarm);
 

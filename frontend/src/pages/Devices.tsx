@@ -28,6 +28,7 @@ export default function Devices() {
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState('');
   const canEdit = hasRole(user, 'admin', 'koordinator');
+  const canEditDevice = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh edit (bukan tambah/hapus)
   const canAlarm = hasRole(user, 'admin', 'koordinator', 'teknisi');
 
   async function requestAlarm(d: Device) {
@@ -208,7 +209,7 @@ export default function Devices() {
                         🖥️ SSH
                       </Link>
                     )}
-                    {canEdit && (
+                    {canEditDevice && (
                       <button onClick={() => openEdit(d)} title="Edit perangkat" className="bg-accent2/10 text-accent2 border border-accent2/40 rounded px-2 py-0.5 text-[10px]">
                         ✏️ Edit
                       </button>
@@ -228,12 +229,13 @@ export default function Devices() {
 
       {showAdd && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={closeForm}>
-          <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-surface border border-border rounded-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-border shrink-0">
               <h3 className="text-sm font-bold">{editId ? '✏️ Edit Perangkat' : '🖥️ Tambah Perangkat'}</h3>
               <button type="button" className="text-text2 hover:text-white text-lg leading-none" onClick={closeForm}>×</button>
             </div>
-            <form onSubmit={(e) => { e.preventDefault(); submitDevice(); }}>
+            <form onSubmit={(e) => { e.preventDefault(); submitDevice(); }} className="flex flex-col flex-1 overflow-hidden">
+            <div className="flex-1 overflow-y-auto px-5 py-4">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Nama *"><input className="dev-inp" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="SW-Core-03" /></Field>
               <Field label="IP *"><input className="dev-inp" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} placeholder="192.168.1.3" /></Field>
@@ -285,10 +287,13 @@ export default function Devices() {
                 </label>
               </div>
             </div>
-            {formErr && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mt-3">⚠️ {formErr}</div>}
-            <div className="flex gap-2 justify-end mt-4">
-              <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white" onClick={closeForm} disabled={saving}>Batal</button>
-              <button type="submit" className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" disabled={saving}>{saving ? 'Menyimpan…' : 'Simpan'}</button>
+            </div>
+            <div className="px-5 py-3 border-t border-border shrink-0">
+              {formErr && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-2">⚠️ {formErr}</div>}
+              <div className="flex gap-2 justify-end">
+                <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white" onClick={closeForm} disabled={saving}>Batal</button>
+                <button type="submit" className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" disabled={saving}>{saving ? 'Menyimpan…' : 'Simpan'}</button>
+              </div>
             </div>
             </form>
           </div>

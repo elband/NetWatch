@@ -33,6 +33,7 @@ export default function CoordDashboard() {
   const [stats, setStats] = useState<MonthlyStats | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [reminding, setReminding] = useState<string | null>(null);
+  const [teknisiList, setTeknisiList] = useState<{ id: number; name: string; emoji?: string | null }[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [acting, setActing] = useState<number | null>(null);
   const [toast, setToast] = useState('');
@@ -50,6 +51,7 @@ export default function CoordDashboard() {
     api.get('/services').then((res) => setServices(res.data.services));
     api.get(`/dashboard/monthly?month=${month}`).then((res) => setStats(res.data));
     api.get('/activities').then((res) => setActivities(res.data.activities));
+    api.get('/incidents/teknisi-list').then((res) => setTeknisiList(res.data.teknisi || [])).catch(() => {});
   }
 
   async function decideActivity(id: number, action: 'approve' | 'reject') {
@@ -105,11 +107,11 @@ export default function CoordDashboard() {
     URL.revokeObjectURL(url);
   }
 
-  async function remind(id: string) {
+  async function remind(id: string, techId?: number) {
     setReminding(id);
     setToast('');
     try {
-      const res = await api.post(`/incidents/${id}/remind`);
+      const res = await api.post(`/incidents/${id}/remind`, techId ? { techId } : {});
       setToast(res.data?.message || 'Pengingat dikirim.');
       load();
     } catch (e: any) {
@@ -349,15 +351,19 @@ export default function CoordDashboard() {
                           <td className="px-2 py-2 text-[10px]">
                             {i.tech_id ? (
                               <span className="text-text2">Teknisi #{i.tech_id}</span>
+                            ) : reminding === i.id ? (
+                              <span className="text-warn">…</span>
                             ) : (
-                              <button
-                                disabled={reminding === i.id}
-                                onClick={() => remind(i.id)}
-                                title="Kirim WA pengingat ke teknisi on-duty"
-                                className="border border-warn/40 text-warn rounded px-2 py-0.5 font-semibold hover:bg-warn/10 disabled:opacity-50"
+                              <select
+                                value=""
+                                onChange={(e) => { const v = e.target.value; if (v === 'all') remind(i.id); else if (v) remind(i.id, Number(v)); }}
+                                title="Pilih: ingatkan semua teknisi on-duty, atau kirim perintah penanganan ke teknisi tertentu"
+                                className="border border-warn/40 text-warn bg-surface rounded px-2 py-0.5 font-semibold hover:bg-warn/10 cursor-pointer text-[10px] focus:outline-none"
                               >
-                                {reminding === i.id ? '…' : '🔔 Ingatkan'}
-                              </button>
+                                <option value="">🔔 Ingatkan…</option>
+                                <option value="all">📢 Semua teknisi on-duty</option>
+                                {teknisiList.map((t) => <option key={t.id} value={t.id}>➡️ Perintah: {t.name}</option>)}
+                              </select>
                             )}
                           </td>
                         </tr>

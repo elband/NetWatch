@@ -118,7 +118,7 @@ function LeaveModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-4">📝 Pengajuan Izin / Cuti</h3>
         <label className="block text-[11px] text-text2 mb-1">Jenis</label>
         <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={type} onChange={(e) => setType(e.target.value)}>
