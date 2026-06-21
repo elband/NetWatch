@@ -3,8 +3,9 @@ import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 
 export async function requireAuth(req, res, next) {
+  // Utama: cookie HttpOnly; fallback: header Authorization (untuk klien API/non-browser).
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const token = req.cookies?.netwatch_token || (header.startsWith('Bearer ') ? header.slice(7) : null);
   if (!token) return res.status(401).json({ error: 'Token tidak ditemukan' });
   let payload;
   try {

@@ -1,10 +1,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, setAuthToken } from '../api/client';
+import { api } from '../api/client';
 import type { User } from '../types';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
+  token: string | null; // dipertahankan untuk kompatibilitas tipe; selalu null (auth via cookie)
   loading: boolean;
   login: (identifier: string, password: string) => Promise<void>;
   loginPin: (pin: string) => Promise<void>;
@@ -17,57 +17,44 @@ const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('netwatch_token'));
   const [loading, setLoading] = useState(true);
 
+  // Pulihkan sesi dari cookie HttpOnly saat load (token tidak bisa dibaca JS).
   useEffect(() => {
-    const stored = localStorage.getItem('netwatch_token');
-    if (stored) {
-      setAuthToken(stored);
-      api
-        .get('/auth/me')
-        .then((res) => setUser(res.data.user))
-        .catch(() => {
-          localStorage.removeItem('netwatch_token');
-          setToken(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    api
+      .get('/auth/me')
+      .then((res) => setUser(res.data.user))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
   }, []);
-
-  function applySession(newToken: string, newUser: User) {
-    localStorage.setItem('netwatch_token', newToken);
-    setAuthToken(newToken);
-    setToken(newToken);
-    setUser(newUser);
-  }
 
   async function login(identifier: string, password: string) {
     const res = await api.post('/auth/login', { identifier, password });
-    applySession(res.data.token, res.data.user);
+    setUser(res.data.user); // cookie sesi di-set oleh server
   }
 
   async function loginPin(pin: string) {
     const res = await api.post('/auth/login-pin', { pin });
-    applySession(res.data.token, res.data.user);
+    setUser(res.data.user);
   }
 
   async function loginAs(userId: number) {
     const res = await api.post(`/auth/login-as/${userId}`);
-    applySession(res.data.token, res.data.user);
+    setUser(res.data.user);
   }
 
-  function logout() {
-    localStorage.removeItem('netwatch_token');
-    setAuthToken(null);
-    setToken(null);
+  // updateSession(token, user): token diabaikan (cookie diperbarui server); cukup set user.
+  function updateSession(_token: string, newUser: User) {
+    setUser(newUser);
+  }
+
+  async function logout() {
+    try { await api.post('/auth/logout'); } catch { /* tetap bersihkan state lokal */ }
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, loginPin, loginAs, updateSession: applySession, logout }}>
+    <AuthContext.Provider value={{ user, token: null, loading, login, loginPin, loginAs, updateSession, logout }}>
       {children}
     </AuthContext.Provider>
   );

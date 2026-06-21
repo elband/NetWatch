@@ -41,6 +41,26 @@ function signToken(u) {
   return jwt.sign(pub, env.jwtSecret, { expiresIn: env.jwtExpiresIn, algorithm: 'HS256' });
 }
 
+// Nama & masa berlaku cookie sesi (selaras dengan masa berlaku JWT).
+export const AUTH_COOKIE = 'netwatch_token';
+function cookieMaxAgeMs() {
+  const m = /^(\d+)\s*([smhd])$/.exec(String(env.jwtExpiresIn || '8h'));
+  if (!m) return 8 * 3600 * 1000;
+  return Number(m[1]) * { s: 1e3, m: 6e4, h: 3.6e6, d: 8.64e7 }[m[2]];
+}
+function cookieOpts() {
+  return { httpOnly: true, sameSite: 'strict', secure: env.isProd, path: '/', maxAge: cookieMaxAgeMs() };
+}
+// Set cookie HttpOnly berisi JWT — tidak bisa dibaca JavaScript (mitigasi XSS token theft).
+function setAuthCookie(res, token) {
+  res.cookie(AUTH_COOKIE, token, cookieOpts());
+}
+
+export function logout(_req, res) {
+  res.clearCookie(AUTH_COOKIE, { httpOnly: true, sameSite: 'strict', secure: env.isProd, path: '/' });
+  res.json({ ok: true });
+}
+
 export async function login(req, res) {
   const { identifier, password } = req.body;
   if (!identifier || !password) return res.status(400).json({ error: 'Username/email dan password wajib diisi' });
@@ -56,6 +76,7 @@ export async function login(req, res) {
   if (!ok) return res.status(401).json({ error: 'Username atau password salah' });
 
   const token = signToken(user);
+  setAuthCookie(res, token);
   res.json({ token, user: toPublicUser(user) });
 }
 
@@ -68,6 +89,7 @@ export async function loginPin(req, res) {
   for (const user of rows) {
     if (await bcrypt.compare(pin, user.pin_hash)) {
       const token = signToken(user);
+      setAuthCookie(res, token);
       return res.json({ token, user: toPublicUser(user) });
     }
   }
@@ -106,7 +128,9 @@ export async function updateProfile(req, res) {
   await pool.query('UPDATE users SET name=?, email=?, phone=?, jabatan=?, pin_hash=?, avatar_url=? WHERE id=?',
     [newName, newEmail || u.email, phone ?? u.phone, jabatan ?? u.jabatan, pinHash, avatarUrl, id]);
   const [updated] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
-  res.json({ token: signToken(updated[0]), user: toPublicUser(updated[0]) });
+  const newToken = signToken(updated[0]);
+  setAuthCookie(res, newToken);
+  res.json({ token: newToken, user: toPublicUser(updated[0]) });
 }
 
 export async function loginAs(req, res) {
@@ -120,6 +144,7 @@ export async function loginAs(req, res) {
   // Jejak audit non-repudiation: siapa menyamar jadi siapa.
   await audit(req.user, 'login_as', 'user', target.id, `${req.user.name} login-as ${target.name} (${target.username})`);
   const token = signToken(target);
+  setAuthCookie(res, token);
   res.json({ token, user: toPublicUser(target) });
 }
 

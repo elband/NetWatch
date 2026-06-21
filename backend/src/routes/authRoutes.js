@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { login, loginPin, me, loginAs, updateProfile } from '../controllers/authController.js';
+import { login, loginPin, me, loginAs, updateProfile, logout } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 
@@ -23,5 +23,6 @@ router.post('/login-pin', authLimiter, loginPin);
 router.get('/me', requireAuth, me);
 router.put('/profile', requireAuth, upload.single('photo'), updateProfile);
 router.post('/login-as/:id', requireAuth, loginAs);
+router.post('/logout', logout);
 
 export default router;

@@ -36,7 +36,6 @@ export default function SshTerminal() {
 
   function connect() {
     if (!deviceId || !containerRef.current) return;
-    const token = localStorage.getItem('netwatch_token') || '';
     const term = new Terminal({ theme: { background: '#0d1117' }, fontSize: 13 });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -44,7 +43,7 @@ export default function SshTerminal() {
     fit.fit();
     termRef.current = term;
 
-    const socket = getSshSocket(token);
+    const socket = getSshSocket();
     socketRef.current = socket;
 
     socket.on('connect', () => {

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import compression from 'compression';
 import http from 'http';
@@ -41,12 +42,34 @@ import { startWaWorker } from './jobs/waWorker.js';
 const app = express();
 // Di belakang reverse proxy (Nginx): percayai X-Forwarded-* agar IP klien & rate-limit benar.
 app.set('trust proxy', 1);
-// Security headers. CSP dimatikan di sini (di-tune di Nginx) agar SPA/iframe tidak rusak;
+// Security headers. CSP hanya diaktifkan di production (saat Express melayani SPA);
+// di dev frontend dilayani Vite sehingga CSP tidak relevan & tidak mengganggu HMR.
 // HSTS hanya efektif saat diakses via HTTPS.
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: env.isProd
+    ? {
+        useDefaults: true,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],   // banyak inline style attribute & dokumen cetak
+          imgSrc: ["'self'", 'data:', 'blob:'],        // QR (data:), foto upload, preview
+          connectSrc: ["'self'", 'ws:', 'wss:'],       // Socket.io
+          fontSrc: ["'self'", 'data:'],
+          frameSrc: ["'self'"],                         // iframe srcDoc pratinjau dokumen
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          upgradeInsecureRequests: [],
+        },
+      }
+    : false,
+}));
 app.use(compression());
-app.use(cors({ origin: env.corsOrigin }));
+// credentials:true agar cookie sesi HttpOnly dikirim lintas-origin (dev: Vite :5173 → :4000).
+app.use(cors({ origin: env.corsOrigin, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
+app.use(cookieParser());
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
@@ -100,7 +123,14 @@ app.use((err, req, res, next) => {
 });
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: env.corsOrigin } });
+const io = new Server(server, { cors: { origin: env.corsOrigin, credentials: true } });
+
+// Ambil JWT dari cookie HttpOnly pada handshake socket (fallback ke event/auth handshake).
+function tokenFromCookie(socket) {
+  const raw = socket.handshake.headers?.cookie || '';
+  const m = /(?:^|;\s*)netwatch_token=([^;]+)/.exec(raw);
+  return m ? decodeURIComponent(m[1]) : null;
+}
 app.set('io', io); // agar route biasa bisa emit (mis. notifikasi maintenance selesai)
 setNotifyIo(io); // Notification Center: kirim notifikasi real-time per-user
 
@@ -112,8 +142,10 @@ function joinUserRoom(socket, token) {
 }
 
 io.on('connection', (socket) => {
-  // Dukung dua cara kirim token: handshake.auth (standar) atau event notif:auth (lama).
-  if (socket.handshake.auth?.token) joinUserRoom(socket, socket.handshake.auth.token);
+  // Token diambil dari cookie HttpOnly (utama), atau handshake.auth / event lama (fallback).
+  const cookieToken = tokenFromCookie(socket);
+  if (cookieToken) joinUserRoom(socket, cookieToken);
+  else if (socket.handshake.auth?.token) joinUserRoom(socket, socket.handshake.auth.token);
   socket.on('notif:auth', (token) => joinUserRoom(socket, token));
   socket.on('disconnect', () => {});
 });

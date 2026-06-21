@@ -10,7 +10,9 @@ export function attachSshNamespace(io) {
 
   nsp.use((socket, next) => {
     try {
-      const token = socket.handshake.auth?.token;
+      const raw = socket.handshake.headers?.cookie || '';
+      const m = /(?:^|;\s*)netwatch_token=([^;]+)/.exec(raw);
+      const token = (m ? decodeURIComponent(m[1]) : null) || socket.handshake.auth?.token;
       socket.user = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] });
       next();
     } catch {
