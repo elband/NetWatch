@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { getIncident, listIncidents, createIncident, advanceStep, resolveIncident, getIncidentReport, saveIncidentReport, signIncidentReport, createNotaDinas, incidentQueue, dutyStatus, takeIncident, setAwaitingPart, remindIncident, addIncidentNote, listTeknisi, inviteCollaborators } from '../controllers/incidentController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { withIncidentDoc } from '../middleware/upload.js';
+import { validateBody } from '../middleware/validate.js';
+import { createIncidentSchema } from '../schemas/index.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -10,7 +12,7 @@ router.get('/queue', incidentQueue);
 router.get('/duty-status', dutyStatus);
 router.get('/teknisi-list', listTeknisi);
 router.post('/:id/collaborators', inviteCollaborators);
-router.post('/', createIncident);
+router.post('/', validateBody(createIncidentSchema), createIncident);
 router.post('/:id/take', takeIncident);
 router.put('/:id/awaiting-part', setAwaitingPart);
 router.post('/:id/advance', withIncidentDoc, advanceStep);
