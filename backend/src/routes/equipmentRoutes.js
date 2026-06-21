@@ -3,7 +3,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import * as XLSX from 'xlsx';
+import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
 import exifr from 'exifr';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -276,11 +276,7 @@ router.get('/maintenance/template', requireRole('admin', 'koordinator'), async (
   const header = ['nama_perangkat', 'tanggal (YYYY-MM-DD)', 'tugas', 'catatan'];
   const example = devices.map((d) => [d.name, `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-15`, 'Pembersihan & cek kondisi', '']);
   const aoa = [header, ...(example.length ? example : [['SW-Core-01', '2026-06-15', 'Pembersihan & cek kondisi', '']])];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 22 }, { wch: 20 }, { wch: 34 }, { wch: 24 }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Maintenance');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await aoaToBuffer('Maintenance', aoa, [22, 20, 34, 24]);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="template-maintenance.xlsx"');
   res.send(buf);
@@ -291,9 +287,7 @@ router.post('/maintenance/import', requireRole('admin', 'koordinator'), upload.s
   if (!req.file) return res.status(400).json({ error: 'File Excel wajib diunggah.' });
   let rows;
   try {
-    const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
+    rows = await bufferToAoa(req.file.buffer);
   } catch {
     return res.status(400).json({ error: 'File tidak dapat dibaca sebagai Excel.' });
   }

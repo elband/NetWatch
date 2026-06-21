@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import * as XLSX from 'xlsx';
+import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { dateKey } from '../config/shifts.js';
@@ -70,11 +70,7 @@ router.get('/template', requireRole('admin', 'koordinator'), async (req, res) =>
   const rows = techs.map((t) => [t.username, t.name, ...dates.map((d) => (map[t.id]?.[d] ? ABBR[map[t.id][d]] : ''))]);
   const note = ['# Isi sel dengan N=Dinas Kantor, P=Pagi, S=Siang, L=Libur. Kosongkan = tidak diubah. Jangan ubah kolom username.'];
 
-  const ws = XLSX.utils.aoa_to_sheet([note, header, ...rows]);
-  ws['!cols'] = [{ wch: 14 }, { wch: 20 }, ...dates.map(() => ({ wch: 5 }))];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Jadwal ' + month);
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await aoaToBuffer('Jadwal ' + month, [note, header, ...rows], [14, 20, ...dates.map(() => 5)]);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="template-jadwal-${month}.xlsx"`);
   res.send(buf);
@@ -85,8 +81,7 @@ router.post('/import', requireRole('admin', 'koordinator'), upload.single('file'
   if (!req.file) return res.status(400).json({ error: 'File Excel wajib diunggah.' });
   let grid;
   try {
-    const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
-    grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false, raw: false });
+    grid = await bufferToAoa(req.file.buffer);
   } catch {
     return res.status(400).json({ error: 'File tidak dapat dibaca sebagai Excel.' });
   }

@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import * as XLSX from 'xlsx';
+import { jsonToBuffer } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
@@ -99,10 +99,7 @@ router.get('/export', requireRole('admin', 'koordinator'), async (req, res) => {
     'Unit Kerja': r.unit_kerja, 'Nama Diklat': r.nama_diklat, 'Penyelenggara': r.penyelenggara, 'Lokasi': r.lokasi,
     'Mulai': r.tanggal_mulai, 'Selesai': r.tanggal_selesai, 'Durasi': r.durasi, 'Biaya': r.biaya, 'Status': r.status, 'No. Nota Dinas': r.nomor_nota_dinas || '-',
   }));
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Pengajuan Diklat');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await jsonToBuffer('Pengajuan Diklat', data);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="pengajuan-diklat.xlsx"');
   res.send(buf);
