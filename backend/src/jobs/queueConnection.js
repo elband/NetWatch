@@ -1,5 +1,6 @@
 import IORedis from 'ioredis';
 import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
 
 export const redisConnection = new IORedis({
   host: env.redis.host,
@@ -10,4 +11,4 @@ export const redisConnection = new IORedis({
 });
 
 // Tanpa listener 'error', kehilangan koneksi Redis memunculkan unhandled error event.
-redisConnection.on('error', (err) => console.error('[redis] error:', err?.message));
+redisConnection.on('error', (err) => logger.error({ err: err?.message }, '[redis] connection error'));

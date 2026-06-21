@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { redisConnection } from './queueConnection.js';
 import { checkAllDevices } from '../services/pingService.js';
 import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
 
 export const pingQueue = new Queue('device-ping-sweep', { connection: redisConnection });
 
@@ -29,7 +30,7 @@ export function startPingWorker(io) {
     { connection: redisConnection, concurrency: 1 }
   );
   // Tanpa handler ini, sweep yang melempar error hilang tanpa jejak (removeOnFail).
-  worker.on('failed', (job, err) => console.error('[pingSweep] gagal:', err?.message));
-  worker.on('error', (err) => console.error('[pingWorker] error:', err?.message));
+  worker.on('failed', (job, err) => logger.error({ err: err?.message }, '[pingSweep] gagal'));
+  worker.on('error', (err) => logger.error({ err: err?.message }, '[pingWorker] error'));
   return worker;
 }

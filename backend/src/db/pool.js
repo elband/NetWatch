@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
 
 export const pool = mysql.createPool({
   host: env.db.host,
@@ -23,5 +24,5 @@ pool.on('connection', (conn) => {
   const off = -new Date().getTimezoneOffset(); // menit di depan UTC
   const sign = off >= 0 ? '+' : '-';
   const tz = `${sign}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`;
-  conn.query(`SET time_zone = '${tz}'`, (e) => { if (e) console.error('[pool] gagal set time_zone:', e.message); });
+  conn.query(`SET time_zone = '${tz}'`, (e) => { if (e) logger.error({ err: e.message }, '[pool] gagal set time_zone'); });
 });

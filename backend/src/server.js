@@ -9,6 +9,8 @@ import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { env } from './config/env.js';
+import { logger } from './config/logger.js';
+import pinoHttp from 'pino-http';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { verifyTte } from './controllers/incidentController.js';
 import authRoutes from './routes/authRoutes.js';
@@ -73,6 +75,18 @@ app.use(cors({ origin: env.corsOrigin, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 
+// Request logging terstruktur (req.id otomatis). Serializer dibatasi agar tidak
+// membocorkan header/cookie sensitif; /health di-skip agar tidak bising.
+app.use(pinoHttp({
+  logger,
+  autoLogging: { ignore: (req) => req.url === '/health' },
+  customLogLevel: (req, res, err) => (res.statusCode >= 500 || err ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'),
+  serializers: {
+    req: (req) => ({ method: req.method, url: req.url }),
+    res: (res) => ({ statusCode: res.statusCode }),
+  },
+}));
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
@@ -119,8 +133,8 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  // Log lengkap di server; klien hanya dapat pesan generik (tidak bocorkan stack).
-  console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} —`, err?.stack || err);
+  // Log lengkap (terstruktur) di server; klien hanya dapat pesan generik.
+  (req.log || logger).error({ err, method: req.method, url: req.originalUrl }, 'unhandled error');
   res.status(500).json({ error: 'Terjadi kesalahan server' });
 });
 
@@ -170,5 +184,5 @@ if (isPrimary) {
 }
 
 server.listen(env.port, () => {
-  console.log(`NetWatch backend running on http://localhost:${env.port}`);
+  logger.info(`NetWatch backend running on http://localhost:${env.port} (TZ=${env.appTz})`);
 });
