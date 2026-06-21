@@ -34,7 +34,7 @@ export default function Users() {
   function openEdit(u: User) {
     setEditId(u.id);
     setErr('');
-    setForm({ name: u.name, username: u.username, email: u.email, pin: '', phone: u.phone || '', nip: u.nip || '', roles: u.roles?.length ? u.roles : [u.role], jabatan: u.jabatan || '', perms: u.perms });
+    setForm({ name: u.name, username: u.username, email: u.email, pin: '', phone: u.phone || '', nip: u.nip || '', roles: u.roles?.length ? u.roles : [u.role], jabatan: u.jabatan || '', perms: Array.isArray(u.perms) ? u.perms : [] });
     setOpen(true);
   }
 

@@ -20,7 +20,7 @@ export const NAV_ITEMS: Record<Role, NavEntry[]> = {
     { section: 'Admin' }, { id: 'users', icon: '👥', label: 'Manajemen User' }, { id: 'attendance', icon: '🕒', label: 'Absensi' }, { id: 'diklat', icon: '🎓', label: 'Pengajuan Diklat' }, { id: 'kegiatan-nr', icon: '📝', label: 'Kegiatan Non-Rutin' }, { id: 'dokumen', icon: '📚', label: 'Manajemen Dokumen' }, { id: 'master', icon: '🗂️', label: 'Master Data' }, { id: 'surat', icon: '📤', label: 'Surat Keluar' }, { id: 'laporan-bulanan', icon: '🗓️', label: 'Laporan Bulanan' }, { id: 'pelaporan-qr', icon: '📱', label: 'Pelaporan Fasilitas QR' }, { id: 'wa', icon: '📲', label: 'Log WhatsApp' }, { id: 'settings', icon: '⚙️', label: 'Pengaturan' }, { id: 'publik-reports', icon: '📬', label: 'Laporan Publik' },
   ],
   koordinator: [
-    { section: 'Overview' }, { id: 'coord-dashboard', icon: '📊', label: 'Dashboard' },
+    { section: 'Overview' }, { id: 'dashboard', icon: '📊', label: 'Dashboard' },
     { section: 'Monitoring' }, { id: 'devices', icon: '🖥️', label: 'Perangkat' }, { id: 'monitor', icon: '📡', label: 'Live Monitor' },
     { section: 'Insiden' }, { id: 'incidents', icon: '🚨', label: 'Insiden' }, { id: 'reports', icon: '📋', label: 'Laporan' },
     { section: 'SDM' }, { id: 'jadwal', icon: '📅', label: 'Jadwal Dinas' }, { id: 'performa', icon: '🏆', label: 'Performa Teknisi' }, { id: 'equipment', icon: '🛠️', label: 'Performa Peralatan' },

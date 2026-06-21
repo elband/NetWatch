@@ -4,8 +4,9 @@ import { api } from '../api/client';
 import { getSocket } from '../api/socket';
 import { activityStatusBadge } from '../components/ActivityModal';
 import LocationMap from '../components/LocationMap';
+import { DeviceStatusBadge } from '../components/StatusBadge';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
-import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity } from '../types';
+import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity, PerformaRow } from '../types';
 
 const PURPLE = '#a78bfa';
 const fmtDur = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}j ${min % 60}m` : `${min}m`);
@@ -27,6 +28,7 @@ const fmtAge = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}j ${min % 6
 export default function CoordDashboard() {
   const [data, setData] = useState<CoordData | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [performa, setPerforma] = useState<PerformaRow[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [mapUrl, setMapUrl] = useState<string | null>(null);
   const [services, setServices] = useState<ServiceItem[]>([]);
@@ -34,6 +36,7 @@ export default function CoordDashboard() {
   const [now, setNow] = useState(() => Date.now());
   const [reminding, setReminding] = useState<string | null>(null);
   const [teknisiList, setTeknisiList] = useState<{ id: number; name: string; emoji?: string | null }[]>([]);
+  const [showRincian, setShowRincian] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [acting, setActing] = useState<number | null>(null);
   const [toast, setToast] = useState('');
@@ -43,14 +46,15 @@ export default function CoordDashboard() {
   const prevMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
 
   function load() {
-    api.get('/dashboard/coordinator').then((res) => setData(res.data));
+    api.get('/dashboard/coordinator').then((res) => setData(res.data)).catch(() => {});
     api.get(`/dashboard/coordinator?month=${prevMonth}`).then((res) => setPrev(res.data.performa)).catch(() => {});
     api.get('/dashboard/coordinator-sparkline').then((res) => setSpark(res.data.spark)).catch(() => {});
-    api.get('/devices').then((res) => setDevices(res.data.devices));
-    api.get('/locations').then((res) => { setLocations(res.data.locations); setMapUrl(res.data.mapUrl || null); });
-    api.get('/services').then((res) => setServices(res.data.services));
-    api.get(`/dashboard/monthly?month=${month}`).then((res) => setStats(res.data));
-    api.get('/activities').then((res) => setActivities(res.data.activities));
+    api.get('/devices').then((res) => setDevices(res.data.devices)).catch(() => {});
+    api.get('/performa').then((res) => setPerforma(res.data.performa)).catch(() => {});
+    api.get('/locations').then((res) => { setLocations(res.data.locations); setMapUrl(res.data.mapUrl || null); }).catch(() => {});
+    api.get('/services').then((res) => setServices(res.data.services)).catch(() => {});
+    api.get(`/dashboard/monthly?month=${month}`).then((res) => setStats(res.data)).catch(() => {});
+    api.get('/activities').then((res) => setActivities(res.data.activities)).catch(() => {});
     api.get('/incidents/teknisi-list').then((res) => setTeknisiList(res.data.teknisi || [])).catch(() => {});
   }
 
@@ -187,6 +191,7 @@ export default function CoordDashboard() {
         <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <span className="text-[13px] font-bold">🎯 Performa Koordinator · {monthLabel}</span>
           <div className="flex items-center gap-3">
+            <button onClick={() => setShowRincian(true)} className="border border-accent2/40 text-accent2 rounded-md px-2.5 py-1 text-[11px] font-semibold hover:bg-accent2/10">📊 Rincian</button>
             <button onClick={exportCsv} className="border border-accent/40 text-accent rounded-md px-2.5 py-1 text-[11px] font-semibold hover:bg-accent/10">⬇️ Ekspor</button>
             <span className="text-[10px] text-text2">Ingatkan di {coordSla} mnt · telat bila &gt; {coordBreach} mnt</span>
           </div>
@@ -212,6 +217,107 @@ export default function CoordDashboard() {
           💡 Saat insiden lewat <b>{coordSla} menit</b> belum diambil → pencet <span className="text-warn">🔔 Ingatkan</span>. Insiden dihitung <span className="text-danger">telat</span> bila belum diambil teknisi dalam <b>{coordBreach} menit</b>. Skor mulai 100, −10 tiap telat, +2 tiap diambil tepat waktu, +2 tiap pengingat manual.
         </div>
       </div>
+
+      {/* Rincian performa koordinator */}
+      {showRincian && (() => {
+        const pf = p || { totalIn: 0, taken: 0, takenOnTime: 0, reminders: 0, breaches: 0, avgClaim: 0, score: 100 };
+        const remCounted = Math.min(pf.reminders, 10);
+        const penaltyTelat = pf.breaches * 10;
+        const bonusTepat = pf.takenOnTime * 2;
+        const bonusIngatkan = remCounted * 2;
+        const raw = 100 - penaltyTelat + bonusTepat + bonusIngatkan;
+        const belumDiambil = Math.max(0, pf.totalIn - pf.taken);
+        const claimRate = pf.totalIn ? Math.round((pf.taken / pf.totalIn) * 100) : 0;
+        const onTimeRate = pf.taken ? Math.round((pf.takenOnTime / pf.taken) * 100) : 0;
+        const breachRate = pf.taken ? Math.round((pf.breaches / pf.taken) * 100) : 0;
+        const tiers = [
+          { min: 85, label: 'EXCELLENT', desc: '85–100', color: 'text-success' },
+          { min: 70, label: 'BAIK', desc: '70–84', color: 'text-success' },
+          { min: 40, label: 'CUKUP', desc: '40–69', color: 'text-warn' },
+          { min: 0, label: 'KURANG', desc: '0–39', color: 'text-danger' },
+        ];
+        const Row = ({ label, val, hint, color = '' }: { label: string; val: string; hint?: string; color?: string }) => (
+          <div className="flex items-center justify-between py-1.5 border-b border-border/40 last:border-0">
+            <div><div className="text-[12px]">{label}</div>{hint && <div className="text-[10px] text-text2">{hint}</div>}</div>
+            <div className={`text-[13px] font-bold font-mono ${color}`}>{val}</div>
+          </div>
+        );
+        return (
+          <div className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-4" onClick={() => setShowRincian(false)}>
+            <div className="bg-surface border border-border rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 border-b border-border shrink-0">
+                <span className="text-sm font-bold">📊 Rincian Performa Koordinator · {monthLabel}</span>
+                <button onClick={() => setShowRincian(false)} className="text-text2 hover:text-white text-lg leading-none shrink-0">×</button>
+              </div>
+              {/* Body */}
+              <div className="px-5 py-4 overflow-y-auto flex-1 space-y-4">
+                {/* Skor hero */}
+                <div className="flex items-center gap-4 bg-surface2/60 border border-border rounded-lg p-3">
+                  <div className="relative w-[84px] h-[84px] flex-shrink-0">
+                    <div className="w-full h-full rounded-full" style={{ background: `conic-gradient(${scoreRing} ${score * 3.6}deg, var(--color-border) 0deg)` }} />
+                    <div className="absolute inset-[9px] rounded-full bg-surface flex flex-col items-center justify-center">
+                      <div className={`text-2xl font-extrabold ${scoreColor}`}>{score}</div>
+                      <div className="text-[8px] font-bold" style={{ color: scoreRing }}>{scoreMeta(score).label}</div>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-text2 leading-relaxed">
+                    Skor dihitung dari ketepatan tim mengambil insiden dalam <b>{coordBreach} menit</b> dan pengingat yang Anda kirim. Skor akhir dibatasi pada rentang <b>0–100</b>.
+                  </div>
+                </div>
+
+                {/* Perhitungan skor */}
+                <div>
+                  <div className="text-[11px] font-bold text-text2 uppercase tracking-wide mb-1">🧮 Perhitungan Skor</div>
+                  <div className="bg-surface2/40 border border-border rounded-lg px-3 py-1">
+                    <Row label="Skor dasar" val="100" />
+                    <Row label={`Telat ambil (>${coordBreach}m)`} hint={`${pf.breaches} insiden × −10`} val={`−${penaltyTelat}`} color="text-danger" />
+                    <Row label={`Diambil tepat (≤${coordBreach}m)`} hint={`${pf.takenOnTime} insiden × +2`} val={`+${bonusTepat}`} color="text-success" />
+                    <Row label="Pengingat manual" hint={`${remCounted} dihitung${pf.reminders > 10 ? ` (dari ${pf.reminders}, maks 10)` : ''} × +2`} val={`+${bonusIngatkan}`} color="text-warn" />
+                    <Row label="Subtotal" val={`${raw}`} color="text-text" />
+                    <Row label="Skor akhir (dibatasi 0–100)" val={`${score}`} color={scoreColor} />
+                  </div>
+                  {pf.reminders > 10 && <div className="text-[10px] text-text2 mt-1">ℹ️ Bonus pengingat dibatasi maksimal 10 pengingat (+20). Sisanya tidak menambah skor.</div>}
+                </div>
+
+                {/* Tingkat efisiensi */}
+                <div>
+                  <div className="text-[11px] font-bold text-text2 uppercase tracking-wide mb-1">📈 Tingkat Efisiensi</div>
+                  <div className="bg-surface2/40 border border-border rounded-lg px-3 py-1">
+                    <Row label="Total tiket masuk" val={`${pf.totalIn}`} />
+                    <Row label="Tingkat pengambilan" hint={`${pf.taken} dari ${pf.totalIn} tiket diambil`} val={`${claimRate}%`} color={claimRate >= 80 ? 'text-success' : claimRate >= 50 ? 'text-warn' : 'text-danger'} />
+                    <Row label="Ketepatan waktu" hint={`${pf.takenOnTime} dari ${pf.taken} diambil tepat waktu`} val={`${onTimeRate}%`} color={onTimeRate >= 80 ? 'text-success' : onTimeRate >= 50 ? 'text-warn' : 'text-danger'} />
+                    <Row label="Tingkat keterlambatan" hint={`${pf.breaches} dari ${pf.taken} diambil telat`} val={`${breachRate}%`} color={breachRate <= 20 ? 'text-success' : breachRate <= 50 ? 'text-warn' : 'text-danger'} />
+                    <Row label="Belum diambil" hint="tiket tanpa teknisi" val={`${belumDiambil}`} color={belumDiambil > 0 ? 'text-accent2' : 'text-text2'} />
+                    <Row label="Rata-rata waktu ambil" hint="sejak insiden dibuat" val={`${pf.avgClaim}m`} color="text-warn" />
+                  </div>
+                </div>
+
+                {/* Skala penilaian */}
+                <div>
+                  <div className="text-[11px] font-bold text-text2 uppercase tracking-wide mb-1">🏅 Skala Penilaian</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {tiers.map((t) => {
+                      const active = scoreMeta(score).label === t.label;
+                      return (
+                        <div key={t.label} className={`rounded-lg border px-3 py-2 ${active ? 'border-accent bg-accent/10' : 'border-border bg-surface2/40'}`}>
+                          <div className={`text-[12px] font-bold ${t.color}`}>{t.label} {active && '← Anda'}</div>
+                          <div className="text-[10px] text-text2">Skor {t.desc}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              {/* Footer */}
+              <div className="px-5 py-3 border-t border-border shrink-0 flex justify-end gap-2">
+                <button onClick={exportCsv} className="border border-accent/40 text-accent rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-accent/10">⬇️ Ekspor CSV</button>
+                <button onClick={() => setShowRincian(false)} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">Tutup</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Monitoring infrastruktur — di bawah performa */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -283,6 +389,28 @@ export default function CoordDashboard() {
           )}
         </Panel>
       </div>
+
+      {/* Perangkat bermasalah (dari dashboard admin) */}
+      <Panel title="⚠️ PERANGKAT BERMASALAH" right={<Link to="/devices" className="text-[11px] text-text2 hover:text-white">Semua →</Link>}>
+        {devices.filter((d) => d.status !== 'online').length === 0 ? (
+          <div className="text-center py-4 text-success text-xs">✅ Semua perangkat online.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-text2 uppercase text-[10px] border-b border-border"><th className="px-3.5 py-2 text-left">Nama</th><th className="px-3.5 py-2 text-left">IP</th><th className="px-3.5 py-2 text-left">Status</th></tr></thead>
+              <tbody>
+                {devices.filter((d) => d.status !== 'online').map((d) => (
+                  <tr key={d.id} className="border-b border-border/50">
+                    <td className="px-3.5 py-2"><strong>{d.name}</strong></td>
+                    <td className="px-3.5 py-2 font-mono">{d.ip}</td>
+                    <td className="px-3.5 py-2"><DeviceStatusBadge status={d.status} offReason={d.off_reason} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
 
       {/* Statistik — satu kartu */}
       <div className="bg-surface border border-border rounded-xl grid grid-cols-2 md:grid-cols-5 divide-x divide-border/60">
@@ -387,6 +515,25 @@ export default function CoordDashboard() {
         </div>
       </Panel>
 
+      {/* Performa teknisi (dari dashboard admin) */}
+      <Panel title="🏆 PERFORMA TEKNISI" right={<Link to="/performa" className="text-[11px] text-text2 hover:text-white">Detail →</Link>}>
+        {performa.length === 0 ? (
+          <div className="text-center py-4 text-text2 text-xs">Belum ada data performa.</div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 nw-stagger">
+            {performa.map((p) => (
+              <div key={p.techId} className="nw-card bg-surface2 border border-border rounded-lg p-3 text-center">
+                <div className="text-2xl mb-1">{p.emoji}</div>
+                <div className="text-xs font-semibold">{p.name.split(' ')[0]}</div>
+                <div className="text-[10px] text-text2 mb-2">{p.jabatan}</div>
+                <div className={`text-xl font-bold ${p.score >= 70 ? 'text-success' : p.score >= 40 ? 'text-warn' : 'text-danger'}`}>{p.score}</div>
+                <div className="text-[9px] text-text2">Skor Performa</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
       {/* Analitik tambahan */}
       {(() => {
         const tot = (p?.takenOnTime ?? 0) + (p?.breaches ?? 0);
@@ -445,9 +592,11 @@ function Bars({ data, color }: { data: number[]; color: string }) {
 }
 
 function Line({ data, color }: { data: number[]; color: string }) {
+  if (!data?.length) return null;
   const max = Math.max(...data), min = Math.min(...data);
   const range = max - min || 1;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${30 - ((v - min) / range) * 28}`).join(' ');
+  const denom = data.length > 1 ? data.length - 1 : 1; // hindari pembagian 0 (NaN) untuk 1 titik
+  const pts = data.map((v, i) => `${(i / denom) * 100},${30 - ((v - min) / range) * 28}`).join(' ');
   return (
     <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-14 mt-1">
       <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />

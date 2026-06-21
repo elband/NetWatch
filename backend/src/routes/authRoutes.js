@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { login, loginPin, me, loginAs, updateProfile } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/auth.js';
+import { authLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -17,8 +18,8 @@ const upload = multer({
   fileFilter: (q, f, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(f.mimetype)),
 });
 
-router.post('/login', login);
-router.post('/login-pin', loginPin);
+router.post('/login', authLimiter, login);
+router.post('/login-pin', authLimiter, loginPin);
 router.get('/me', requireAuth, me);
 router.put('/profile', requireAuth, upload.single('photo'), updateProfile);
 router.post('/login-as/:id', requireAuth, loginAs);

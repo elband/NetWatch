@@ -28,7 +28,8 @@ export default function Devices() {
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState('');
   const canEdit = hasRole(user, 'admin', 'koordinator');
-  const canEditDevice = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh edit (bukan tambah/hapus)
+  const canEditDevice = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh edit (bukan hapus)
+  const canAdd = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh tambah perangkat
   const canAlarm = hasRole(user, 'admin', 'koordinator', 'teknisi');
 
   async function requestAlarm(d: Device) {
@@ -149,7 +150,7 @@ export default function Devices() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          {canEdit && (
+          {canAdd && (
             <button onClick={openAdd} className="bg-accent text-bg rounded-md px-3 py-2 text-xs font-semibold whitespace-nowrap">
               + Tambah Perangkat
             </button>

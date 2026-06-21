@@ -4,9 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import PanduanModal from '../components/PanduanModal';
 
 const QUICK_LOGINS = [
-  { label: 'Admin', pin: '111111', emoji: '👑' },
-  { label: 'Siti', pin: '222222', emoji: '👩‍💼' },
-  { label: 'Budi', pin: '333333', emoji: '👨‍💻' },
+  { label: 'Admin', pin: '222222', emoji: '👑' },
+  { label: 'Teknisi (Okta)', pin: '333333', emoji: '🔧' },
+  { label: 'Teknisi (Alex)', pin: '444444', emoji: '🔧' },
   { label: 'Viewer', pin: '777777', emoji: '👁️' },
 ];
 

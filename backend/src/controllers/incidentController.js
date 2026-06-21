@@ -204,7 +204,11 @@ export async function takeIncident(req, res) {
     if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai' });
     if (incident.tech_id) return res.status(409).json({ error: 'Insiden sudah diambil teknisi lain' });
 
-    if (req.user.role === 'teknisi') {
+    // Gate on-duty untuk teknisi (cek array roles, bukan hanya peran utama).
+    // Koordinator/admin dikecualikan agar tetap bisa menugaskan/mengambil kapan saja.
+    const takerRoles = req.user.roles?.length ? req.user.roles : [req.user.role];
+    const isManager = takerRoles.some((r) => r === 'admin' || r === 'koordinator');
+    if (!isManager) {
       const { onDuty } = await getDutyStatus(conn, req.user.id);
       if (!onDuty) return res.status(403).json({ error: 'Anda sedang tidak on-duty, tidak bisa mengambil insiden' });
     }

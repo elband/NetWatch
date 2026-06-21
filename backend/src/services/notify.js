@@ -41,7 +41,7 @@ export async function createNotification({ userId, title, message = null, type, 
     try {
       const [[c]] = await pool.query('SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND is_read = 0', [userId]);
       _io.to(`user:${userId}`).emit('notification:new', { notification: row, unread: c.c });
-    } catch { /* abaikan kegagalan emit */ }
+    } catch (e) { console.warn('[notify] gagal emit real-time:', e?.message); }
   }
   return row;
 }

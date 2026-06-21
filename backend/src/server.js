@@ -1,11 +1,14 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
 import http from 'http';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { env } from './config/env.js';
+import { apiLimiter } from './middleware/rateLimit.js';
 import { verifyTte } from './controllers/incidentController.js';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
@@ -36,13 +39,21 @@ import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
 
 const app = express();
+// Di belakang reverse proxy (Nginx): percayai X-Forwarded-* agar IP klien & rate-limit benar.
+app.set('trust proxy', 1);
+// Security headers. CSP dimatikan di sini (di-tune di Nginx) agar SPA/iframe tidak rusak;
+// HSTS hanya efektif saat diakses via HTTPS.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(compression());
 app.use(cors({ origin: env.corsOrigin }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+// Rate limit umum untuk seluruh API.
+app.use('/api', apiLimiter);
 // Verifikasi publik TTE (tanpa auth) — dipindai dari QR.
 app.get('/api/verify-tte/:token', verifyTte);
 // Halaman TTD Kepala Seksi (tanpa auth) — diakses via tautan WA.
@@ -82,7 +93,9 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use((err, req, res, next) => {
-  console.error(err);
+  if (res.headersSent) return next(err);
+  // Log lengkap di server; klien hanya dapat pesan generik (tidak bocorkan stack).
+  console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} —`, err?.stack || err);
   res.status(500).json({ error: 'Terjadi kesalahan server' });
 });
 
@@ -91,22 +104,31 @@ const io = new Server(server, { cors: { origin: env.corsOrigin } });
 app.set('io', io); // agar route biasa bisa emit (mis. notifikasi maintenance selesai)
 setNotifyIo(io); // Notification Center: kirim notifikasi real-time per-user
 
+function joinUserRoom(socket, token) {
+  try {
+    const u = jwt.verify(String(token || ''), env.jwtSecret, { algorithms: ['HS256'] });
+    if (u?.id) socket.join(`user:${u.id}`);
+  } catch { /* token tidak valid — abaikan */ }
+}
+
 io.on('connection', (socket) => {
-  // Klien mengirim JWT-nya → join room user:{id} agar notifikasi tersampaikan ke user yang tepat.
-  socket.on('notif:auth', (token) => {
-    try {
-      const u = jwt.verify(String(token || ''), env.jwtSecret);
-      if (u?.id) socket.join(`user:${u.id}`);
-    } catch { /* token tidak valid — abaikan */ }
-  });
+  // Dukung dua cara kirim token: handshake.auth (standar) atau event notif:auth (lama).
+  if (socket.handshake.auth?.token) joinUserRoom(socket, socket.handshake.auth.token);
+  socket.on('notif:auth', (token) => joinUserRoom(socket, token));
   socket.on('disconnect', () => {});
 });
 
 attachSshNamespace(io);
-startPingWorker(io);
-startWaWorker(io);
-startCoordWatcher(io);
-await schedulePingSweep();
+// Worker latar belakang & penjadwal hanya jalan di SATU instance (PM2 primary),
+// agar tidak terjadi duplikasi ping/notifikasi saat di-scale ke cluster.
+// NODE_APP_INSTANCE di-set PM2 cluster; undefined saat fork tunggal.
+const isPrimary = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
+if (isPrimary) {
+  startPingWorker(io);
+  startWaWorker(io);
+  startCoordWatcher(io);
+  await schedulePingSweep();
+}
 
 server.listen(env.port, () => {
   console.log(`NetWatch backend running on http://localhost:${env.port}`);

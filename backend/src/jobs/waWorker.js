@@ -15,7 +15,7 @@ export function startWaWorker(io) {
       io?.emit('wa:sent', rows[0]);
       return { ok: true };
     },
-    { connection: redisConnection }
+    { connection: redisConnection, concurrency: 3 }
   );
 
   worker.on('failed', async (job, err) => {

@@ -16,10 +16,12 @@ const ROLE_COLOR: Record<string, string> = {
 const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi · 05.00–13.00', siang: 'Siang · 12.00–20.00', malam: 'Malam · 20.00–05.00' };
 const ROLE_ORDER: Role[] = ['admin', 'koordinator', 'teknisi', 'viewer'];
 
-// Gabungkan menu dari semua peran user: item unik per id, dikelompokkan per
+// Gabungkan menu dari semua peran user: item unik per id (dan per label, agar
+// "Dashboard" admin & koordinator tidak muncul dobel), dikelompokkan per
 // section (kemunculan pertama), section kosong dibuang.
 function mergedNav(roles: Role[]): NavEntry[] {
   const seen = new Set<string>();
+  const seenLabels = new Set<string>();
   const groups = new Map<string, Extract<NavEntry, { id: string }>[]>();
   const order: string[] = [];
   let cur = 'Menu';
@@ -29,8 +31,9 @@ function mergedNav(roles: Role[]): NavEntry[] {
       if ('section' in e && e.section) {
         cur = e.section;
         if (!groups.has(cur)) { groups.set(cur, []); order.push(cur); }
-      } else if ('id' in e && !seen.has(e.id)) {
+      } else if ('id' in e && !seen.has(e.id) && !seenLabels.has(e.label)) {
         seen.add(e.id);
+        seenLabels.add(e.label);
         if (!groups.has(cur)) { groups.set(cur, []); order.push(cur); }
         groups.get(cur)!.push(e);
       }

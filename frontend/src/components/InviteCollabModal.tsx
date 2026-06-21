@@ -11,7 +11,7 @@ export default function InviteCollabModal({ incident, onClose, onDone }: { incid
   const [msg, setMsg] = useState('');
   const already = new Set((incident.collaborators || []).map((c) => c.user_id));
 
-  useEffect(() => { api.get('/incidents/teknisi-list').then((r) => setTechs(r.data.teknisi)).catch(() => {}); }, []);
+  useEffect(() => { api.get('/incidents/teknisi-list').then((r) => setTechs(r.data.teknisi || [])).catch(() => {}); }, []);
   const toggle = (id: number) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   async function submit() {

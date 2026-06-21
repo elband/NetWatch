@@ -20,7 +20,7 @@ export async function queueWaNotification({ type, toUserId, message, relatedInci
   await waQueue.add(
     'send',
     { waLogId, phone, message },
-    { attempts: 5, backoff: { type: 'exponential', delay: 5000 } }
+    { attempts: 5, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } }
   );
 
   return waLogId;
@@ -34,6 +34,6 @@ export async function queueWaRaw({ type = 'other', toLabel, phone, message, rela
     [type, toLabel || phone || 'Eksternal', phone || null, message, relatedIncidentId || null]
   );
   const waLogId = result.insertId;
-  await waQueue.add('send', { waLogId, phone, message }, { attempts: 5, backoff: { type: 'exponential', delay: 5000 } });
+  await waQueue.add('send', { waLogId, phone, message }, { attempts: 5, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } });
   return waLogId;
 }

@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { hasRole } from './utils/roles';
 import RequireAuth from './components/RequireAuth';
+import ProtectedRoute from './components/ProtectedRoute';
 import AppLayout from './components/AppLayout';
 import Login from './pages/Login';
 import LaporPublik from './pages/LaporPublik';
@@ -35,8 +37,15 @@ import PelaporanQR from './pages/PelaporanQR';
 function HomeRedirect() {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  const home = user.role === 'teknisi' ? '/my-dashboard' : user.role === 'koordinator' ? '/coord-dashboard' : '/dashboard';
+  const home = user.role === 'teknisi' ? '/my-dashboard' : '/dashboard';
   return <Navigate to={home} replace />;
+}
+
+// Dashboard gabungan: admin & koordinator melihat satu halaman lengkap
+// (CoordDashboard + bagian unik dashboard admin); viewer tetap versi ringkas.
+function DashboardRoute() {
+  const { user } = useAuth();
+  return hasRole(user, 'admin', 'koordinator') ? <CoordDashboard /> : <Dashboard />;
 }
 
 export default function App() {
@@ -49,31 +58,44 @@ export default function App() {
       <Route path="/ttd-pelaksana" element={<TtdPelaksana />} />
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
+          {/* Terbuka untuk semua user terautentikasi */}
           <Route path="/" element={<HomeRedirect />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<DashboardRoute />} />
           <Route path="/my-dashboard" element={<MyDashboard />} />
-          <Route path="/coord-dashboard" element={<CoordDashboard />} />
+          <Route path="/coord-dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route path="/devices" element={<Devices />} />
           <Route path="/monitor" element={<Monitor />} />
-          <Route path="/incidents" element={<Incidents />} />
           <Route path="/my-incidents" element={<MyIncidents />} />
-          <Route path="/reports" element={<Reports />} />
           <Route path="/jadwal" element={<Jadwal />} />
-          <Route path="/performa" element={<Performa />} />
-          <Route path="/users" element={<Users />} />
-          <Route path="/wa" element={<WaLog />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/publik-reports" element={<PublicReports />} />
-          <Route path="/master" element={<MasterData />} />
-          <Route path="/ssh" element={<SshTerminal />} />
           <Route path="/equipment" element={<EquipmentPerf />} />
-          <Route path="/surat" element={<SuratKeluar />} />
-          <Route path="/laporan-bulanan" element={<LaporanBulanan />} />
-          <Route path="/attendance" element={<Attendance />} />
           <Route path="/diklat" element={<Diklat />} />
           <Route path="/dokumen" element={<Dokumen />} />
           <Route path="/kegiatan-nr" element={<KegiatanNonRutin />} />
-          <Route path="/pelaporan-qr" element={<PelaporanQR />} />
+
+          {/* SSH: admin/koordinator/teknisi (bukan viewer) */}
+          <Route element={<ProtectedRoute roles={['admin', 'koordinator', 'teknisi']} />}>
+            <Route path="/ssh" element={<SshTerminal />} />
+          </Route>
+
+          {/* Manajer: admin & koordinator */}
+          <Route element={<ProtectedRoute roles={['admin', 'koordinator']} />}>
+            <Route path="/incidents" element={<Incidents />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/performa" element={<Performa />} />
+            <Route path="/wa" element={<WaLog />} />
+            <Route path="/publik-reports" element={<PublicReports />} />
+            <Route path="/surat" element={<SuratKeluar />} />
+            <Route path="/laporan-bulanan" element={<LaporanBulanan />} />
+            <Route path="/attendance" element={<Attendance />} />
+            <Route path="/pelaporan-qr" element={<PelaporanQR />} />
+          </Route>
+
+          {/* Admin saja */}
+          <Route element={<ProtectedRoute roles={['admin']} />}>
+            <Route path="/users" element={<Users />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/master" element={<MasterData />} />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

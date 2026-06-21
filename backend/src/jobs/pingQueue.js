@@ -12,18 +12,24 @@ export async function schedulePingSweep() {
     {
       repeat: { every: env.pingIntervalMs },
       jobId: 'recurring-ping-sweep',
+      attempts: 2,                       // coba ulang sekali bila sweep gagal
+      backoff: { type: 'fixed', delay: 2000 },
       removeOnComplete: true,
-      removeOnFail: true,
+      removeOnFail: { count: 50 },       // simpan 50 kegagalan terakhir untuk diagnosa
     }
   );
 }
 
 export function startPingWorker(io) {
-  return new Worker(
+  const worker = new Worker(
     'device-ping-sweep',
     async () => {
       await checkAllDevices(io);
     },
-    { connection: redisConnection }
+    { connection: redisConnection, concurrency: 1 }
   );
+  // Tanpa handler ini, sweep yang melempar error hilang tanpa jejak (removeOnFail).
+  worker.on('failed', (job, err) => console.error('[pingSweep] gagal:', err?.message));
+  worker.on('error', (err) => console.error('[pingWorker] error:', err?.message));
+  return worker;
 }

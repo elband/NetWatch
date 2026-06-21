@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool.js';
 import { env } from '../config/env.js';
+import { audit } from '../services/audit.js';
 
 function toPublicUser(u) {
   let roles;
@@ -10,6 +11,13 @@ function toPublicUser(u) {
     roles = Array.isArray(parsed) && parsed.length ? parsed : [u.role];
   } catch {
     roles = [u.role];
+  }
+  let perms;
+  try {
+    const parsed = typeof u.perms === 'string' ? JSON.parse(u.perms) : u.perms;
+    perms = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    perms = [];
   }
   return {
     id: u.id,
@@ -24,13 +32,13 @@ function toPublicUser(u) {
     emoji: u.emoji,
     avatar_url: u.avatar_url ?? null,
     active: !!u.active,
-    perms: typeof u.perms === 'string' ? JSON.parse(u.perms) : u.perms,
+    perms,
   };
 }
 
 function signToken(u) {
   const pub = toPublicUser(u);
-  return jwt.sign(pub, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
+  return jwt.sign(pub, env.jwtSecret, { expiresIn: env.jwtExpiresIn, algorithm: 'HS256' });
 }
 
 export async function login(req, res) {
@@ -102,11 +110,15 @@ export async function updateProfile(req, res) {
 }
 
 export async function loginAs(req, res) {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Hanya admin yang bisa login-as' });
+  // Cek peran admin pada SELURUH peran (bukan hanya role utama).
+  const roles = req.user?.roles?.length ? req.user.roles : (req.user?.role ? [req.user.role] : []);
+  if (!roles.includes('admin')) return res.status(403).json({ error: 'Hanya admin yang bisa login-as' });
   const targetId = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM users WHERE id = ? AND active = 1', [targetId]);
   const target = rows[0];
   if (!target) return res.status(404).json({ error: 'User tidak ditemukan atau nonaktif' });
+  // Jejak audit non-repudiation: siapa menyamar jadi siapa.
+  await audit(req.user, 'login_as', 'user', target.id, `${req.user.name} login-as ${target.name} (${target.username})`);
   const token = signToken(target);
   res.json({ token, user: toPublicUser(target) });
 }

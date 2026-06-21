@@ -1,19 +1,43 @@
-# NetWatch — Nginx reverse proxy configuration example
+# NetWatch — Nginx reverse proxy (PRODUCTION)
 # Place at: /etc/nginx/sites-available/netwatch
-# Enable: ln -s /etc/nginx/sites-available/netwatch /etc/nginx/sites-enabled/
-# Then: nginx -t && systemctl reload nginx
+# Enable:   ln -s /etc/nginx/sites-available/netwatch /etc/nginx/sites-enabled/
+# TLS cert: certbot --nginx -d netwatch.example.com
+# Test+reload: nginx -t && systemctl reload nginx
 
+# Rate-limit zone untuk endpoint login (lapisan kedua selain rate-limit aplikasi).
+# Letakkan di http{} (mis. /etc/nginx/nginx.conf) bila blok ini ditolak di server{}.
+limit_req_zone $binary_remote_addr zone=netwatch_login:10m rate=5r/m;
+
+# ── HTTP → paksa ke HTTPS ────────────────────────────────
 server {
     listen 80;
     server_name netwatch.example.com;
+    return 301 https://$host$request_uri;
+}
 
-    # Redirect HTTP → HTTPS (uncomment after obtaining SSL cert)
-    # return 301 https://$host$request_uri;
+# ── HTTPS ────────────────────────────────────────────────
+server {
+    listen 443 ssl http2;
+    server_name netwatch.example.com;
 
-    # Upload size limit (incident photos, inspection docs)
-    client_max_body_size 20M;
+    server_tokens off;                       # sembunyikan versi nginx
+    client_max_body_size 20M;                # batas upload (foto insiden/dok)
 
-    # Static uploaded files — serve directly without hitting Node
+    ssl_certificate     /etc/letsencrypt/live/netwatch.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/netwatch.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # ── Security headers ─────────────────────────────────
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # CSP — tune dulu di staging sebelum diaktifkan (aplikasi pakai inline style & data: URI).
+    # add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss:; frame-src 'self'" always;
+
+    # Static uploaded files — dilayani langsung tanpa membebani Node.
     location /uploads/ {
         alias /var/www/netwatch/backend/uploads/;
         expires 7d;
@@ -27,10 +51,24 @@ server {
         proxy_set_header   Upgrade $http_upgrade;
         proxy_set_header   Connection "upgrade";
         proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 3600s;
     }
 
-    # All other traffic → Express (API + SPA)
+    # Rate-limit khusus endpoint login (burst kecil diizinkan).
+    location ~ ^/api/auth/login {
+        limit_req zone=netwatch_login burst=5 nodelay;
+        proxy_pass         http://127.0.0.1:4000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    # API + SPA → Express
     location / {
         proxy_pass         http://127.0.0.1:4000;
         proxy_http_version 1.1;
@@ -41,39 +79,3 @@ server {
         proxy_read_timeout 120s;
     }
 }
-
-# HTTPS block (uncomment and fill in after: certbot --nginx -d netwatch.example.com)
-# server {
-#     listen 443 ssl http2;
-#     server_name netwatch.example.com;
-#     ssl_certificate     /etc/letsencrypt/live/netwatch.example.com/fullchain.pem;
-#     ssl_certificate_key /etc/letsencrypt/live/netwatch.example.com/privkey.pem;
-#     include /etc/letsencrypt/options-ssl-nginx.conf;
-#
-#     client_max_body_size 20M;
-#
-#     location /uploads/ {
-#         alias /var/www/netwatch/backend/uploads/;
-#         expires 7d;
-#         add_header Cache-Control "public";
-#     }
-#
-#     location /socket.io/ {
-#         proxy_pass         http://127.0.0.1:4000;
-#         proxy_http_version 1.1;
-#         proxy_set_header   Upgrade $http_upgrade;
-#         proxy_set_header   Connection "upgrade";
-#         proxy_set_header   Host $host;
-#         proxy_cache_bypass $http_upgrade;
-#     }
-#
-#     location / {
-#         proxy_pass         http://127.0.0.1:4000;
-#         proxy_http_version 1.1;
-#         proxy_set_header   Host              $host;
-#         proxy_set_header   X-Real-IP         $remote_addr;
-#         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-#         proxy_set_header   X-Forwarded-Proto $scheme;
-#         proxy_read_timeout 120s;
-#     }
-# }

@@ -15,7 +15,10 @@ async function getThresholds() {
     "SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('threshold_ping_timeout_ms','threshold_cpu','threshold_mem')"
   );
   const map = {};
-  for (const r of rows) map[r.setting_key] = JSON.parse(r.setting_value);
+  for (const r of rows) {
+    try { map[r.setting_key] = typeof r.setting_value === 'string' ? JSON.parse(r.setting_value) : r.setting_value; }
+    catch { map[r.setting_key] = r.setting_value; }
+  }
   return {
     pingTimeoutMs: map.threshold_ping_timeout_ms ?? 3000,
     cpu: map.threshold_cpu ?? 80,

@@ -249,7 +249,8 @@ function BulkModal({ onClose, onSaved, rooms }: { onClose: () => void; onSaved: 
   async function printAll() {
     const items = await Promise.all(rooms.filter((r) => r.active).map(async (r) => ({ r, url: await QRCode.toDataURL(publicUrl(r.kode), { width: 200, margin: 1 }) })));
     const w = window.open('', '_blank'); if (!w) return;
-    const cells = items.map(({ r, url }) => `<div style="border:1px solid #333;border-radius:8px;padding:10px;text-align:center;break-inside:avoid"><div style="font-size:10px;color:#0a5">SCAN LAPOR GANGGUAN</div><b style="font-size:12px">${r.nama}</b><div style="font-size:9px;color:#555">${r.gedung || ''} ${r.area || ''}</div><img src="${url}" style="width:150px;height:150px"><div style="font-family:monospace;font-size:9px;color:#555">${r.kode}</div></div>`).join('');
+    const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const cells = items.map(({ r, url }) => `<div style="border:1px solid #333;border-radius:8px;padding:10px;text-align:center;break-inside:avoid"><div style="font-size:10px;color:#0a5">SCAN LAPOR GANGGUAN</div><b style="font-size:12px">${esc(r.nama)}</b><div style="font-size:9px;color:#555">${esc(r.gedung || '')} ${esc(r.area || '')}</div><img src="${esc(url)}" style="width:150px;height:150px"><div style="font-family:monospace;font-size:9px;color:#555">${esc(r.kode)}</div></div>`).join('');
     w.document.write(`<!doctype html><html><head><title>QR Ruangan</title></head><body style="font-family:Arial"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px">${cells}</div></body></html>`);
     w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
   }

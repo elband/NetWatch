@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { pool } from '../db/pool.js';
 import { toPublicUser } from './authController.js';
+import { audit } from '../services/audit.js';
 
 const EMOJI_MAP = { admin: '👑', koordinator: '👨‍💼', teknisi: '🔧', viewer: '👁️' };
 const VALID_ROLES = ['admin', 'koordinator', 'teknisi', 'viewer'];
@@ -55,6 +56,7 @@ export async function createUser(req, res) {
       [name, username, email, hash, pinRes.hash, phone || null, nip || null, primary, JSON.stringify(roleList), jabatan || null, emoji, JSON.stringify(perms || [])]
     );
     const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
+    await audit(req.user, 'create_user', 'user', result.insertId, `Buat user ${username} (peran: ${roleList.join(',')})`);
     res.status(201).json({ user: withHasPin(rows[0]) });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Username atau email sudah dipakai' });
@@ -113,19 +115,21 @@ export async function updateUser(req, res) {
   }
 
   const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+  await audit(req.user, 'update_user', 'user', id, `Ubah user ${fields.username}${password ? ' (+password)' : ''}${pin ? ' (+PIN)' : ''}${roleList ? ` (peran: ${roleList.join(',')})` : ''}`);
   res.json({ user: withHasPin(rows[0]) });
 }
 
 export async function deleteUser(req, res) {
   const id = Number(req.params.id);
   if (id === req.user.id) return res.status(400).json({ error: 'Tidak dapat menghapus akun Anda sendiri.' });
-  const [rows] = await pool.query('SELECT id, name FROM users WHERE id = ?', [id]);
+  const [rows] = await pool.query('SELECT id, name, username FROM users WHERE id = ?', [id]);
   if (!rows[0]) return res.status(404).json({ error: 'User tidak ditemukan' });
   try {
     await pool.query('DELETE FROM users WHERE id = ?', [id]);
   } catch {
     return res.status(409).json({ error: 'Akun tidak bisa dihapus karena masih tertaut data. Nonaktifkan saja.' });
   }
+  await audit(req.user, 'delete_user', 'user', id, `Hapus user ${rows[0].username} (${rows[0].name})`);
   res.json({ ok: true });
 }
 
@@ -136,5 +140,6 @@ export async function toggleUserActive(req, res) {
   const newActive = rows[0].active ? 0 : 1;
   await pool.query('UPDATE users SET active = ? WHERE id = ?', [newActive, id]);
   const [updated] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+  await audit(req.user, newActive ? 'activate_user' : 'deactivate_user', 'user', id, `${newActive ? 'Aktifkan' : 'Nonaktifkan'} user ${rows[0].username}`);
   res.json({ user: withHasPin(updated[0]) });
 }

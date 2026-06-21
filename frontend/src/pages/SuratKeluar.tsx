@@ -52,67 +52,6 @@ export default function SuratKeluar() {
   const ZOOM_STEPS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
   const [zoomIdx, setZoomIdx] = useState(5); // default 0.85
 
-  // Hasilkan HTML dokumen LKP lengkap (sama persis dengan cetak dari IncidentReportModal).
-  // Settings menyimpan dengan field: kepala_jabatan/nama/nip, fasilitas — akses via cast any.
-  function buildLkpDocHtml(inc: Incident, qr: string): string {
-    const report = inc.report;
-    const cfg = lkp as Record<string, string>; // settings gunakan kepala_* & fasilitas
-    const esc = (s: unknown) => String(s || '-').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-    const dt = (s?: string | null) => (s ? new Date(s.replace(' ', 'T')) : null);
-    const dmy = (s?: string | null) => { const d = dt(s); return d ? d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'; };
-    const dshort = (s?: string | null) => { const d = dt(s); return d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}` : '-'; };
-    const jam = (s?: string | null) => { const d = dt(s); return d ? d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '-'; };
-    const dur = inc.duration_min || 0;
-    const durTxt = dur ? `${Math.floor(dur / 60)} Jam ${dur % 60} menit` : '-';
-    const kategori = inc.priority === 'kritis' || inc.priority === 'tinggi' ? 'RB' : 'RR';
-    const kodeHambatan = inc.awaiting_part ? 'SC' : 'TH';
-    const tgl = inc.resolved_at || inc.created_at;
-    const signerNama = report?.signer_name || cfg.koord_nama;
-    const signerNip = report?.signer_nip || cfg.koord_nip;
-    const token = report?.sign_token || '';
-    const fotos = (inc.notes || []).filter((n) => n.doc_url);
-    const img = (u: string, max = 300) => `<img src="${location.origin}${u}" style="max-width:100%;max-height:${max}px;object-fit:contain;border:1px solid #ddd">`;
-    const awal = fotos[0];
-    const sesudah = fotos.find((n) => /selesai|normal kembali|teratasi|diperbaiki/i.test(n.note)) || (fotos.length > 1 ? fotos[fotos.length - 1] : null);
-    const tteBlock = token
-      ? `<div style="margin:6px auto;width:120px"><img src="${qr}" style="width:108px;height:108px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:8px;color:#444">Token: ${esc(token)}</div><div style="font-size:7px;color:#666">Pindai untuk verifikasi</div></div>`
-      : `<div style="margin:14px 0;font-size:10px;color:#999">(Belum disahkan TTE koordinator)</div>`;
-    const sigBlock = `<table class="sig"><tr>
-      <td style="width:50%;vertical-align:top">Diperiksa Oleh :<br><b>${esc(cfg.kepala_jabatan || cfg.kasie_jabatan)}</b><br>${esc(cfg.kantor)}<br><br><br><br><u><b>${esc(cfg.kepala_nama || cfg.kasie_nama)}</b></u><br>NIP. ${esc(cfg.kepala_nip || cfg.kasie_nip)}</td>
-      <td style="width:50%;vertical-align:top">${esc(cfg.kota)}, ${dmy(report?.signed_at || tgl)}<br>Dibuat Oleh :<br><b>${esc(cfg.koord_jabatan)}</b><br>${esc(cfg.kantor)}${tteBlock}<u><b>${esc(signerNama)}</b></u><br>NIP. ${esc(signerNip)}</td>
-    </tr></table>`;
-    return `<!doctype html><html><head><title>LKP ${inc.id} — ${inc.device_name}</title>
-      <style>*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:12px}.page{width:210mm;min-height:297mm;padding:18mm 16mm;margin:0 auto}h1{font-size:14px;text-align:center;margin:0 0 14px;text-transform:uppercase}table{width:100%;border-collapse:collapse}td{border:1px solid #000;padding:5px 7px;vertical-align:top}td.no{width:26px;text-align:center}td.ur{width:200px;font-weight:bold}.ket{font-size:10px;color:#333}table.sig{margin-top:18px}table.sig td{border:none;padding:2px 7px;font-size:12px;text-align:center}.legend{font-size:10px;line-height:1.4}@media print{.page{padding:14mm}}</style>
-      </head><body><div class="page">
-      <h1>Laporan Kerusakan dan Perbaikan Peralatan Elektronika Bandara</h1>
-      <table>
-        <tr><td class="no"><b>NO</b></td><td class="ur">URAIAN</td><td><b>DATA</b></td></tr>
-        <tr><td class="no">1</td><td class="ur">Tanggal/Bulan/Tahun</td><td>${dmy(tgl)}</td></tr>
-        <tr><td class="no">2</td><td class="ur">Lokasi</td><td>${esc(inc.device_name)}</td></tr>
-        <tr><td class="no">3</td><td class="ur">Fasilitas</td><td>${esc(cfg.fasilitas || 'Elektronika Bandara')}</td></tr>
-        <tr><td class="no">4</td><td class="ur">Peralatan</td><td>${esc(inc.device_name)}${inc.ip && inc.ip.match(/^\d/) ? ' (' + esc(inc.ip) + ')' : ''}</td></tr>
-        <tr><td class="no">5</td><td class="ur">Bagian Peralatan</td><td>${esc(report?.sparepart)}</td></tr>
-        <tr><td class="no">6</td><td class="ur">Kategori Kerusakan</td><td><b>${kategori}</b> <span class="ket">&nbsp;&nbsp;Ket: RR - Rusak Ringan · RB - Rusak Berat</span></td></tr>
-        <tr><td class="no">7</td><td class="ur">Uraian Kerusakan</td><td>${esc(report?.kerusakan)}</td></tr>
-        <tr><td class="no">8</td><td class="ur">Tindakan Perbaikan<br><span class="ket">Oleh: ${esc(report?.reporter_name)} · Lokasi: ${esc(lkp.kota)}</span></td><td>${esc(report?.perbaikan)}</td></tr>
-        <tr><td class="no">9</td><td class="ur">Penyebab Kerusakan</td><td>${esc(report?.penyebab)}</td></tr>
-        <tr><td class="no">10</td><td class="ur">Tgl. Kerusakan<br>Jam Kerusakan</td><td>${dshort(inc.created_at)}<br>${jam(inc.created_at)}</td></tr>
-        <tr><td class="no">11</td><td class="ur">Tgl. Selesai Perbaikan<br>Jam Selesai Perbaikan</td><td>${dshort(inc.resolved_at)}<br>${jam(inc.resolved_at)}</td></tr>
-        <tr><td class="no">12</td><td class="ur">Jumlah Jam Operasi Terputus</td><td>${durTxt}</td></tr>
-        <tr><td class="no">13</td><td class="ur">Kode Hambatan</td><td><b>${kodeHambatan}</b> <span class="ket">(SC - Menunggu Suku Cadang · TH - Tidak Ada Hambatan)</span></td></tr>
-      </table>
-      ${sigBlock}
-      </div>
-      <div class="page" style="page-break-before:always"><h1>Lampiran Kerusakan</h1>
-      <table><tr>
-        <td style="width:50%;height:260px;text-align:center;vertical-align:middle"><b>Kondisi Awal</b><br><br>${awal?.doc_url ? img(awal.doc_url, 240) : '<span style="color:#999">- belum ada foto -</span>'}</td>
-        <td style="width:50%;height:260px;text-align:center;vertical-align:middle"><b>Kondisi Sesudah</b><br><br>${sesudah?.doc_url ? img(sesudah.doc_url, 240) : '<span style="color:#999">- belum ada foto -</span>'}</td>
-      </tr></table>
-      ${fotos.length ? `<div style="margin-top:14px;font-size:12px;font-weight:bold">Dokumentasi dari Log Perbaikan (${fotos.length} foto)</div><table style="margin-top:4px"><tr>${fotos.map((n) => `<td style="text-align:center;width:${Math.floor(100 / Math.min(fotos.length, 3))}%;vertical-align:top">${img(n.doc_url || '', 160)}<div style="font-size:9px;margin-top:3px">${esc(n.note.split(':')[0])}</div><div style="font-size:8px;color:#666">${esc(n.created_at)}</div></td>`).join('')}</tr></table>` : ''}
-      ${sigBlock}
-      </div></body></html>`;
-  }
-
   // Bangun pratinjau dokumen saat modal detail dibuka / berubah.
   useEffect(() => {
     if (!detail) { setPreviewHtml(''); return; }
@@ -489,7 +428,7 @@ export default function SuratKeluar() {
   // Gabungkan Nota Dinas (hal.1) + LKP form (hal.2) + Lampiran (hal.3) dalam 1 HTML.
   function buildCombinedIncidentDoc(s: Surat, notaQr: string, inc: Incident, lkpQr: string, kasiQr = ''): string {
     const report = inc.report;
-    const cfg = lkp as Record<string, string>;
+    const cfg = lkp as unknown as Record<string, string>;
     const esc = (v: unknown) => String(v || '-').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
     const dt = (v?: string | null) => (v ? new Date(v.replace(' ', 'T')) : null);
     const dmy = (v?: string | null) => { const d = dt(v); return d ? d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'; };
@@ -681,35 +620,47 @@ export default function SuratKeluar() {
         </div>
       )}
 
-      <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead><tr className="text-text2 uppercase text-[10px] border-b border-border">
-            {['Jenis', 'Nomor', 'Hal', 'Tanggal', 'Pembuat', 'TTE', 'Aksi'].map((h) => <th key={h} className="px-3 py-2.5 text-left">{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr key={s.id} className="border-b border-border/50">
-                <td className="px-3 py-2.5">{s.jenis}{s.incident_id ? <span className="ml-1 text-[9px] text-accent2 font-mono">{s.incident_id}</span> : ''}</td>
-                <td className="px-3 py-2.5 font-mono text-[11px]">{s.nomor}</td>
-                <td className="px-3 py-2.5 max-w-[260px]"><div className="truncate">{s.hal}{s.lampiran && s.lampiran.length > 0 && <span className="ml-1.5 text-[9px] text-accent2" title={`${s.lampiran.length} lampiran bukti dukung`}>📎{s.lampiran.length}</span>}</div></td>
-                <td className="px-3 py-2.5 font-mono text-[10px]">{s.tanggal}</td>
-                <td className="px-3 py-2.5 text-text2">{s.creator_name}</td>
-                <td className="px-3 py-2.5">{s.sign_token ? <span className="text-[10px] text-success">🔏 {s.signer_name}</span> : <span className="text-[10px] text-text2">—</span>}</td>
-                <td className="px-3 py-2.5">
-                  <div className="flex gap-1.5 flex-wrap">
-                    <button onClick={() => openInWindow(s)} disabled={busy} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5" title="Buka dokumen lengkap (Nota Dinas + LKP + Lampiran)">👁️ Lihat</button>
-                    <button onClick={() => setDetail(s)} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5" title="Kelola TTE, lampiran, dan persetujuan Kasi">⚙️ Detail</button>
-                    {!s.sign_token && <button onClick={() => sign(s)} className="border border-success/40 text-success rounded px-2 py-0.5">🔏 Sahkan</button>}
-                    <button onClick={() => openInWindow(s, true)} disabled={busy} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5">🖨️ Cetak</button>
-                    <button onClick={() => hapus(s)} className="border border-danger/40 text-danger hover:bg-danger/10 rounded px-2 py-0.5" title="Hapus surat">🗑️ Hapus</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-text2">Belum ada surat keluar.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {rows.length === 0 ? (
+        <div className="bg-surface border border-border rounded-[10px] px-3 py-10 text-center text-text2 text-sm">Belum ada surat keluar.</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {rows.map((s) => (
+            <div key={s.id} className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-3 hover:border-accent/40 transition-colors">
+              {/* Header: jenis + tanggal */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-accent2/10 text-accent2">{s.jenis}</span>
+                  {s.incident_id && <span className="text-[9px] text-accent2 font-mono">{s.incident_id}</span>}
+                </div>
+                <span className="text-[10px] text-text2 font-mono shrink-0">{s.tanggal}</span>
+              </div>
+
+              {/* Hal + nomor */}
+              <div>
+                <div className="text-sm font-semibold leading-snug line-clamp-2" title={s.hal}>{s.hal}{s.lampiran && s.lampiran.length > 0 && <span className="ml-1.5 text-[9px] text-accent2 align-middle" title={`${s.lampiran.length} lampiran bukti dukung`}>📎{s.lampiran.length}</span>}</div>
+                <div className="text-[11px] text-text2 font-mono mt-1">{s.nomor}</div>
+              </div>
+
+              {/* Meta: pembuat + status TTE */}
+              <div className="flex items-center justify-between gap-2 text-[11px] border-t border-border/60 pt-2">
+                <span className="text-text2 truncate">👤 {s.creator_name || '-'}</span>
+                {s.sign_token
+                  ? <span className="text-success truncate shrink-0" title={`Ditandatangani ${s.signer_name}`}>🔏 {s.signer_name}</span>
+                  : <span className="text-text2 shrink-0">— Belum TTE</span>}
+              </div>
+
+              {/* Aksi */}
+              <div className="flex gap-1.5 flex-wrap mt-auto">
+                <button onClick={() => openInWindow(s)} disabled={busy} className="border border-border text-text2 hover:text-white rounded px-2 py-1 text-[11px]" title="Buka dokumen lengkap (Nota Dinas + LKP + Lampiran)">👁️ Lihat</button>
+                <button onClick={() => setDetail(s)} className="border border-border text-text2 hover:text-white rounded px-2 py-1 text-[11px]" title="Kelola TTE, lampiran, dan persetujuan Kasi">⚙️ Detail</button>
+                {!s.sign_token && <button onClick={() => sign(s)} className="border border-success/40 text-success rounded px-2 py-1 text-[11px]">🔏 Sahkan</button>}
+                <button onClick={() => openInWindow(s, true)} disabled={busy} className="border border-border text-text2 hover:text-white rounded px-2 py-1 text-[11px]">🖨️ Cetak</button>
+                <button onClick={() => hapus(s)} className="border border-danger/40 text-danger hover:bg-danger/10 rounded px-2 py-1 text-[11px]" title="Hapus surat">🗑️ Hapus</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center overflow-y-auto p-4" onClick={() => setShowForm(false)}>
@@ -835,15 +786,15 @@ export default function SuratKeluar() {
 
       {detail && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center overflow-y-auto p-4" onClick={() => setDetail(null)}>
-          <div className="bg-surface border border-border rounded-xl w-full max-w-5xl p-5 flex flex-col" style={{ height: 'calc(100vh - 2rem)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-5xl xl:max-w-6xl 2xl:max-w-7xl p-4 sm:p-5 flex flex-col" style={{ height: 'calc(100vh - 2rem)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3 shrink-0">
               <h3 className="text-sm font-bold">👁️ Detail Dokumen</h3>
               <button onClick={() => setDetail(null)} className="text-text2 hover:text-white text-lg leading-none">×</button>
             </div>
 
-            <div className="flex gap-4 flex-1 min-h-0">
+            <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
             {/* Pratinjau dokumen (PDF/render) */}
-            <div className="flex-1 min-h-0 bg-[#525659] rounded-lg border border-border overflow-hidden flex flex-col">
+            <div className="flex-1 min-h-[50vh] lg:min-h-0 bg-[#525659] rounded-lg border border-border overflow-hidden flex flex-col">
               <div className="px-3 py-1.5 text-[10px] text-white/70 border-b border-black/20 flex items-center justify-between gap-2">
                 <span className="shrink-0">📄 Pratinjau</span>
                 <div className="flex items-center gap-1">
@@ -874,7 +825,7 @@ export default function SuratKeluar() {
                 : <div className="flex-1 flex items-center justify-center text-white/50 text-xs">Memuat dokumen…</div>}
             </div>
 
-            <div className="w-[380px] shrink-0 space-y-2 text-xs overflow-y-auto pr-1 min-h-0">
+            <div className="w-full lg:w-[380px] lg:shrink-0 space-y-2 text-xs lg:overflow-y-auto pr-1 min-h-0">
               <Row label="Jenis" value={detail.jenis} />
               <Row label="Nomor" value={detail.nomor} mono />
               <Row label="Hal / Perihal" value={detail.hal} />

@@ -8,7 +8,7 @@ export async function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Token tidak ditemukan' });
   let payload;
   try {
-    payload = jwt.verify(token, env.jwtSecret);
+    payload = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] });
   } catch {
     return res.status(401).json({ error: 'Token tidak valid atau kedaluwarsa' });
   }
