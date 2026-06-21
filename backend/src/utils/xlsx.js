@@ -31,6 +31,14 @@ export async function jsonToBuffer(sheetName, data) {
   return aoaToBuffer(sheetName, aoa);
 }
 
+// Format Date dari sel spreadsheet ke 'YYYY-MM-DD' tanpa pergeseran zona waktu.
+// Sel tanggal Excel bersifat date-only & dibaca ExcelJS sebagai UTC tengah malam,
+// jadi pakai komponen UTC (bukan lokal) agar tidak geser ±1 hari.
+export function xlsxDateToYmd(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
 // Baca buffer .xlsx jadi array-of-arrays (setara sheet_to_json header:1, blankrows:false).
 // Nilai sel dikembalikan apa adanya (string/number/Date) — pemanggil yang melakukan koersi.
 export async function bufferToAoa(buffer) {

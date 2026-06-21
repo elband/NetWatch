@@ -3,7 +3,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
+import { aoaToBuffer, bufferToAoa, xlsxDateToYmd } from '../utils/xlsx.js';
 import exifr from 'exifr';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -306,8 +306,8 @@ router.post('/maintenance/import', requireRole('admin', 'koordinator'), upload.s
     const key = String(devCell ?? '').toLowerCase().trim();
     const deviceId = byName.get(key) || byIp.get(key);
     let dateStr = '';
-    if (dateCell instanceof Date) dateStr = dateKey(dateCell);
-    else if (typeof dateCell === 'number') dateStr = dateKey(new Date(Math.round((dateCell - 25569) * 86400 * 1000)));
+    if (dateCell instanceof Date) dateStr = xlsxDateToYmd(dateCell);
+    else if (typeof dateCell === 'number') dateStr = xlsxDateToYmd(new Date(Math.round((dateCell - 25569) * 86400 * 1000)));
     else dateStr = String(dateCell ?? '').trim();
 
     if (!deviceId) { errors.push(`Baris ${i + 1}: perangkat "${devCell}" tidak ditemukan`); continue; }
