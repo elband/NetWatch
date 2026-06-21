@@ -16,3 +16,12 @@ export const pool = mysql.createPool({
   queueLimit: 0,
   dateStrings: true,
 });
+
+// Selaraskan sesi MySQL dengan zona waktu server (process.env.TZ) agar
+// NOW()/CURRENT_TIMESTAMP tersimpan & terbaca dalam zona itu — bukan UTC.
+pool.on('connection', (conn) => {
+  const off = -new Date().getTimezoneOffset(); // menit di depan UTC
+  const sign = off >= 0 ? '+' : '-';
+  const tz = `${sign}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`;
+  conn.query(`SET time_zone = '${tz}'`, (e) => { if (e) console.error('[pool] gagal set time_zone:', e.message); });
+});

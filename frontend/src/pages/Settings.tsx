@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 
 const LKP_FIELDS: [keyof LkpForm, string][] = [
@@ -19,13 +19,40 @@ export default function Settings() {
   const [form, setForm] = useState({ wa_provider: 'fonnte', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000 });
   const [lkp, setLkp] = useState<LkpForm>(LKP_DEFAULT);
   const [saved, setSaved] = useState(false);
+  const [tz, setTz] = useState('Asia/Makassar');
+  const [srv, setSrv] = useState<{ tz: string; offset: string } | null>(null);
+  const [clock, setClock] = useState('—');
+  const baseRef = useRef<{ epoch: number; at: number } | null>(null);
+
+  async function loadServerTime() {
+    try {
+      const r = await api.get('/settings/server-time');
+      setSrv({ tz: r.data.tz, offset: r.data.offset });
+      baseRef.current = { epoch: r.data.epoch, at: Date.now() };
+    } catch { /* abaikan */ }
+  }
 
   useEffect(() => {
     api.get('/settings').then((res) => {
       setForm((f) => ({ ...f, ...res.data.settings }));
       if (res.data.settings?.lkp) setLkp((l) => ({ ...l, ...res.data.settings.lkp }));
+      if (res.data.settings?.app_timezone) setTz(res.data.settings.app_timezone);
     });
+    loadServerTime();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Jam server berdetak: hitung dari epoch server + selisih lokal, format di zona server.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const base = baseRef.current;
+      if (!base || !srv) return;
+      const now = new Date(base.epoch + (Date.now() - base.at));
+      setClock(now.toLocaleString('id-ID', { timeZone: srv.tz, dateStyle: 'full', timeStyle: 'medium' }));
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srv]);
 
   async function saveLkp() {
     await api.put('/settings', { lkp });
@@ -35,6 +62,13 @@ export default function Settings() {
 
   async function save() {
     await api.put('/settings', form);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function saveTz() {
+    await api.put('/settings', { app_timezone: tz });
+    await loadServerTime();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -70,6 +104,32 @@ export default function Settings() {
               <input type="number" className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.threshold_ping_timeout_ms} onChange={(e) => setForm({ ...form, threshold_ping_timeout_ms: Number(e.target.value) })} />
             </div>
             <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold" onClick={save}>💾 Simpan</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Zona waktu server — semua waktu (NOW, tampilan, laporan) memakai zona ini, bukan UTC */}
+      <div className="bg-surface border border-border rounded-[10px] overflow-hidden mt-4">
+        <div className="px-4 py-3 border-b border-border text-[13px] font-semibold">🕒 Waktu Server</div>
+        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div className="text-[11px] text-text2 mb-1">Waktu server saat ini</div>
+            <div className="bg-surface2 border border-border rounded-md px-3 py-2.5">
+              <div className="text-sm font-semibold font-mono">{clock}</div>
+              <div className="text-[10px] text-text2 mt-0.5">Zona aktif: <b>{srv?.tz || '—'}</b> (UTC{srv?.offset || ''})</div>
+            </div>
+            <p className="text-[10px] text-text2 mt-2 leading-relaxed">Semua pencatatan waktu (insiden, absensi, surat, laporan) dan <code>NOW()</code> database mengikuti zona ini — bukan UTC.</p>
+          </div>
+          <div>
+            <label className="text-[11px] text-text2 block mb-1">Zona Waktu</label>
+            <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={tz} onChange={(e) => setTz(e.target.value)}>
+              <option value="Asia/Jakarta">WIB — Asia/Jakarta (UTC+7)</option>
+              <option value="Asia/Makassar">WITA — Asia/Makassar (UTC+8)</option>
+              <option value="Asia/Jayapura">WIT — Asia/Jayapura (UTC+9)</option>
+              <option value="UTC">UTC (UTC+0)</option>
+            </select>
+            <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold mt-3" onClick={saveTz}>💾 Simpan Zona Waktu</button>
+            <p className="text-[10px] text-text2 mt-2 leading-relaxed">Berlaku langsung untuk waktu baru. Untuk konsistensi penuh pada koneksi DB lama, restart server (PM2) setelah mengubah.</p>
           </div>
         </div>
       </div>

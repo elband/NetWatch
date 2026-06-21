@@ -1,6 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Zona waktu server (default WITA/Asia/Makassar). Di-set sedini mungkin agar
+// semua operasi Date, toLocale*, dan sesi MySQL memakai zona ini — bukan UTC.
+// Nilai dapat ditimpa runtime dari Pengaturan (settings.app_timezone).
+const appTz = process.env.TZ || process.env.APP_TZ || 'Asia/Makassar';
+try { process.env.TZ = appTz; } catch { /* abaikan bila tak bisa di-set */ }
+
 const isProd = process.env.NODE_ENV === 'production';
 
 // Di production, secret lemah/default ditolak agar token tidak bisa dipalsukan.
@@ -18,6 +24,7 @@ if (isProd && !process.env.DB_PASSWORD) {
 
 export const env = {
   isProd,
+  appTz,
   port: Number(process.env.PORT || 4000),
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',

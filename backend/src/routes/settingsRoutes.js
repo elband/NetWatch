@@ -1,9 +1,13 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { applyTimezone, isValidTz, serverTimeInfo } from '../services/timezone.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Waktu server saat ini + zona aktif (untuk panel "Waktu Server").
+router.get('/server-time', (req, res) => res.json(serverTimeInfo()));
 
 router.get('/', async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM settings');
@@ -21,6 +25,10 @@ router.get('/', async (req, res) => {
 
 router.put('/', requireRole('admin'), async (req, res) => {
   const entries = Object.entries(req.body || {});
+  // Validasi zona waktu sebelum disimpan.
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'app_timezone') && !isValidTz(req.body.app_timezone)) {
+    return res.status(400).json({ error: 'Zona waktu tidak valid (gunakan format IANA, mis. Asia/Makassar).' });
+  }
   for (const [key, value] of entries) {
     await pool.query(
       `INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
@@ -28,7 +36,11 @@ router.put('/', requireRole('admin'), async (req, res) => {
       [key, JSON.stringify(value)]
     );
   }
-  res.json({ ok: true });
+  // Terapkan zona waktu langsung (koneksi baru pakai offset baru; restart utk konsistensi penuh).
+  if (req.body?.app_timezone) {
+    try { await applyTimezone(req.body.app_timezone); } catch { /* sudah divalidasi */ }
+  }
+  res.json({ ok: true, ...(req.body?.app_timezone ? { serverTime: serverTimeInfo() } : {}) });
 });
 
 export default router;

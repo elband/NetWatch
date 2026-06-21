@@ -38,6 +38,7 @@ import { attachSshNamespace } from './services/sshBridge.js';
 import { startCoordWatcher } from './services/coordWatcher.js';
 import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
+import { initTimezoneFromSettings } from './services/timezone.js';
 
 const app = express();
 // Di belakang reverse proxy (Nginx): percayai X-Forwarded-* agar IP klien & rate-limit benar.
@@ -151,6 +152,8 @@ io.on('connection', (socket) => {
 });
 
 attachSshNamespace(io);
+// Pulihkan zona waktu server dari Pengaturan (semua instance, sebelum melayani request).
+await initTimezoneFromSettings();
 // Worker latar belakang & penjadwal hanya jalan di SATU instance (PM2 primary),
 // agar tidak terjadi duplikasi ping/notifikasi saat di-scale ke cluster.
 // NODE_APP_INSTANCE di-set PM2 cluster; undefined saat fork tunggal.
