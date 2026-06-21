@@ -38,6 +38,7 @@ import { attachSshNamespace } from './services/sshBridge.js';
 import { startCoordWatcher } from './services/coordWatcher.js';
 import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
+import { purgeOldWaLogs } from './jobs/waQueue.js';
 import { initTimezoneFromSettings } from './services/timezone.js';
 
 const app = express();
@@ -163,6 +164,9 @@ if (isPrimary) {
   startWaWorker(io);
   startCoordWatcher(io);
   await schedulePingSweep();
+  // Retensi log WA (PDP): bersihkan saat start + harian.
+  purgeOldWaLogs().then((n) => n && console.log(`[wa_log] retensi: ${n} log lama dihapus`)).catch(() => {});
+  setInterval(() => { purgeOldWaLogs().catch(() => {}); }, 24 * 60 * 60 * 1000);
 }
 
 server.listen(env.port, () => {

@@ -1,0 +1,10 @@
+import { maskPhone } from './src/utils/privacy.js';
+import { purgeOldWaLogs } from './src/jobs/waQueue.js';
+import { pool } from './src/db/pool.js';
+console.log("maskPhone('081234567890') ->", maskPhone('081234567890'), '(expect 0812******90)');
+console.log("maskPhone('0812')         ->", maskPhone('0812'), '(short)');
+console.log("maskPhone(null)           ->", maskPhone(null));
+const [before] = await pool.query("SELECT COUNT(*) n FROM wa_log");
+const deleted = await purgeOldWaLogs(90);
+console.log('wa_log rows:', before[0].n, '| purged (>90d, expect 0):', deleted);
+await pool.end();

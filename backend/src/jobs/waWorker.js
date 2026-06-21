@@ -8,6 +8,11 @@ export function startWaWorker(io) {
     'wa-notifications',
     async (job) => {
       const { waLogId, phone, message } = job.data;
+      // Idempoten: bila job di-retry setelah pengiriman sukses (mis. ack gagal),
+      // jangan kirim ulang ke Fonnte.
+      const [cur] = await pool.query('SELECT status FROM wa_log WHERE id = ?', [waLogId]);
+      if (!cur[0]) return { ok: false, missing: true };
+      if (cur[0].status === 'sent') return { ok: true, skipped: true };
       await pool.query('UPDATE wa_log SET attempts = attempts + 1 WHERE id = ?', [waLogId]);
       await sendFonnteMessage(phone, message);
       await pool.query("UPDATE wa_log SET status='sent', sent_at=NOW(), error=NULL WHERE id=?", [waLogId]);
