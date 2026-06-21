@@ -127,6 +127,8 @@ Create `backend/.env` from `backend/.env.example`:
 
 ## Production Deployment
 
+> **Panduan lengkap langkah-demi-langkah:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (env aman, DB/Redis hardening, Nginx+TLS, PM2, backup, verifikasi). HA/DR: [docs/DISASTER-RECOVERY.md](docs/DISASTER-RECOVERY.md). Ringkasan cepat di bawah.
+
 ### 1. Build
 ```bash
 cd frontend && npm install && npm run build
