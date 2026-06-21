@@ -8,6 +8,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
+import { escapeLike } from '../utils/sql.js';
 import { audit } from '../services/audit.js';
 
 const router = Router();
@@ -80,7 +81,7 @@ function buildList(req) {
   if (!isManager(req.user)) { sql += ' AND created_by=?'; params.push(req.user.id); }
   if (/^\d{4}$/.test(req.query.year)) { sql += ' AND tahun=?'; params.push(Number(req.query.year)); }
   if (['draft', 'diajukan', 'diverifikasi', 'disetujui', 'ditolak', 'selesai'].includes(req.query.status)) { sql += ' AND status=?'; params.push(req.query.status); }
-  if (req.query.q) { sql += ' AND (nama_diklat LIKE ? OR pegawai_nama LIKE ? OR nomor_pengajuan LIKE ? OR penyelenggara LIKE ?)'; const k = `%${req.query.q}%`; params.push(k, k, k, k); }
+  if (req.query.q) { sql += " AND (nama_diklat LIKE ? ESCAPE '\\\\' OR pegawai_nama LIKE ? ESCAPE '\\\\' OR nomor_pengajuan LIKE ? ESCAPE '\\\\' OR penyelenggara LIKE ? ESCAPE '\\\\')"; const k = `%${escapeLike(req.query.q)}%`; params.push(k, k, k, k); }
   return { sql, params };
 }
 router.get('/', async (req, res) => {

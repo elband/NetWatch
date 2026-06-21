@@ -19,6 +19,10 @@ backend/uploads/
 *.log
 npm-debug.log*
 
+# Redis runtime dump (jangan commit binary runtime)
+*.rdb
+dump.rdb
+
 # OS / Editor
 .DS_Store
 Thumbs.db

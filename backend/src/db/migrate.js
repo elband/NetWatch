@@ -131,8 +131,41 @@ async function migrate() {
     }
   }
 
+  // ── Index untuk performa query (dashboard, laporan bulanan, filter status) ──
+  await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_created_at', '(created_at)');
+  await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_status', '(status)');
+  await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_device', '(device_id)');
+  await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_tech', '(tech_id)');
+  await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_location', '(location_id)');
+  await addIndexIfMissing(conn, env.db.database, 'incident_notes', 'idx_note_incident', '(incident_id)');
+  await addIndexIfMissing(conn, env.db.database, 'incident_reports', 'idx_report_incident', '(incident_id)');
+  await addIndexIfMissing(conn, env.db.database, 'nota_dinas', 'idx_nd_created_at', '(created_at)');
+  await addIndexIfMissing(conn, env.db.database, 'nota_dinas', 'idx_nd_report_month', '(report_month)');
+  await addIndexIfMissing(conn, env.db.database, 'wa_log', 'idx_wa_status', '(status)');
+  await addIndexIfMissing(conn, env.db.database, 'wa_log', 'idx_wa_incident', '(related_incident_id)');
+  await addIndexIfMissing(conn, env.db.database, 'pengajuan_diklat', 'idx_diklat_tahun_status', '(tahun, status)');
+  await addIndexIfMissing(conn, env.db.database, 'public_reports', 'idx_pubrep_status', '(status)');
+
   console.log('Migration complete.');
   await conn.end();
+}
+
+// Tambah index idempoten (MySQL 8 tidak punya ADD INDEX IF NOT EXISTS).
+// Toleran: bila kolom tak ada / tabel beda, dilewati dengan peringatan (tidak menggagalkan migrasi).
+async function addIndexIfMissing(conn, dbName, table, indexName, colsExpr) {
+  try {
+    const [rows] = await conn.query(
+      `SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
+      [dbName, table, indexName]
+    );
+    if (rows.length === 0) {
+      await conn.query(`ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` ${colsExpr}`);
+      console.log(`  + index ${table}.${indexName}`);
+    }
+  } catch (e) {
+    console.warn(`  ! lewati index ${table}.${indexName}: ${e.message}`);
+  }
 }
 
 async function addColumnIfMissing(conn, dbName, table, column, definition) {

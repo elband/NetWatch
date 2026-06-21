@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification, queueWaRaw } from '../jobs/waQueue.js';
+import { escapeLike } from '../utils/sql.js';
 import { notifyRoles } from '../services/notify.js';
 import { snapshotAndNotifyOnDuty } from '../controllers/incidentController.js';
 
@@ -114,7 +115,7 @@ router.post('/:id/assign-incident', requireRole('admin', 'koordinator'), async (
     // Petakan gedung laporan ke lokasi (best-effort) untuk peta gangguan.
     let locationId = null;
     if (report.gedung) {
-      const [locRows] = await conn.query('SELECT id FROM locations WHERE name LIKE ? LIMIT 1', [`%${report.gedung}%`]);
+      const [locRows] = await conn.query("SELECT id FROM locations WHERE name LIKE ? ESCAPE '\\\\' LIMIT 1", [`%${escapeLike(report.gedung)}%`]);
       locationId = locRows[0]?.id || null;
     }
     const [countRows] = await conn.query('SELECT COUNT(*) as c FROM incidents');
