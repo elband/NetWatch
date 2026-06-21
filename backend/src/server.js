@@ -1,40 +1,9 @@
-import express from 'express';
-import cors from 'cors';
-import cookieParser from 'cookie-parser';
-import helmet from 'helmet';
-import compression from 'compression';
 import http from 'http';
-import path from 'path';
 import jwt from 'jsonwebtoken';
-import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
-import pinoHttp from 'pino-http';
-import { apiLimiter } from './middleware/rateLimit.js';
-import { verifyTte } from './controllers/incidentController.js';
-import authRoutes from './routes/authRoutes.js';
-import userRoutes from './routes/userRoutes.js';
-import deviceRoutes from './routes/deviceRoutes.js';
-import incidentRoutes from './routes/incidentRoutes.js';
-import waRoutes from './routes/waRoutes.js';
-import jadwalRoutes from './routes/jadwalRoutes.js';
-import performaRoutes from './routes/performaRoutes.js';
-import publicReportRoutes from './routes/publicReportRoutes.js';
-import settingsRoutes from './routes/settingsRoutes.js';
-import masterRoutes from './routes/masterRoutes.js';
-import dashboardRoutes from './routes/dashboardRoutes.js';
-import equipmentRoutes from './routes/equipmentRoutes.js';
-import activityRoutes from './routes/activityRoutes.js';
-import suratRoutes, { getTtdDoc, submitTtd, getPelaksanaSignDoc, submitPelaksanaSign } from './routes/suratRoutes.js';
-import laporanRoutes from './routes/laporanRoutes.js';
-import attendanceRoutes from './routes/attendanceRoutes.js';
-import leaveRoutes from './routes/leaveRoutes.js';
-import diklatRoutes from './routes/diklatRoutes.js';
-import dokumenRoutes from './routes/dokumenRoutes.js';
-import kegiatanNrRoutes from './routes/kegiatanNrRoutes.js';
-import roomRoutes from './routes/roomRoutes.js';
-import notificationRoutes from './routes/notificationRoutes.js';
+import { createApp } from './app.js';
 import { setNotifyIo } from './services/notify.js';
 import { attachSshNamespace } from './services/sshBridge.js';
 import { startCoordWatcher } from './services/coordWatcher.js';
@@ -43,103 +12,11 @@ import { startWaWorker } from './jobs/waWorker.js';
 import { purgeOldWaLogs } from './jobs/waQueue.js';
 import { initTimezoneFromSettings } from './services/timezone.js';
 
-const app = express();
-// Di belakang reverse proxy (Nginx): percayai X-Forwarded-* agar IP klien & rate-limit benar.
-app.set('trust proxy', 1);
-// Security headers. CSP hanya diaktifkan di production (saat Express melayani SPA);
-// di dev frontend dilayani Vite sehingga CSP tidak relevan & tidak mengganggu HMR.
-// HSTS hanya efektif saat diakses via HTTPS.
-app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: env.isProd
-    ? {
-        useDefaults: true,
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],   // banyak inline style attribute & dokumen cetak
-          imgSrc: ["'self'", 'data:', 'blob:'],        // QR (data:), foto upload, preview
-          connectSrc: ["'self'", 'ws:', 'wss:'],       // Socket.io
-          fontSrc: ["'self'", 'data:'],
-          frameSrc: ["'self'"],                         // iframe srcDoc pratinjau dokumen
-          objectSrc: ["'none'"],
-          baseUri: ["'self'"],
-          upgradeInsecureRequests: [],
-        },
-      }
-    : false,
-}));
-app.use(compression());
-// credentials:true agar cookie sesi HttpOnly dikirim lintas-origin (dev: Vite :5173 → :4000).
-app.use(cors({ origin: env.corsOrigin, credentials: true }));
-app.use(express.json({ limit: '2mb' }));
-app.use(cookieParser());
-
-// Request logging terstruktur (req.id otomatis). Serializer dibatasi agar tidak
-// membocorkan header/cookie sensitif; /health di-skip agar tidak bising.
-app.use(pinoHttp({
-  logger,
-  autoLogging: { ignore: (req) => req.url === '/health' },
-  customLogLevel: (req, res, err) => (res.statusCode >= 500 || err ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'),
-  serializers: {
-    req: (req) => ({ method: req.method, url: req.url }),
-    res: (res) => ({ statusCode: res.statusCode }),
-  },
-}));
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
-
-app.get('/health', (req, res) => res.json({ ok: true }));
-// Rate limit umum untuk seluruh API.
-app.use('/api', apiLimiter);
-// Verifikasi publik TTE (tanpa auth) — dipindai dari QR.
-app.get('/api/verify-tte/:token', verifyTte);
-// Halaman TTD Kepala Seksi (tanpa auth) — diakses via tautan WA.
-app.get('/api/ttd/:token', getTtdDoc);
-app.post('/api/ttd/:token', submitTtd);
-// Halaman TTD Pelaksana Lembur (tanpa auth) — diakses via tautan notifikasi/WA.
-app.get('/api/surat/pelaksana-sign/:token', getPelaksanaSignDoc);
-app.post('/api/surat/pelaksana-sign/:token', submitPelaksanaSign);
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/devices', deviceRoutes);
-app.use('/api/incidents', incidentRoutes);
-app.use('/api/wa', waRoutes);
-app.use('/api/jadwal', jadwalRoutes);
-app.use('/api/performa', performaRoutes);
-app.use('/api/public-reports', publicReportRoutes);
-app.use('/api/rooms', roomRoutes); // sebelum masterRoutes — punya route publik /public/:kode
-app.use('/api/settings', settingsRoutes);
-app.use('/api', masterRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/equipment', equipmentRoutes);
-app.use('/api/activities', activityRoutes);
-app.use('/api/surat', suratRoutes);
-app.use('/api/laporan', laporanRoutes);
-app.use('/api/attendance', attendanceRoutes);
-app.use('/api/leave', leaveRoutes);
-app.use('/api/diklat', diklatRoutes);
-app.use('/api/dokumen', dokumenRoutes);
-app.use('/api/kegiatan-nr', kegiatanNrRoutes);
-app.use('/api/notifications', notificationRoutes);
-
-// Production: serve built frontend and handle SPA routing.
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '..', '..', 'frontend', 'dist');
-  app.use(express.static(distPath));
-  app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
-}
-
-app.use((err, req, res, next) => {
-  if (res.headersSent) return next(err);
-  // Log lengkap (terstruktur) di server; klien hanya dapat pesan generik.
-  (req.log || logger).error({ err, method: req.method, url: req.originalUrl }, 'unhandled error');
-  res.status(500).json({ error: 'Terjadi kesalahan server' });
-});
-
+const app = createApp();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: env.corsOrigin, credentials: true } });
+app.set('io', io); // agar route biasa bisa emit (mis. notifikasi maintenance selesai)
+setNotifyIo(io); // Notification Center: kirim notifikasi real-time per-user
 
 // Ambil JWT dari cookie HttpOnly pada handshake socket (fallback ke event/auth handshake).
 function tokenFromCookie(socket) {
@@ -147,9 +24,6 @@ function tokenFromCookie(socket) {
   const m = /(?:^|;\s*)netwatch_token=([^;]+)/.exec(raw);
   return m ? decodeURIComponent(m[1]) : null;
 }
-app.set('io', io); // agar route biasa bisa emit (mis. notifikasi maintenance selesai)
-setNotifyIo(io); // Notification Center: kirim notifikasi real-time per-user
-
 function joinUserRoom(socket, token) {
   try {
     const u = jwt.verify(String(token || ''), env.jwtSecret, { algorithms: ['HS256'] });
@@ -158,7 +32,6 @@ function joinUserRoom(socket, token) {
 }
 
 io.on('connection', (socket) => {
-  // Token diambil dari cookie HttpOnly (utama), atau handshake.auth / event lama (fallback).
   const cookieToken = tokenFromCookie(socket);
   if (cookieToken) joinUserRoom(socket, cookieToken);
   else if (socket.handshake.auth?.token) joinUserRoom(socket, socket.handshake.auth.token);
@@ -171,7 +44,6 @@ attachSshNamespace(io);
 await initTimezoneFromSettings();
 // Worker latar belakang & penjadwal hanya jalan di SATU instance (PM2 primary),
 // agar tidak terjadi duplikasi ping/notifikasi saat di-scale ke cluster.
-// NODE_APP_INSTANCE di-set PM2 cluster; undefined saat fork tunggal.
 const isPrimary = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
 if (isPrimary) {
   startPingWorker(io);
@@ -179,7 +51,7 @@ if (isPrimary) {
   startCoordWatcher(io);
   await schedulePingSweep();
   // Retensi log WA (PDP): bersihkan saat start + harian.
-  purgeOldWaLogs().then((n) => n && console.log(`[wa_log] retensi: ${n} log lama dihapus`)).catch(() => {});
+  purgeOldWaLogs().then((n) => n && logger.info(`[wa_log] retensi: ${n} log lama dihapus`)).catch(() => {});
   setInterval(() => { purgeOldWaLogs().catch(() => {}); }, 24 * 60 * 60 * 1000);
 }
 
