@@ -24,6 +24,29 @@ export default function Settings() {
   const [clock, setClock] = useState('—');
   const baseRef = useRef<{ epoch: number; at: number } | null>(null);
 
+  // Migrasi data historis (zona waktu)
+  const [migStatus, setMigStatus] = useState<{ globalTz: string; systemTz: string; sessionOffsetHours: number; alreadyDone: unknown } | null>(null);
+  const [migShift, setMigShift] = useState(8);
+  const [migForce, setMigForce] = useState(false);
+  const [migBusy, setMigBusy] = useState(false);
+  const [migMsg, setMigMsg] = useState('');
+  const [migResult, setMigResult] = useState<{ mode: string; shift: number; totalColumns: number; totalRows: number; columns: { key: string; n: number; min: string | null; max: string | null }[] } | null>(null);
+
+  async function loadMigStatus() {
+    try { const r = await api.get('/settings/tz-migration/status'); setMigStatus(r.data); } catch { /* abaikan */ }
+  }
+  async function runMig(apply: boolean) {
+    if (apply && !window.confirm(`Geser SEMUA timestamp historis ${migShift > 0 ? '+' : ''}${migShift} jam?\n\nTindakan ini MENGUBAH data dan tidak otomatis bisa dibatalkan. Pastikan sudah BACKUP database.`)) return;
+    setMigBusy(true); setMigMsg('');
+    try {
+      const r = await api.post('/settings/tz-migration', { shift: migShift, apply, force: migForce });
+      setMigResult(r.data);
+      setMigMsg(apply ? `✅ Migrasi diterapkan: ${r.data.totalRows} nilai pada ${r.data.totalColumns} kolom digeser ${r.data.shift > 0 ? '+' : ''}${r.data.shift} jam.` : `🟢 Pratinjau: ${r.data.totalRows} nilai pada ${r.data.totalColumns} kolom akan digeser. Tinjau lalu klik Jalankan.`);
+      if (apply) loadMigStatus();
+    } catch (e: any) { setMigMsg('⚠️ ' + (e?.response?.data?.error || 'Gagal.')); }
+    finally { setMigBusy(false); }
+  }
+
   async function loadServerTime() {
     try {
       const r = await api.get('/settings/server-time');
@@ -39,6 +62,7 @@ export default function Settings() {
       if (res.data.settings?.app_timezone) setTz(res.data.settings.app_timezone);
     });
     loadServerTime();
+    loadMigStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -131,6 +155,51 @@ export default function Settings() {
             <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold mt-3" onClick={saveTz}>💾 Simpan Zona Waktu</button>
             <p className="text-[10px] text-text2 mt-2 leading-relaxed">Berlaku langsung untuk waktu baru. Untuk konsistensi penuh pada koneksi DB lama, restart server (PM2) setelah mengubah.</p>
           </div>
+        </div>
+      </div>
+
+      {/* Migrasi data historis zona waktu (one-off, untuk data yang terlanjur tersimpan UTC) */}
+      <div className="bg-surface border border-border rounded-[10px] overflow-hidden mt-4">
+        <div className="px-4 py-3 border-b border-border text-[13px] font-semibold">🧭 Migrasi Data Historis (Zona Waktu)</div>
+        <div className="p-4 space-y-3">
+          <div className="bg-warn/10 border border-warn/30 rounded-md px-3 py-2 text-[11px] text-warn leading-relaxed">
+            ⚠️ Geser <b>semua timestamp lama</b> (created_at, dll) sebesar N jam. Pakai <b>hanya</b> bila data historis terlanjur tersimpan UTC. <b>Backup database dulu</b> — perubahan mengubah data.
+          </div>
+          {migStatus && (
+            <div className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px] text-text2">
+              <div>Diagnosa DB: <b>system_time_zone</b> = {migStatus.systemTz} · <b>global.time_zone</b> = {migStatus.globalTz} · offset sesi = +{migStatus.sessionOffsetHours}j</div>
+              <div className="mt-0.5">
+                {/^(utc|\+00:00|00:00)$/i.test(String(migStatus.systemTz)) || migStatus.sessionOffsetHours === 0
+                  ? <span className="text-warn">→ Data lama kemungkinan <b>UTC</b> — migrasi mungkin diperlukan.</span>
+                  : <span className="text-success">→ Server menyimpan waktu lokal (offset +{migStatus.sessionOffsetHours}j) — biasanya <b>TIDAK perlu</b> migrasi.</span>}
+              </div>
+              {migStatus.alreadyDone ? <div className="text-danger mt-0.5">⚑ Migrasi sudah pernah dijalankan. Centang "Paksa" untuk menjalankan lagi.</div> : null}
+            </div>
+          )}
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="text-[11px] text-text2 block mb-1">Geser (jam)</label>
+              <input type="number" className="w-24 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={migShift} onChange={(e) => setMigShift(Number(e.target.value))} />
+            </div>
+            {migStatus?.alreadyDone ? (
+              <label className="flex items-center gap-1.5 text-[11px] text-text2 pb-2"><input type="checkbox" checked={migForce} onChange={(e) => setMigForce(e.target.checked)} /> Paksa</label>
+            ) : null}
+            <button disabled={migBusy} className="border border-accent2/50 text-accent2 rounded-md px-3 py-2 text-xs font-semibold disabled:opacity-50" onClick={() => runMig(false)}>🔍 Pratinjau (Dry-run)</button>
+            <button disabled={migBusy || migResult?.mode !== 'dry-run'} title={migResult?.mode === 'dry-run' ? '' : 'Lakukan pratinjau dulu'} className="bg-danger text-white rounded-md px-3 py-2 text-xs font-semibold disabled:opacity-40" onClick={() => runMig(true)}>▶️ Jalankan Migrasi</button>
+          </div>
+          {migMsg && <div className="text-[11px]">{migMsg}</div>}
+          {migResult && (
+            <div className="border border-border rounded-md max-h-52 overflow-y-auto">
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-text2 border-b border-border sticky top-0 bg-surface"><th className="text-left px-3 py-1.5">Kolom</th><th className="text-right px-3 py-1.5">Baris</th><th className="text-left px-3 py-1.5">Rentang</th></tr></thead>
+                <tbody>
+                  {migResult.columns.filter((c) => c.n > 0).map((c) => (
+                    <tr key={c.key} className="border-b border-border/40"><td className="px-3 py-1 font-mono">{c.key}</td><td className="px-3 py-1 text-right">{c.n}</td><td className="px-3 py-1 text-text2">{c.min} … {c.max}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 

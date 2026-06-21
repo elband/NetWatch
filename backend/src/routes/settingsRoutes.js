@@ -2,12 +2,31 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { applyTimezone, isValidTz, serverTimeInfo } from '../services/timezone.js';
+import { diagnoseTz, runTzMigration } from '../services/tzMigration.js';
 
 const router = Router();
 router.use(requireAuth);
 
 // Waktu server saat ini + zona aktif (untuk panel "Waktu Server").
 router.get('/server-time', (req, res) => res.json(serverTimeInfo()));
+
+// Diagnosa apakah migrasi data historis diperlukan (admin).
+router.get('/tz-migration/status', requireRole('admin'), async (req, res) => {
+  try { res.json(await diagnoseTz()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Preview (dry-run) / jalankan migrasi data historis (admin).
+router.post('/tz-migration', requireRole('admin'), async (req, res) => {
+  try {
+    const result = await runTzMigration({
+      shift: req.body?.shift,
+      apply: !!req.body?.apply,
+      exclude: Array.isArray(req.body?.exclude) ? req.body.exclude : [],
+      force: !!req.body?.force,
+    });
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 router.get('/', async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM settings');
