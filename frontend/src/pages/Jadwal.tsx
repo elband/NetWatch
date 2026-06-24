@@ -194,14 +194,17 @@ export default function Jadwal() {
 }
 
 // ===================== ATUR JAM DINAS (SHIFT WINDOWS) =====================
-type ShiftKey = 'pagi' | 'siang';
+type ShiftKey = 'pagi' | 'siang' | 'malam';
 interface Win { start: number; end: number }
-// Hanya Pagi & Siang yang punya jendela on-duty. Dinas Kantor (N), Libur, DL, dan
-// Cuti tidak menentukan on-duty sehingga tidak diatur jamnya di sini.
-const RULE_ROWS: Array<{ key: ShiftKey; abbr: string; label: string; color: string }> = [
-  { key: 'pagi', abbr: 'P', label: 'Dinas Pagi', color: 'var(--color-success)' },
-  { key: 'siang', abbr: 'S', label: 'Dinas Siang', color: 'var(--color-warn)' },
-];
+// Pagi & Siang wajib (selalu jendela on-duty). Dinas Kantor (N) opsional —
+// ditambahkan koordinator lewat tombol "+ Tambah Aturan".
+const OPTIONAL_KEYS: ShiftKey[] = ['malam'];
+const ROW_ORDER: ShiftKey[] = ['pagi', 'siang', 'malam'];
+const ROW_META: Record<ShiftKey, { abbr: string; label: string; color: string }> = {
+  pagi: { abbr: 'P', label: 'Dinas Pagi', color: 'var(--color-success)' },
+  siang: { abbr: 'S', label: 'Dinas Siang', color: 'var(--color-warn)' },
+  malam: { abbr: 'N', label: 'Dinas Kantor', color: 'var(--color-accent2)' },
+};
 const hourToTime = (h: number) => {
   const hh = Math.floor(h); const mm = Math.round((h - hh) * 60);
   return `${String(hh).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
@@ -210,19 +213,47 @@ const timeToHour = (t: string) => {
   const [hh, mm] = (t || '0:0').split(':').map(Number);
   return (hh || 0) + (mm || 0) / 60;
 };
+// Opsi waktu 24 jam tiap 30 menit — dropdown deterministik 24 jam (tak bergantung locale browser).
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => hourToTime(i / 2));
+
+// Dropdown jam 24 jam. Bila nilai saat ini tak ada di grid 30 menit, sisipkan sebagai opsi.
+function TimeSelect({ value, onChange }: { value: number; onChange: (t: string) => void }) {
+  const cur = hourToTime(value);
+  const opts = TIME_OPTIONS.includes(cur) ? TIME_OPTIONS : [...TIME_OPTIONS, cur].sort();
+  return (
+    <select
+      value={cur}
+      onChange={(e) => onChange(e.target.value)}
+      className="bg-surface border border-border rounded px-2 py-1 text-xs tabular-nums"
+    >
+      {opts.map((t) => <option key={t} value={t}>{t}</option>)}
+    </select>
+  );
+}
 
 function ShiftRulesModal({ onClose }: { onClose: () => void }) {
-  const [wins, setWins] = useState<Record<ShiftKey, Win> | null>(null);
+  const [wins, setWins] = useState<Partial<Record<ShiftKey, Win>> | null>(null);
+  const [defaults, setDefaults] = useState<Partial<Record<ShiftKey, Win>>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState(false);
 
   useEffect(() => {
-    api.get('/jadwal/shift-windows').then((r) => setWins(r.data.windows)).catch(() => setErr('Gagal memuat aturan jam.'));
+    api.get('/jadwal/shift-windows')
+      .then((r) => { setWins(r.data.windows || {}); setDefaults(r.data.defaults || {}); })
+      .catch(() => setErr('Gagal memuat aturan jam.'));
   }, []);
 
   function setField(key: ShiftKey, field: 'start' | 'end', time: string) {
-    setWins((w) => (w ? { ...w, [key]: { ...w[key], [field]: timeToHour(time) } } : w));
+    setWins((w) => (w ? { ...w, [key]: { ...(w[key] as Win), [field]: timeToHour(time) } } : w));
+    setOk(false);
+  }
+  function addRule(key: ShiftKey) {
+    setWins((w) => (w ? { ...w, [key]: defaults[key] || { start: 20, end: 5 } } : w));
+    setOk(false);
+  }
+  function removeRule(key: ShiftKey) {
+    setWins((w) => { if (!w) return w; const n = { ...w }; delete n[key]; return n; });
     setOk(false);
   }
 
@@ -238,6 +269,9 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
     } finally { setBusy(false); }
   }
 
+  // Aturan opsional yang belum aktif (bisa ditambahkan).
+  const addable = wins ? OPTIONAL_KEYS.filter((k) => !wins[k]) : [];
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -246,7 +280,7 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button>
         </div>
         <p className="text-[11px] text-text2 mb-4 leading-relaxed">
-          Atur rentang jam tiap shift. Jam inilah yang menentukan siapa teknisi <b>on-duty</b> (penerima insiden &amp; SLA). Dinas Kantor (N), Libur, Dinas Luar, dan Cuti tidak punya jam dinas.
+          Atur rentang jam tiap shift. Jam inilah yang menentukan siapa teknisi <b>on-duty</b> (penerima insiden &amp; SLA). Pagi &amp; Siang wajib; Dinas Kantor (N) opsional — tambahkan bila ingin teknisi N ikut on-duty. Libur, Dinas Luar, dan Cuti tidak punya jam dinas.
         </p>
 
         {!wins ? (
@@ -254,10 +288,11 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <div className="space-y-2.5">
-              {RULE_ROWS.map(({ key, abbr, label, color }) => {
-                const w = wins[key];
-                if (!w) return null;
+              {ROW_ORDER.filter((k) => wins[k]).map((key) => {
+                const w = wins[key] as Win;
+                const { abbr, label, color } = ROW_META[key];
                 const overnight = w.start > w.end;
+                const removable = OPTIONAL_KEYS.includes(key);
                 return (
                   <div key={key} className="flex items-center gap-2.5 bg-surface2 border border-border rounded-lg px-3 py-2.5">
                     <span className="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-[12px] font-bold" style={{ background: `color-mix(in srgb, ${color} 18%, transparent)`, color }}>{abbr}</span>
@@ -265,13 +300,27 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
                       <div className="text-xs font-semibold leading-tight">{label}</div>
                       {overnight && <div className="text-[9px] text-warn">↦ lintas tengah malam</div>}
                     </div>
-                    <input type="time" lang="id-ID" value={hourToTime(w.start)} onChange={(e) => setField(key, 'start', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
+                    <TimeSelect value={w.start} onChange={(t) => setField(key, 'start', t)} />
                     <span className="text-text2 text-xs">–</span>
-                    <input type="time" lang="id-ID" value={hourToTime(w.end)} onChange={(e) => setField(key, 'end', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
+                    <TimeSelect value={w.end} onChange={(t) => setField(key, 'end', t)} />
+                    {removable
+                      ? <button onClick={() => removeRule(key)} title="Hapus aturan" className="text-text2 hover:text-danger text-lg leading-none px-0.5 shrink-0">×</button>
+                      : <span className="w-[18px] shrink-0" />}
                   </div>
                 );
               })}
             </div>
+
+            {addable.map((key) => (
+              <button
+                key={key}
+                onClick={() => addRule(key)}
+                className="mt-2.5 w-full border border-dashed border-border hover:border-accent2/50 text-text2 hover:text-accent2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+              >
+                + Tambah Aturan: {ROW_META[key].label} ({ROW_META[key].abbr})
+              </button>
+            ))}
+
             <div className="text-[10px] text-text2 mt-3 leading-relaxed">💡 Jika jam <b>mulai &gt; selesai</b> (mis. 20:00–05:00), shift dianggap melewati tengah malam. Perubahan langsung berlaku tanpa restart.</div>
             {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mt-3">⚠️ {err}</div>}
             {ok && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mt-3">✓ Tersimpan & diterapkan.</div>}

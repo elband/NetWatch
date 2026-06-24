@@ -60,6 +60,16 @@ router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, re
     if (start === end) return res.status(400).json({ error: `Jam mulai & selesai shift "${k}" tidak boleh sama.` });
     out[k] = { start, end };
   }
+  // Dinas Kantor (malam) opsional — hanya disimpan bila dikirim & valid. Tidak dikirim = dinonaktifkan.
+  const m = body.malam;
+  if (m && typeof m === 'object' && (m.start != null || m.end != null)) {
+    const start = Number(m.start), end = Number(m.end);
+    if (![start, end].every((n) => Number.isFinite(n) && n >= 0 && n <= 24)) {
+      return res.status(400).json({ error: 'Jam shift "Dinas Kantor" tidak valid (gunakan 0–24).' });
+    }
+    if (start === end) return res.status(400).json({ error: 'Jam mulai & selesai shift "Dinas Kantor" tidak boleh sama.' });
+    out.malam = { start, end };
+  }
   await pool.query(
     `INSERT INTO settings (setting_key, setting_value) VALUES ('shift_windows', ?)
      ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,

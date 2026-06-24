@@ -7,16 +7,23 @@
 // =====================================================================
 
 // Nilai default pabrik — dipakai bila belum ada pengaturan kustom di DB.
-// Hanya Pagi & Siang yang berfungsi sebagai jendela on-duty (penerima insiden).
-// N/Dinas Kantor (malam) BUKAN jendela on-duty — teknisi N tidak ditugaskan insiden otomatis.
+// Pagi & Siang SELALU jadi jendela on-duty. Dinas Kantor (N/malam) OPSIONAL:
+// hanya jadi jendela on-duty bila koordinator menambahkannya lewat "Atur Jam Dinas"
+// (default jam di bawah dipakai sebagai nilai awal saat aturan ditambahkan).
 export const DEFAULT_SHIFT_WINDOWS = {
   pagi: { start: 5, end: 13 },   // 05:00 - 13:00
   siang: { start: 12, end: 20 }, // 12:00 - 20:00
+  malam: { start: 20, end: 5 },  // 20:00 - 05:00 (lintas tengah malam) — nilai awal bila diaktifkan
 };
+
+// Shift wajib (selalu punya jendela) vs opsional (hanya bila dikonfigurasi).
+const REQUIRED_WINS = ['pagi', 'siang'];
+const OPTIONAL_WINS = ['malam'];
 
 // Window aktif yang dipakai seluruh logika on-duty. Bisa di-override Koordinator
 // dari UI Jadwal (tersimpan di settings.shift_windows). Objek ini di-MUTASI in-place
 // oleh loadShiftWindows() agar binding yang sudah di-import ikut melihat nilai terbaru.
+// Default: hanya pagi & siang (malam tidak on-duty kecuali diaktifkan).
 export const SHIFT_WINDOWS = {
   pagi: { ...DEFAULT_SHIFT_WINDOWS.pagi },
   siang: { ...DEFAULT_SHIFT_WINDOWS.siang },
@@ -25,18 +32,27 @@ export const SHIFT_WINDOWS = {
 /**
  * Muat override jam dinas dari tabel `settings` (key 'shift_windows').
  * Setiap nilai yang tidak valid jatuh kembali ke default. Aman dipanggil ulang.
+ * Shift opsional (malam) hanya aktif bila tersimpan di settings.
  */
 export async function loadShiftWindows(conn) {
   try {
     const [rows] = await conn.query("SELECT setting_value FROM settings WHERE setting_key = 'shift_windows' LIMIT 1");
     let v = rows[0]?.setting_value;
     if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
-    for (const k of ['pagi', 'siang']) {
+    for (const k of REQUIRED_WINS) {
       const d = DEFAULT_SHIFT_WINDOWS[k];
       const o = v && typeof v === 'object' ? v[k] : null;
       const start = o && Number.isFinite(Number(o.start)) ? Number(o.start) : d.start;
       const end = o && Number.isFinite(Number(o.end)) ? Number(o.end) : d.end;
       SHIFT_WINDOWS[k] = { start, end };
+    }
+    for (const k of OPTIONAL_WINS) {
+      const o = v && typeof v === 'object' ? v[k] : null;
+      if (o && Number.isFinite(Number(o.start)) && Number.isFinite(Number(o.end))) {
+        SHIFT_WINDOWS[k] = { start: Number(o.start), end: Number(o.end) };
+      } else {
+        delete SHIFT_WINDOWS[k]; // tidak dikonfigurasi → bukan jendela on-duty
+      }
     }
   } catch { /* pertahankan nilai saat ini bila DB gagal dibaca */ }
   return SHIFT_WINDOWS;
