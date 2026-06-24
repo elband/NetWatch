@@ -73,11 +73,6 @@ export default function Incidents() {
     setSelected(null);
   }
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSortKey(key); setSortDir('asc'); }
-  }
-
   // Stats
   const active = incidents.filter((i) => i.status === 'aktif').length;
   const inProgress = incidents.filter((i) => i.status === 'proses').length;
@@ -100,27 +95,10 @@ export default function Incidents() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
-  function SortIcon({ k }: { k: SortKey }) {
-    if (sortKey !== k) return <span className="text-text2 opacity-30 ml-1">↕</span>;
-    return <span className="text-accent ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>;
-  }
-
-  function Th({ label, k }: { label: string; k?: SortKey }) {
-    if (!k) return <th className="px-3.5 py-2.5 text-left">{label}</th>;
-    return (
-      <th
-        className="px-3.5 py-2.5 text-left cursor-pointer hover:text-text select-none"
-        onClick={() => toggleSort(k)}
-      >
-        {label}<SortIcon k={k} />
-      </th>
-    );
-  }
-
-  const rowTint: Record<string, string> = {
-    kritis: 'bg-danger/[0.04] hover:bg-danger/[0.08]',
-    tinggi: 'bg-warn/[0.03] hover:bg-warn/[0.06]',
-    sedang: 'hover:bg-white/[0.03]',
+  const cardTint: Record<string, string> = {
+    kritis: 'border-danger/30 bg-danger/[0.04] hover:border-danger/50',
+    tinggi: 'border-warn/30 bg-warn/[0.03] hover:border-warn/50',
+    sedang: 'border-border hover:border-accent/40',
   };
 
   return (
@@ -171,6 +149,28 @@ export default function Incidents() {
           <option value="proses">Dalam Proses</option>
           <option value="selesai">Selesai</option>
         </select>
+        <div className="flex">
+          <select
+            className="bg-surface2 border border-border rounded-l-md border-r-0 px-3 py-2 text-xs"
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            title="Urutkan berdasarkan"
+          >
+            <option value="created_at">Waktu</option>
+            <option value="priority">Prioritas</option>
+            <option value="downtime">Terputus</option>
+            <option value="device_name">Perangkat</option>
+            <option value="status">Status</option>
+            <option value="id">ID</option>
+          </select>
+          <button
+            className="bg-surface2 border border-border rounded-r-md px-2.5 py-2 text-xs text-text2 hover:text-text"
+            onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            title={sortDir === 'asc' ? 'Naik' : 'Turun'}
+          >
+            {sortDir === 'asc' ? '↑' : '↓'}
+          </button>
+        </div>
         {(filter !== 'all' || search) && (
           <button
             className="text-xs text-text2 hover:text-text border border-border rounded px-2.5 py-1"
@@ -181,100 +181,72 @@ export default function Incidents() {
         )}
       </div>
 
-      {/* ===== Table ===== */}
-      <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
-        {loading ? (
-          <div className="py-16 text-center text-text2 text-xs animate-pulse">Memuat data insiden…</div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center text-text2 text-xs">
-            {search ? `Tidak ada hasil untuk "${search}"` : 'Tidak ada insiden.'}
-          </div>
-        ) : (
-          <table className="w-full text-xs" style={{ minWidth: '860px' }}>
-            <thead>
-              <tr className="text-text2 uppercase text-[10px] border-b border-border">
-                <Th label="ID" k="id" />
-                <Th label="Perangkat" k="device_name" />
-                <Th label="Masalah" />
-                <Th label="Prioritas" k="priority" />
-                <Th label="Terputus" k="downtime" />
-                <Th label="Waktu" k="created_at" />
-                <Th label="Status" k="status" />
-                <Th label="Aksi" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((i) => (
-                <tr
-                  key={i.id}
-                  className={`border-b border-border/50 cursor-pointer transition-colors ${rowTint[i.priority] || 'hover:bg-white/[0.03]'}`}
+      {/* ===== Cards ===== */}
+      {loading ? (
+        <div className="bg-surface border border-border rounded-[10px] py-16 text-center text-text2 text-xs animate-pulse">Memuat data insiden…</div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-surface border border-border rounded-[10px] py-16 text-center text-text2 text-xs">
+          {search ? `Tidak ada hasil untuk "${search}"` : 'Tidak ada insiden.'}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {filtered.map((i) => (
+            <div
+              key={i.id}
+              onClick={() => setSelected(i)}
+              className={`bg-surface border rounded-xl p-3.5 flex flex-col gap-2.5 cursor-pointer transition-colors ${cardTint[i.priority] || 'border-border hover:border-accent/40'}`}
+            >
+              {/* Header: perangkat + id */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm truncate" title={i.device_name}>{i.device_name}</div>
+                  <div className="text-[10px] text-text2 font-mono truncate mt-0.5" title={i.ip || '—'}>{i.ip || '—'}</div>
+                </div>
+                <span className="shrink-0 font-mono text-accent2 text-[10px] flex items-center gap-1.5">
+                  {i.id}
+                  {i.status === 'aktif' && (
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-danger opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-danger" />
+                    </span>
+                  )}
+                </span>
+              </div>
+
+              {/* Masalah */}
+              <div className="text-text2 text-[11px] line-clamp-2" title={i.issue}>{i.issue}</div>
+
+              {/* Badges */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <PriorityBadge priority={i.priority} />
+                <IncidentStatusBadge status={i.status} />
+              </div>
+
+              {/* Meta: terputus + waktu */}
+              <div className="flex items-center justify-between text-[10px] pt-2 border-t border-border/50">
+                <span className={`font-mono font-semibold ${downtimeColor(i, downtimeMs(i, now))}`}>⏱ {fmtDowntime(downtimeMs(i, now))}</span>
+                <span className="text-text2 font-mono">{i.created_at}</span>
+              </div>
+
+              {/* Aksi */}
+              <div className="flex gap-1.5 text-xs" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="flex-1 text-text2 hover:text-text border border-border rounded px-2 py-1 hover:border-accent/40 transition-colors"
                   onClick={() => setSelected(i)}
                 >
-                  {/* ID */}
-                  <td className="px-3.5 py-2.5 font-mono text-accent2 text-[10px] whitespace-nowrap">
-                    <span className="flex items-center gap-1.5">
-                      {i.id}
-                      {i.status === 'aktif' && (
-                        <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-danger opacity-75" />
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-danger" />
-                        </span>
-                      )}
-                    </span>
-                  </td>
-
-                  {/* Perangkat — fixed width, satu baris truncate + tooltip */}
-                  <td className="px-3.5 py-2.5" style={{ maxWidth: '180px', width: '180px' }}>
-                    <div className="truncate font-semibold" title={i.device_name}>{i.device_name}</div>
-                    <div className="truncate text-[10px] text-text2 font-mono mt-0.5" title={i.ip || '—'}>{i.ip || '—'}</div>
-                  </td>
-
-                  {/* Masalah — satu baris truncate + tooltip */}
-                  <td className="px-3.5 py-2.5 text-text2" style={{ maxWidth: '180px', width: '180px' }}>
-                    <div className="truncate" title={i.issue}>{i.issue}</div>
-                  </td>
-
-                  {/* Prioritas */}
-                  <td className="px-3.5 py-2.5 whitespace-nowrap">
-                    <PriorityBadge priority={i.priority} />
-                  </td>
-
-                  {/* Terputus — teks murni, tanpa emoji besar */}
-                  <td className={`px-3.5 py-2.5 font-mono font-semibold whitespace-nowrap ${downtimeColor(i, downtimeMs(i, now))}`}>
-                    {fmtDowntime(downtimeMs(i, now))}
-                  </td>
-
-                  {/* Waktu */}
-                  <td className="px-3.5 py-2.5 text-text2 font-mono text-[10px] whitespace-nowrap">{i.created_at}</td>
-
-                  {/* Status */}
-                  <td className="px-3.5 py-2.5 whitespace-nowrap">
-                    <IncidentStatusBadge status={i.status} />
-                  </td>
-
-                  {/* Aksi */}
-                  <td className="px-3.5 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex gap-1.5">
-                      <button
-                        className="text-text2 hover:text-text border border-border rounded px-2 py-0.5 hover:border-accent/40 transition-colors"
-                        onClick={() => setSelected(i)}
-                      >
-                        Detail →
-                      </button>
-                      <button
-                        className={`border rounded px-2 py-0.5 transition-colors ${i.report ? 'text-success border-success/40 hover:bg-success/10' : 'text-accent2 border-accent2/40 hover:bg-accent2/10'}`}
-                        onClick={() => setReportFor(i)}
-                      >
-                        {i.report ? 'Laporan ✓' : 'Laporan'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+                  Detail →
+                </button>
+                <button
+                  className={`flex-1 border rounded px-2 py-1 transition-colors ${i.report ? 'text-success border-success/40 hover:bg-success/10' : 'text-accent2 border-accent2/40 hover:bg-accent2/10'}`}
+                  onClick={() => setReportFor(i)}
+                >
+                  {i.report ? 'Laporan ✓' : 'Laporan'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ===== Result count ===== */}
       {!loading && filtered.length > 0 && (
