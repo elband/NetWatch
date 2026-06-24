@@ -134,8 +134,15 @@ function FloatingMenu({ navItems, user, allRoles, notif, onEditProfile, onLogout
   const SIZE = 54;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(() => {
-    try { const s = JSON.parse(localStorage.getItem('nw_fab') || 'null'); if (s && typeof s.x === 'number' && typeof s.y === 'number') return s; } catch { /* abaikan */ }
+    const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const h = typeof window !== 'undefined' ? window.innerHeight : 800;
+    // Clamp ke viewport saat ini: posisi tersimpan dari layar lebih besar tak boleh
+    // membuat tombol profil terlempar ke luar layar (= "profil hilang").
+    const cl = (v: number, max: number) => Math.min(Math.max(0, v), Math.max(0, max));
+    try {
+      const s = JSON.parse(localStorage.getItem('nw_fab') || 'null');
+      if (s && typeof s.x === 'number' && typeof s.y === 'number') return { x: cl(s.x, w - SIZE), y: cl(s.y, h - SIZE) };
+    } catch { /* abaikan */ }
     return { x: 18, y: h - SIZE - 26 };
   });
   const posRef = useRef(pos);
