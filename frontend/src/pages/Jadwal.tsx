@@ -194,10 +194,11 @@ export default function Jadwal() {
 }
 
 // ===================== ATUR JAM DINAS (SHIFT WINDOWS) =====================
-type ShiftKey = 'malam' | 'pagi' | 'siang';
+type ShiftKey = 'pagi' | 'siang';
 interface Win { start: number; end: number }
+// Hanya Pagi & Siang yang punya jendela on-duty. Dinas Kantor (N), Libur, DL, dan
+// Cuti tidak menentukan on-duty sehingga tidak diatur jamnya di sini.
 const RULE_ROWS: Array<{ key: ShiftKey; abbr: string; label: string; color: string }> = [
-  { key: 'malam', abbr: 'N', label: 'Dinas Kantor', color: 'var(--color-accent2)' },
   { key: 'pagi', abbr: 'P', label: 'Dinas Pagi', color: 'var(--color-success)' },
   { key: 'siang', abbr: 'S', label: 'Dinas Siang', color: 'var(--color-warn)' },
 ];
@@ -245,7 +246,7 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button>
         </div>
         <p className="text-[11px] text-text2 mb-4 leading-relaxed">
-          Atur rentang jam tiap shift. Jam inilah yang menentukan siapa teknisi <b>on-duty</b> (penerima insiden &amp; SLA). Libur, Dinas Luar, dan Cuti tidak punya jam dinas.
+          Atur rentang jam tiap shift. Jam inilah yang menentukan siapa teknisi <b>on-duty</b> (penerima insiden &amp; SLA). Dinas Kantor (N), Libur, Dinas Luar, dan Cuti tidak punya jam dinas.
         </p>
 
         {!wins ? (
@@ -255,6 +256,7 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
             <div className="space-y-2.5">
               {RULE_ROWS.map(({ key, abbr, label, color }) => {
                 const w = wins[key];
+                if (!w) return null;
                 const overnight = w.start > w.end;
                 return (
                   <div key={key} className="flex items-center gap-2.5 bg-surface2 border border-border rounded-lg px-3 py-2.5">
@@ -263,9 +265,9 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
                       <div className="text-xs font-semibold leading-tight">{label}</div>
                       {overnight && <div className="text-[9px] text-warn">↦ lintas tengah malam</div>}
                     </div>
-                    <input type="time" value={hourToTime(w.start)} onChange={(e) => setField(key, 'start', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
+                    <input type="time" lang="id-ID" value={hourToTime(w.start)} onChange={(e) => setField(key, 'start', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
                     <span className="text-text2 text-xs">–</span>
-                    <input type="time" value={hourToTime(w.end)} onChange={(e) => setField(key, 'end', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
+                    <input type="time" lang="id-ID" value={hourToTime(w.end)} onChange={(e) => setField(key, 'end', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
                   </div>
                 );
               })}
