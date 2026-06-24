@@ -8,14 +8,17 @@ const ROLE_PERMS = {
   viewer: ['dashboard', 'devices', 'monitor'],
 };
 
+// `pin` = PIN bootstrap login pertama kali (UI hanya menerima PIN). WAJIB diganti
+// dari Pengaturan → Edit Profil setelah login pertama. Harus unik antar-user.
+// Nilai disamakan dengan DEMO_PINS di migrate.js agar satu konvensi.
 const USERS = [
-  { name: 'Ahmad Fauzi', username: 'admin', email: 'admin@netwatch.id', pass: 'admin123', phone: '+628987654321', role: 'admin', jabatan: 'IT Manager', emoji: '👑' },
-  { name: 'Siti Rahayu', username: 'koordinator', email: 'siti@netwatch.id', pass: 'koord123', phone: '+628811223344', role: 'koordinator', jabatan: 'Koordinator Jaringan', emoji: '👩‍💼' },
-  { name: 'Budi Santoso', username: 'budi', email: 'budi@netwatch.id', pass: 'budi123', phone: '+628111222333', role: 'teknisi', jabatan: 'Senior Network Engineer', emoji: '👨‍💻' },
-  { name: 'Dian Pratama', username: 'dian', email: 'dian@netwatch.id', pass: 'dian123', phone: '+628222333444', role: 'teknisi', jabatan: 'Network Engineer', emoji: '👩‍💻' },
-  { name: 'Rina Wijaya', username: 'rina', email: 'rina@netwatch.id', pass: 'rina123', phone: '+628333444555', role: 'teknisi', jabatan: 'Junior Technician', emoji: '👩‍🔧' },
-  { name: 'Hendra Kusuma', username: 'hendra', email: 'hendra@netwatch.id', pass: 'hendra123', phone: '+628444555666', role: 'teknisi', jabatan: 'Network Engineer', emoji: '👨‍🔧' },
-  { name: 'Viewer Umum', username: 'viewer', email: 'viewer@netwatch.id', pass: 'view123', phone: '', role: 'viewer', jabatan: 'Stakeholder', emoji: '👁️' },
+  { name: 'Ahmad Fauzi', username: 'admin', email: 'admin@netwatch.id', pass: 'admin123', pin: '111111', phone: '+628987654321', role: 'admin', jabatan: 'IT Manager', emoji: '👑' },
+  { name: 'Siti Rahayu', username: 'koordinator', email: 'siti@netwatch.id', pass: 'koord123', pin: '222222', phone: '+628811223344', role: 'koordinator', jabatan: 'Koordinator Jaringan', emoji: '👩‍💼' },
+  { name: 'Budi Santoso', username: 'budi', email: 'budi@netwatch.id', pass: 'budi123', pin: '333333', phone: '+628111222333', role: 'teknisi', jabatan: 'Senior Network Engineer', emoji: '👨‍💻' },
+  { name: 'Dian Pratama', username: 'dian', email: 'dian@netwatch.id', pass: 'dian123', pin: '444444', phone: '+628222333444', role: 'teknisi', jabatan: 'Network Engineer', emoji: '👩‍💻' },
+  { name: 'Rina Wijaya', username: 'rina', email: 'rina@netwatch.id', pass: 'rina123', pin: '555555', phone: '+628333444555', role: 'teknisi', jabatan: 'Junior Technician', emoji: '👩‍🔧' },
+  { name: 'Hendra Kusuma', username: 'hendra', email: 'hendra@netwatch.id', pass: 'hendra123', pin: '666666', phone: '+628444555666', role: 'teknisi', jabatan: 'Network Engineer', emoji: '👨‍🔧' },
+  { name: 'Viewer Umum', username: 'viewer', email: 'viewer@netwatch.id', pass: 'view123', pin: '777777', phone: '', role: 'viewer', jabatan: 'Stakeholder', emoji: '👁️' },
 ];
 
 const DEVICES = [
@@ -47,13 +50,17 @@ async function seed() {
 
     for (const u of USERS) {
       const hash = await bcrypt.hash(u.pass, 10);
+      const pinHash = await bcrypt.hash(u.pin, 10);
       await conn.query(
-        `INSERT INTO users (name, username, email, password_hash, phone, role, jabatan, emoji, active, perms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-        [u.name, u.username, u.email, hash, u.phone, u.role, u.jabatan, u.emoji, JSON.stringify(ROLE_PERMS[u.role])]
+        `INSERT INTO users (name, username, email, password_hash, pin_hash, phone, role, jabatan, emoji, active, perms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        [u.name, u.username, u.email, hash, pinHash, u.phone, u.role, u.jabatan, u.emoji, JSON.stringify(ROLE_PERMS[u.role])]
       );
     }
     console.log(`Seeded ${USERS.length} users.`);
+    console.log('\n⚠️  PIN BOOTSTRAP (login pertama via keypad) — WAJIB GANTI setelah login:');
+    for (const u of USERS) console.log(`   ${u.username.padEnd(12)} role=${u.role.padEnd(11)} PIN=${u.pin}`);
+    console.log('   Ganti dari: Pengaturan → Edit Profil. PIN harus unik antar-user.\n');
 
     for (const [name, ip, type, loc] of DEVICES) {
       await conn.query(
