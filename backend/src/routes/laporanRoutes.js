@@ -37,7 +37,8 @@ export async function buildLaporanData(monthIn) {
 
   // ===== I. Data Personil Teknisi =====
   const [personil] = await pool.query(
-    "SELECT name, nip, jabatan, pangkat, ttl FROM users WHERE active=1 AND (role='teknisi' OR role='koordinator' OR JSON_CONTAINS(roles,'\"teknisi\"') OR JSON_CONTAINS(roles,'\"koordinator\"')) ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"')) DESC, name"
+    // Urutan: koordinator dulu, OJT paling bawah, sisanya per nama.
+    "SELECT name, nip, jabatan, pangkat, ttl FROM users WHERE active=1 AND (role='teknisi' OR role='koordinator' OR JSON_CONTAINS(roles,'\"teknisi\"') OR JSON_CONTAINS(roles,'\"koordinator\"')) ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"')) DESC, (jabatan LIKE '%OJT%') ASC, name"
   );
 
   // ===== II. Daftar / Inventaris Peralatan =====
@@ -47,10 +48,10 @@ export async function buildLaporanData(monthIn) {
   // ===== III. Jadwal Dinas — bulan ini & bulan berikutnya =====
   const buildJadwal = async (rangeStart, rangeEnd, days, label) => {
     const [rows] = await pool.query(
-      // Urutan baris jadwal mengikuti Data Personil: koordinator dulu, lalu per nama.
+      // Urutan baris jadwal mengikuti Data Personil: koordinator dulu, OJT paling bawah, lalu per nama.
       `SELECT s.user_id, u.name, DAY(s.shift_date) d, s.shift_type FROM shifts s JOIN users u ON u.id=s.user_id
         WHERE s.shift_date>=? AND s.shift_date<?
-        ORDER BY (u.role='koordinator' OR JSON_CONTAINS(u.roles,'"koordinator"')) DESC, u.name`,
+        ORDER BY (u.role='koordinator' OR JSON_CONTAINS(u.roles,'"koordinator"')) DESC, (u.jabatan LIKE '%OJT%') ASC, u.name`,
       [rangeStart, rangeEnd]
     );
     const map = new Map();

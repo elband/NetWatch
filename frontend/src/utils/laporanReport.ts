@@ -129,7 +129,12 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
   </div></div>`);
 
   if (has('personil')) {
-    const r = data.personil.map((p) => `<tr><td style="text-align:center">${p.no}</td><td>${esc(p.name)}<br><span style="font-size:9px">NIP. ${esc(p.nip || '-')}</span></td><td>${esc(p.pangkat || '-')}</td><td>${esc(p.ttl || '-')}</td><td>${esc(p.jabatan || '-')}</td></tr>`).join('');
+    // OJT (peserta on-the-job training) tidak memakai NIP.
+    const r = data.personil.map((p) => {
+      const isOjt = /OJT/i.test(p.jabatan || '');
+      const nip = isOjt ? '' : `<br><span style="font-size:9px">NIP. ${esc(p.nip || '-')}</span>`;
+      return `<tr><td style="text-align:center">${p.no}</td><td>${esc(p.name)}${nip}</td><td>${esc(p.pangkat || '-')}</td><td>${esc(p.ttl || '-')}</td><td>${esc(p.jabatan || '-')}</td></tr>`;
+    }).join('');
     pages.push(`<div class="page">${sec('Data Personil Teknisi Elektronika Bandara')}${head2(`BULAN/TAHUN : ${bln}`)}
       <table class="data"><thead><tr><th style="width:28px">No</th><th>Nama / NIP</th><th>Pangkat/Gol</th><th>Tempat, Tgl Lahir</th><th>Jabatan</th></tr></thead><tbody>${r}</tbody></table>${sign()}</div>`);
   }
