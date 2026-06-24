@@ -131,20 +131,20 @@ export default function NotificationCenter() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-[360px] max-w-[92vw] rounded-xl border border-white/10 shadow-2xl overflow-hidden nw-pop"
-          style={{ background: 'rgba(22,27,34,0.92)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+        <div className="absolute right-0 top-full mt-2 w-[360px] max-w-[92vw] rounded-xl border border-border shadow-2xl overflow-hidden nw-pop"
+          style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
           {/* Header */}
-          <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-white/10">
+          <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border">
             <div className="text-sm font-bold flex items-center gap-2">🔔 Notifikasi {unread > 0 && <span className="text-[10px] font-semibold text-danger">({unread} baru)</span>}</div>
             <div className="flex items-center gap-2">
-              <button onClick={toggleMute} title={muted ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'} className="text-text2 hover:text-white text-[13px]">{muted ? '🔕' : '🔔'}</button>
+              <button onClick={toggleMute} title={muted ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'} className="text-text2 hover:text-text text-[13px]">{muted ? '🔕' : '🔔'}</button>
               <button onClick={markAll} disabled={!unread} className="text-[10px] text-accent2 hover:underline disabled:opacity-40 disabled:no-underline">Tandai semua dibaca</button>
             </div>
           </div>
           {/* Filter */}
-          <div className="flex gap-1 px-3.5 py-2 border-b border-white/10">
+          <div className="flex gap-1 px-3.5 py-2 border-b border-border">
             {(['all', 'unread'] as const).map((k) => (
-              <button key={k} onClick={() => setFilter(k)} className={`px-2.5 py-1 rounded-md text-[11px] ${filter === k ? 'bg-accent/15 text-accent font-semibold' : 'text-text2 hover:bg-white/5'}`}>
+              <button key={k} onClick={() => setFilter(k)} className={`px-2.5 py-1 rounded-md text-[11px] ${filter === k ? 'bg-accent/15 text-accent font-semibold' : 'text-text2 hover:bg-text/5'}`}>
                 {k === 'all' ? 'Semua' : 'Belum dibaca'}
               </button>
             ))}
@@ -158,7 +158,7 @@ export default function NotificationCenter() {
               const p = PRIO[n.priority] || PRIO.info;
               return (
                 <div key={n.id} onClick={() => clickItem(n)}
-                  className={`group relative flex gap-2.5 px-3.5 py-2.5 border-b border-white/5 cursor-pointer hover:bg-white/5 ${n.is_read ? 'opacity-70' : ''}`}
+                  className={`group relative flex gap-2.5 px-3.5 py-2.5 border-b border-border cursor-pointer hover:bg-text/5 ${n.is_read ? 'opacity-70' : ''}`}
                   style={{ borderLeft: `3px solid ${p.color}` }}>
                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0" style={{ background: `${p.color}22` }}>{ICON[n.type] || '🔔'}</div>
                   <div className="flex-1 min-w-0">

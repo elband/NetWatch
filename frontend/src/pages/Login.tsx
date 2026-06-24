@@ -2,13 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import PanduanModal from '../components/PanduanModal';
-
-const QUICK_LOGINS = [
-  { label: 'Admin', pin: '222222', emoji: '👑' },
-  { label: 'Teknisi (Okta)', pin: '333333', emoji: '🔧' },
-  { label: 'Teknisi (Alex)', pin: '444444', emoji: '🔧' },
-  { label: 'Viewer', pin: '777777', emoji: '👁️' },
-];
+import ThemeToggle from '../components/ThemeToggle';
 
 const HIGHLIGHTS = [
   { icon: '📡', title: 'Monitoring Real-time', desc: 'Pantau status & latency perangkat jaringan secara langsung.' },
@@ -70,6 +64,8 @@ export default function Login() {
       <div className="absolute -bottom-40 -right-20 w-[460px] h-[460px] rounded-full bg-accent2/20 blur-[130px] login-blob" style={{ animationDelay: '-6s' }} />
       <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/40 pointer-events-none" />
 
+      <ThemeToggle className="absolute top-4 right-4 z-20 w-10 h-10 text-lg bg-surface/70 backdrop-blur-sm shadow-lg" />
+
       <div className="login-card relative z-10 w-full max-w-[920px] grid md:grid-cols-2 rounded-2xl overflow-hidden border border-border shadow-2xl shadow-black/50 backdrop-blur-xl">
         {/* Left — brand */}
         <div className="hidden md:flex flex-col justify-between p-10 bg-gradient-to-br from-surface/90 to-surface2/70 relative">
@@ -106,7 +102,7 @@ export default function Login() {
             </div>
             <button
               onClick={() => setShowPanduan(true)}
-              className="flex items-center gap-1.5 text-[11px] text-text2 hover:text-white border border-border/60 hover:border-accent/50 rounded-lg px-3 py-1.5 transition-all hover:bg-accent/10"
+              className="flex items-center gap-1.5 text-[11px] text-text2 hover:text-text border border-border/60 hover:border-accent/50 rounded-lg px-3 py-1.5 transition-all hover:bg-accent/10"
             >
               📖 Panduan
             </button>
@@ -144,24 +140,13 @@ export default function Login() {
 
           {loading && <div className="text-[11px] text-text2 mt-4">Memverifikasi…</div>}
 
-          <div className="mt-6 border-t border-border pt-4 w-full">
-            <div className="text-[10px] text-text2 uppercase tracking-wider mb-2.5 text-center">Login cepat (demo)</div>
-            <div className="grid grid-cols-2 gap-2">
-              {QUICK_LOGINS.map((q) => (
-                <button key={q.pin} disabled={loading} className="flex items-center gap-2 bg-surface2 border border-border rounded-lg px-3 py-2 text-[12px] text-text2 transition-all hover:border-accent hover:text-white disabled:opacity-60" onClick={() => { setPin(q.pin); submit(q.pin); }}>
-                  <span className="text-base">{q.emoji}</span> {q.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Panduan button — visible on mobile (md:hidden for desktop, covered by left panel) */}
-            <button
-              onClick={() => setShowPanduan(true)}
-              className="md:hidden mt-4 w-full flex items-center justify-center gap-2 border border-border/60 rounded-lg px-3 py-2 text-[12px] text-text2 hover:border-accent/50 hover:text-white hover:bg-accent/10 transition-all"
-            >
-              📖 Panduan Penggunaan
-            </button>
-          </div>
+          {/* Panduan button — visible on mobile (md:hidden for desktop, covered by left panel) */}
+          <button
+            onClick={() => setShowPanduan(true)}
+            className="md:hidden mt-6 w-full flex items-center justify-center gap-2 border border-border/60 rounded-lg px-3 py-2 text-[12px] text-text2 hover:border-accent/50 hover:text-text hover:bg-accent/10 transition-all"
+          >
+            📖 Panduan Penggunaan
+          </button>
         </div>
       </div>
 

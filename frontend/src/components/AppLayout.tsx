@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { hasRole, userRoles } from '../utils/roles';
 import { NAV_ITEMS, PAGE_TITLES, type NavEntry } from './NavConfig';
 import NotificationCenter from './NotificationCenter';
+import ThemeToggle from './ThemeToggle';
 import type { Role, User } from '../types';
 
 const ROLE_COLOR: Record<string, string> = {
@@ -109,6 +110,7 @@ export default function AppLayout() {
             </span>
           </>
         )}
+        <ThemeToggle className="w-8 h-8 text-sm shrink-0" />
         <NotificationCenter />
         <span className="text-[11px] text-text2 font-mono hidden sm:inline"><HeaderClock /></span>
       </header>
@@ -185,8 +187,8 @@ function FloatingMenu({ navItems, user, allRoles, notif, onEditProfile, onLogout
     <>
       {open && <div className="fixed inset-0 z-[39]" onClick={() => setOpen(false)} aria-hidden />}
       {open && (
-        <div className="fixed z-40 rounded-2xl border border-white/10 shadow-2xl overflow-hidden nw-pop" style={{ ...popStyle, background: 'rgba(22,27,34,0.62)', backdropFilter: 'blur(16px) saturate(140%)', WebkitBackdropFilter: 'blur(16px) saturate(140%)' }}>
-          <button onClick={() => { setOpen(false); onEditProfile(); }} className="w-full flex items-center gap-2.5 px-3.5 py-3 border-b border-white/10 hover:bg-white/5 text-left">
+        <div className="fixed z-40 rounded-2xl border border-border shadow-2xl overflow-hidden nw-pop" style={{ ...popStyle, background: 'var(--glass-bg)', backdropFilter: 'blur(16px) saturate(140%)', WebkitBackdropFilter: 'blur(16px) saturate(140%)' }}>
+          <button onClick={() => { setOpen(false); onEditProfile(); }} className="w-full flex items-center gap-2.5 px-3.5 py-3 border-b border-border hover:bg-text/5 text-left">
             <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center text-base shrink-0" style={{ background: `${color}33`, border: `2px solid ${color}` }}>{user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : user.emoji}</div>
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold truncate flex items-center gap-1">{user.name}<span className="text-text2 text-[10px]">✏️</span></div>
@@ -199,13 +201,13 @@ function FloatingMenu({ navItems, user, allRoles, notif, onEditProfile, onLogout
                 <div key={idx} style={{ animationDelay: `${idx * 0.012}s` }} className="col-span-2 px-2 pt-1.5 pb-0.5 text-[9px] text-text2 uppercase tracking-[1.5px]">{n.section}</div>
               ) : (
                 <NavLink key={n.id} to={`/${n.id}`} onClick={() => setOpen(false)} style={{ animationDelay: `${idx * 0.012}s` }}
-                  className={({ isActive }) => `nav-link flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] ${isActive ? 'nav-link-active bg-accent/15 text-accent' : 'text-text2 hover:bg-white/10 hover:text-white'}`}>
+                  className={({ isActive }) => `nav-link flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] ${isActive ? 'nav-link-active bg-accent/15 text-accent' : 'text-text2 hover:bg-text/10 hover:text-text'}`}>
                   <span className="shrink-0">{n.icon}</span><span className="truncate">{n.label}</span>
                 </NavLink>
               )
             )}
           </nav>
-          <button onClick={() => { setOpen(false); onLogout(); }} className="w-full border-t border-white/10 px-3.5 py-2.5 text-[13px] text-left text-danger hover:bg-danger/10 flex items-center gap-2">⏻ Keluar</button>
+          <button onClick={() => { setOpen(false); onLogout(); }} className="w-full border-t border-border px-3.5 py-2.5 text-[13px] text-left text-danger hover:bg-danger/10 flex items-center gap-2">⏻ Keluar</button>
         </div>
       )}
       <button
@@ -289,14 +291,14 @@ function ProfileModal({ onClose, onSaved }: { onClose: () => void; onSaved: (tok
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">👤 Edit Profil</h3><button onClick={onClose} className="text-text2 hover:text-white text-lg leading-none">×</button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">👤 Edit Profil</h3><button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button></div>
         <div className="flex items-center gap-3 mb-4">
           <div className="w-16 h-16 rounded-full overflow-hidden flex items-center justify-center text-3xl shrink-0 bg-surface2" style={{ border: `2px solid ${color}` }}>
             {photoPreview ? <img src={photoPreview} alt="Foto profil" className="w-full h-full object-cover" /> : (user?.emoji || '👤')}
           </div>
           <div className="flex flex-col gap-1.5">
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onPick} />
-            <button type="button" onClick={() => fileRef.current?.click()} className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs">📷 {photoPreview ? 'Ganti Foto' : 'Unggah Foto'}</button>
+            <button type="button" onClick={() => fileRef.current?.click()} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs">📷 {photoPreview ? 'Ganti Foto' : 'Unggah Foto'}</button>
             {photoPreview && <button type="button" onClick={clearPhoto} className="text-[11px] text-danger hover:underline text-left">Hapus foto (pakai ikon)</button>}
             <span className="text-[10px] text-text2">JPG/PNG/WebP, maks 5 MB</span>
           </div>
