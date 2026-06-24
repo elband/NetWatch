@@ -50,7 +50,7 @@ router.get('/shift-windows', (req, res) => {
 router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, res) => {
   const body = req.body || {};
   const out = {};
-  for (const k of ['pagi', 'siang', 'malam']) {
+  for (const k of ['pagi', 'siang']) {
     const o = body[k];
     if (!o || typeof o !== 'object') return res.status(400).json({ error: `Jam untuk shift "${k}" wajib diisi.` });
     const start = Number(o.start), end = Number(o.end);

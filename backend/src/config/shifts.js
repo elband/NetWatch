@@ -7,10 +7,11 @@
 // =====================================================================
 
 // Nilai default pabrik — dipakai bila belum ada pengaturan kustom di DB.
+// Hanya Pagi & Siang yang berfungsi sebagai jendela on-duty (penerima insiden).
+// N/Dinas Kantor (malam) BUKAN jendela on-duty — teknisi N tidak ditugaskan insiden otomatis.
 export const DEFAULT_SHIFT_WINDOWS = {
   pagi: { start: 5, end: 13 },   // 05:00 - 13:00
   siang: { start: 12, end: 20 }, // 12:00 - 20:00
-  malam: { start: 20, end: 5 },  // 20:00 - 05:00 (lintas tengah malam)
 };
 
 // Window aktif yang dipakai seluruh logika on-duty. Bisa di-override Koordinator
@@ -19,7 +20,6 @@ export const DEFAULT_SHIFT_WINDOWS = {
 export const SHIFT_WINDOWS = {
   pagi: { ...DEFAULT_SHIFT_WINDOWS.pagi },
   siang: { ...DEFAULT_SHIFT_WINDOWS.siang },
-  malam: { ...DEFAULT_SHIFT_WINDOWS.malam },
 };
 
 /**
@@ -31,7 +31,7 @@ export async function loadShiftWindows(conn) {
     const [rows] = await conn.query("SELECT setting_value FROM settings WHERE setting_key = 'shift_windows' LIMIT 1");
     let v = rows[0]?.setting_value;
     if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
-    for (const k of ['pagi', 'siang', 'malam']) {
+    for (const k of ['pagi', 'siang']) {
       const d = DEFAULT_SHIFT_WINDOWS[k];
       const o = v && typeof v === 'object' ? v[k] : null;
       const start = o && Number.isFinite(Number(o.start)) ? Number(o.start) : d.start;
