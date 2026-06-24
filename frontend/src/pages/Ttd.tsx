@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { api } from '../api/client';
+import { alertDialog } from '../components/dialog';
 import { buildReportHtml, SECTIONS, type LaporanData, type LkpHead } from '../utils/laporanReport';
 
 const LKP_DEFAULT: LkpHead = {
@@ -71,13 +72,13 @@ export default function Ttd() {
   const go = (d: number) => setSlide((s) => (s + d + totalSlides) % totalSlides);
 
   async function submit(action: 'approve' | 'reject') {
-    if (action === 'approve' && !name.trim()) return alert('Nama penandatangan wajib diisi.');
+    if (action === 'approve' && !name.trim()) { alertDialog({ title: 'Nama wajib diisi', message: 'Masukkan nama penandatangan terlebih dahulu.', variant: 'warning' }); return; }
     setBusy(true);
     try {
       const res = await api.post(`/ttd/${encodeURIComponent(token)}`, action === 'approve' ? { action, name, nip } : { action, note });
       setDone(res.data.status);
       if (res.data.kasi_sign_token && doc) doc.kasi_sign_token = res.data.kasi_sign_token;
-    } catch (e: any) { alert(e?.response?.data?.error || 'Gagal memproses.'); }
+    } catch (e: any) { alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal memproses.', variant: 'danger' }); }
     finally { setBusy(false); }
   }
 

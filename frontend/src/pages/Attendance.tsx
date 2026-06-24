@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import { confirmDialog, promptDialog } from '../components/dialog';
 import type { Attendance as Att } from '../types';
 
 function recentMonths(n = 12) {
@@ -51,9 +52,9 @@ export default function Attendance() {
   async function decideAbsen(a: Absence, status: 'penalti' | 'dimaafkan' | 'reset') {
     let note: string | null = null;
     if (status !== 'reset') {
-      const r = window.prompt(status === 'penalti'
-        ? `Konfirmasi ALPA (−15 skor) — ${a.name}, ${a.work_date}. Catatan (opsional):`
-        : `Maafkan absen (tanpa penalti) — ${a.name}, ${a.work_date}. Catatan (opsional):`);
+      const r = await promptDialog(status === 'penalti'
+        ? { title: 'Konfirmasi ALPA (−15 skor)', message: `${a.name} · ${a.work_date}`, inputLabel: 'Catatan (opsional)', confirmText: 'Terapkan ALPA', variant: 'danger' }
+        : { title: 'Maafkan absen', message: `${a.name} · ${a.work_date} — tanpa penalti`, inputLabel: 'Catatan (opsional)', confirmText: 'Maafkan', variant: 'success' });
       if (r === null) return; // dibatalkan
       note = r;
     }
@@ -64,21 +65,21 @@ export default function Attendance() {
   async function toggleFlag(a: Att) { await api.patch(`/attendance/${a.id}`, { flagged: a.flagged ? 0 : 1 }); loadAbsensi(); }
   async function saveOffice() { if (!office) return; await api.put('/settings', { office }); setMsg('Lokasi kantor disimpan.'); setTimeout(() => setMsg(''), 3000); }
   async function decide(l: Leave, status: 'disetujui' | 'ditolak') {
-    const note = status === 'ditolak' ? (window.prompt('Alasan penolakan (opsional):') ?? '') : '';
+    const note = status === 'ditolak' ? ((await promptDialog({ title: 'Tolak pengajuan cuti', inputLabel: 'Alasan penolakan (opsional)', confirmText: 'Tolak', variant: 'danger' })) ?? '') : '';
     await api.patch(`/leave/${l.id}`, { status, note });
     api.get(`/leave?month=${month}`).then((r) => setLeaves(r.data.leave));
   }
   async function resetDevice(techId: number, name: string) {
-    if (!window.confirm(`Reset perangkat absensi ${name}? Perangkat berikutnya yang dipakai absen akan diikat ulang.`)) return;
+    if (!(await confirmDialog({ title: `Reset perangkat absensi`, message: `${name} — perangkat berikutnya yang dipakai absen akan diikat ulang.`, confirmText: '🔄 Reset', variant: 'warning' }))) return;
     await api.post(`/attendance/reset-device/${techId}`); setMsg(`Perangkat ${name} direset.`); setTimeout(() => setMsg(''), 3000);
   }
   function reloadRecap() { api.get(`/attendance/recap?month=${month}`).then((r) => setRecap(r.data.recap)).catch(() => {}); }
   async function toggleUser(r: Recap) {
-    if (!window.confirm(`${r.active ? 'Nonaktifkan' : 'Aktifkan'} akun ${r.name}?${r.active ? ' Akses dashboard-nya akan langsung hilang.' : ''}`)) return;
+    if (!(await confirmDialog({ title: `${r.active ? 'Nonaktifkan' : 'Aktifkan'} akun ${r.name}`, message: r.active ? 'Akses dashboard-nya akan langsung hilang.' : 'Akun akan bisa mengakses dashboard kembali.', confirmText: r.active ? 'Nonaktifkan' : 'Aktifkan', variant: r.active ? 'warning' : 'success' }))) return;
     await api.patch(`/users/${r.techId}/toggle-active`); setMsg(`${r.name} ${r.active ? 'dinonaktifkan' : 'diaktifkan'}.`); setTimeout(() => setMsg(''), 3000); reloadRecap();
   }
   async function hapusUser(r: Recap) {
-    if (!window.confirm(`HAPUS akun ${r.name} secara permanen? Akses dashboard hilang & data jadwal/absensi miliknya ikut terhapus. Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!(await confirmDialog({ title: `Hapus akun ${r.name}`, message: 'Akses dashboard hilang & data jadwal/absensi miliknya ikut terhapus. Tindakan ini tidak bisa dibatalkan.', confirmText: '🗑️ Hapus permanen', variant: 'danger' }))) return;
     try { await api.delete(`/users/${r.techId}`); setMsg(`Akun ${r.name} dihapus.`); setTimeout(() => setMsg(''), 3000); reloadRecap(); }
     catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal menghapus.'); }
   }
@@ -132,7 +133,7 @@ export default function Attendance() {
                 <td className="px-3 py-2.5">{a.check_in_lat != null && a.check_in_lng != null ? <a href={`https://www.google.com/maps?q=${a.check_in_lat},${a.check_in_lng}`} target="_blank" rel="noreferrer" className="text-accent2 hover:underline text-[11px]">📍 Peta</a> : <span className="text-text2 text-[10px]">GPS mati</span>}</td>
                 <td className="px-3 py-2.5">{a.flagged ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-danger/15 text-danger font-semibold">⚠️ Ditandai</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/15 text-success">✓ Wajar</span>}</td>
                 <td className="px-3 py-2.5 text-text2 text-[11px] max-w-[220px]"><div className="truncate" title={a.reason || ''}>{a.reason || '-'}</div></td>
-                <td className="px-3 py-2.5">{isAdmin && <button onClick={() => toggleFlag(a)} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5 text-[10px]">{a.flagged ? '✓ Wajar' : '⚠️ Tandai'}</button>}</td>
+                <td className="px-3 py-2.5">{isAdmin && <button onClick={() => toggleFlag(a)} className="border border-border text-text2 hover:text-text rounded px-2 py-0.5 text-[10px]">{a.flagged ? '✓ Wajar' : '⚠️ Tandai'}</button>}</td>
               </tr>
             ))}
             {rows.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-text2">Belum ada data absensi.</td></tr>}
@@ -181,7 +182,7 @@ export default function Attendance() {
                 <td className={`px-3 py-2.5 text-center ${r.flagged > 0 ? 'text-danger font-semibold' : 'text-text2'}`}>{r.flagged}</td>
                 {isAdmin && <td className="px-3 py-2.5"><div className="flex gap-1.5 flex-wrap">
                   <button onClick={() => toggleUser(r)} className={`rounded px-2 py-0.5 text-[10px] border ${r.active ? 'border-warn/40 text-warn' : 'border-success/40 text-success'}`}>{r.active ? '🚫 Nonaktifkan' : '✓ Aktifkan'}</button>
-                  <button onClick={() => resetDevice(r.techId, r.name)} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5 text-[10px]">📱 Reset HP</button>
+                  <button onClick={() => resetDevice(r.techId, r.name)} className="border border-border text-text2 hover:text-text rounded px-2 py-0.5 text-[10px]">📱 Reset HP</button>
                   <button onClick={() => hapusUser(r)} className="border border-danger/40 text-danger rounded px-2 py-0.5 text-[10px]">🗑️ Hapus</button>
                 </div></td>}
               </tr>
@@ -218,7 +219,7 @@ export default function Attendance() {
                 <td className="px-3 py-2.5"><div className="flex gap-1.5 flex-wrap">
                   {a.status !== 'penalti' && <button onClick={() => decideAbsen(a, 'penalti')} className="border border-danger/40 text-danger rounded px-2 py-0.5 text-[10px]">⚠️ Alpa −15</button>}
                   {a.status !== 'dimaafkan' && <button onClick={() => decideAbsen(a, 'dimaafkan')} className="border border-success/40 text-success rounded px-2 py-0.5 text-[10px]">✓ Maafkan</button>}
-                  {a.status && <button onClick={() => decideAbsen(a, 'reset')} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5 text-[10px]">↺ Reset</button>}
+                  {a.status && <button onClick={() => decideAbsen(a, 'reset')} className="border border-border text-text2 hover:text-text rounded px-2 py-0.5 text-[10px]">↺ Reset</button>}
                 </div></td>
               </tr>
             ))}

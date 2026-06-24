@@ -45,7 +45,7 @@ export default function ActivityModal({ onClose, onDone }: { onClose: () => void
       <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-bold">📋 Ajukan Kegiatan Lain</h3>
-          <button type="button" className="text-text2 hover:text-white text-lg leading-none" onClick={onClose}>×</button>
+          <button type="button" className="text-text2 hover:text-text text-lg leading-none" onClick={onClose}>×</button>
         </div>
         <label className="block text-[11px] text-text2 mb-1">Jenis kegiatan</label>
         <div className="flex flex-wrap gap-1.5 mb-3">
@@ -68,14 +68,14 @@ export default function ActivityModal({ onClose, onDone }: { onClose: () => void
           accept="image/*,application/pdf"
           capture="environment"
           onChange={(e) => setBukti(e.target.files?.[0] || null)}
-          className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white mb-1"
+          className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text mb-1"
         />
         {bukti && <div className="text-[10px] text-accent2 mb-3">✓ {bukti.name} ({Math.round(bukti.size / 1024)} KB)</div>}
         {!bukti && <div className="mb-3" />}
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="text-[10px] text-text2 mb-3">Pengajuan dikirim ke koordinator via WhatsApp untuk disetujui.</div>
         <div className="flex gap-2 justify-end">
-          <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white" onClick={onClose} disabled={busy}>Batal</button>
+          <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text" onClick={onClose} disabled={busy}>Batal</button>
           <button type="button" className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={submit} disabled={busy}>{busy ? 'Mengirim…' : 'Ajukan'}</button>
         </div>
       </div>

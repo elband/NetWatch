@@ -592,6 +592,19 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance (
   FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- Dokumentasi foto maintenance (banyak foto per rencana maintenance).
+CREATE TABLE IF NOT EXISTS equipment_maintenance_photos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  maintenance_id INT NOT NULL,
+  url VARCHAR(255) NOT NULL,
+  caption VARCHAR(255) DEFAULT NULL,
+  uploaded_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_mphoto_maint (maintenance_id),
+  FOREIGN KEY (maintenance_id) REFERENCES equipment_maintenance(id) ON DELETE CASCADE,
+  FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 -- Notification Center: notifikasi per-user, dikirim real-time via Socket.IO.
 CREATE TABLE IF NOT EXISTS notifications (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

@@ -36,7 +36,7 @@ export default function PanduanModal({ onClose }: Props) {
           </button>
           <button
             onClick={onClose}
-            className="bg-surface border border-border text-white rounded-lg px-4 py-2 text-sm font-semibold shadow-lg hover:bg-surface2 transition-colors"
+            className="bg-surface border border-border text-text rounded-lg px-4 py-2 text-sm font-semibold shadow-lg hover:bg-surface2 transition-colors"
           >
             ✕ Tutup
           </button>

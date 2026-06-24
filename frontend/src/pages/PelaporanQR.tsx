@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { api } from '../api/client';
+import { alertDialog } from '../components/dialog';
 import type { Room, QrStats } from '../types';
 
 const publicUrl = (kode: string) => `${location.origin}/lapor?room=${encodeURIComponent(kode)}`;
@@ -22,7 +23,7 @@ export default function PelaporanQR() {
   function demo() {
     const r = rooms.find((x) => x.active) || rooms[0];
     if (r) window.open(publicUrl(r.kode), '_blank');
-    else alert('Tambahkan ruangan dulu untuk demo.');
+    else alertDialog({ title: 'Belum ada ruangan', message: 'Tambahkan ruangan dulu untuk mencoba demo.', variant: 'warning' });
   }
 
   const Stat = ({ l, v, c }: { l: string; v: number | string; c: string }) => (
@@ -35,7 +36,7 @@ export default function PelaporanQR() {
         <div className="text-[17px] font-bold">📱 Pelaporan Fasilitas QR</div>
         <div className="flex items-center gap-2">
           <button onClick={demo} className="bg-accent2 text-bg rounded-md px-3 py-1.5 text-xs font-semibold">🎬 Demo Scan QR</button>
-          <button onClick={() => setBulk(true)} className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs">⚡ Bulk Ruangan</button>
+          <button onClick={() => setBulk(true)} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs">⚡ Bulk Ruangan</button>
           <button onClick={() => setEdit('new')} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Tambah Ruangan</button>
         </div>
       </div>

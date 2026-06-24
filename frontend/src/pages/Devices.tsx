@@ -5,6 +5,7 @@ import { getSocket } from '../api/socket';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { DeviceStatusBadge } from '../components/StatusBadge';
+import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Device } from '../types';
 
 function meterColor(v: number) {
@@ -33,13 +34,13 @@ export default function Devices() {
   const canAlarm = hasRole(user, 'admin', 'koordinator', 'teknisi');
 
   async function requestAlarm(d: Device) {
-    if (!confirm(`Alarmkan "${d.name}" sekarang?\nPerangkat ini terkategori "dimatikan" (jam malam). Tindakan ini membuat insiden alarm & memberi tahu teknisi on-duty.`)) return;
+    if (!(await confirmDialog({ title: `Alarmkan ${d.name}`, message: 'Perangkat ini terkategori "dimatikan" (jam malam). Tindakan ini membuat insiden alarm & memberi tahu teknisi on-duty.', confirmText: '🔔 Alarmkan', variant: 'warning' }))) return;
     try {
       const r = await api.post(`/devices/${d.id}/request-alarm`);
       setDevices((prev) => prev.map((x) => (x.id === d.id ? { ...x, off_reason: null } : x)));
-      alert(r.data.incidentId ? `Alarm dibuat (${r.data.incidentId}). Notifikasi ke ${r.data.notified} teknisi on-duty.` : 'Perangkat ditandai untuk dialarmkan.');
+      alertDialog({ title: 'Alarm dibuat', message: r.data.incidentId ? `Alarm dibuat (${r.data.incidentId}). Notifikasi ke ${r.data.notified} teknisi on-duty.` : 'Perangkat ditandai untuk dialarmkan.', variant: 'success' });
     } catch (e: any) {
-      alert(e?.response?.data?.error || 'Gagal mengalarmkan perangkat.');
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mengalarmkan perangkat.', variant: 'danger' });
     }
   }
 
@@ -61,12 +62,12 @@ export default function Devices() {
   }
 
   async function removeDevice(d: Device) {
-    if (!confirm(`Hapus perangkat "${d.name}" (${d.ip})?\nInsiden terkait akan dilepas dari perangkat ini, dan riwayat inspeksi/maintenance-nya ikut terhapus.`)) return;
+    if (!(await confirmDialog({ title: `Hapus perangkat ${d.name}`, message: `${d.ip}\n\nInsiden terkait akan dilepas dari perangkat ini, dan riwayat inspeksi/maintenance-nya ikut terhapus.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     try {
       await api.delete(`/devices/${d.id}`);
       setDevices((prev) => prev.filter((x) => x.id !== d.id));
     } catch (e: any) {
-      alert(e?.response?.data?.error || 'Gagal menghapus perangkat.');
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal menghapus perangkat.', variant: 'danger' });
     }
   }
 
@@ -129,7 +130,7 @@ export default function Devices() {
       priority: 'kritis',
       source: 'manual',
     });
-    alert(`Insiden dibuat untuk ${device.name}`);
+    alertDialog({ title: 'Insiden dibuat', message: `Insiden manual dibuat untuk ${device.name}.`, variant: 'success' });
   }
 
   const filtered = devices.filter(
@@ -233,7 +234,7 @@ export default function Devices() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-border shrink-0">
               <h3 className="text-sm font-bold">{editId ? '✏️ Edit Perangkat' : '🖥️ Tambah Perangkat'}</h3>
-              <button type="button" className="text-text2 hover:text-white text-lg leading-none" onClick={closeForm}>×</button>
+              <button type="button" className="text-text2 hover:text-text text-lg leading-none" onClick={closeForm}>×</button>
             </div>
             <form onSubmit={(e) => { e.preventDefault(); submitDevice(); }} className="flex flex-col flex-1 overflow-hidden">
             <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -292,7 +293,7 @@ export default function Devices() {
             <div className="px-5 py-3 border-t border-border shrink-0">
               {formErr && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-2">⚠️ {formErr}</div>}
               <div className="flex gap-2 justify-end">
-                <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white" onClick={closeForm} disabled={saving}>Batal</button>
+                <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text" onClick={closeForm} disabled={saving}>Batal</button>
                 <button type="submit" className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" disabled={saving}>{saving ? 'Menyimpan…' : 'Simpan'}</button>
               </div>
             </div>

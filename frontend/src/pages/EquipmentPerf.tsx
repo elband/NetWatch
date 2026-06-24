@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import MaintenancePhotosModal from '../components/MaintenancePhotosModal';
+import { confirmDialog, alertDialog } from '../components/dialog';
 import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
@@ -165,7 +167,7 @@ function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: 
       fd.append('photo', file);
       if (geo) { fd.append('lat', String(geo.lat)); fd.append('lng', String(geo.lng)); }
       const res = await api.post('/equipment/inspections', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      if (res.data?.warning) alert('Tersimpan, namun: ' + res.data.warning + '\n(ditandai BELUM TERVERIFIKASI untuk koordinator)');
+      if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -209,7 +211,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
   const [rows, setRows] = useState<MaintenanceRow[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [completeFor, setCompleteFor] = useState<MaintenanceRow | null>(null);
+  const [photoModalFor, setPhotoModalFor] = useState<MaintenanceRow | null>(null);
   const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -224,7 +226,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
     load();
   }
   async function remove(id: number) {
-    if (!confirm('Hapus rencana maintenance ini?')) return;
+    if (!(await confirmDialog({ title: 'Hapus rencana maintenance', message: 'Rencana maintenance ini akan dihapus.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     await api.delete(`/equipment/maintenance/${id}`);
     load();
   }
@@ -264,7 +266,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
         {isManager && (
           <div className="flex gap-2 ml-auto flex-wrap">
             <button onClick={() => setShowAdd(true)} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Tambah</button>
-            <button onClick={downloadTemplate} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white">⬇️ Template Excel</button>
+            <button onClick={downloadTemplate} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text">⬇️ Template Excel</button>
             <button onClick={() => fileRef.current?.click()} className="border border-accent2/40 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">⬆️ Import Excel</button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} />
           </div>
@@ -282,12 +284,14 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
               <tr key={m.id} className="border-b border-border/50">
                 <td className="px-3.5 py-2.5 font-mono text-[11px]">{m.scheduled_date}</td>
                 <td className="px-3.5 py-2.5"><strong>{m.device_name}</strong><div className="text-text2 text-[10px]">{m.device_type}</div></td>
-                <td className="px-3.5 py-2.5">{m.task}{m.note && <div className="text-text2 text-[10px]">{m.note}</div>}{m.doc_url && <a href={m.doc_url} target="_blank" rel="noreferrer" className="text-accent2 text-[10px] hover:underline">📎 Dokumentasi</a>}</td>
+                <td className="px-3.5 py-2.5">{m.task}{m.note && <div className="text-text2 text-[10px]">{m.note}</div>}
+                  <button onClick={() => setPhotoModalFor(m)} className="block text-accent2 text-[10px] hover:underline mt-0.5">📷 {m.photo_count || 0} foto dokumentasi{m.doc_url ? ' + lampiran' : ''}</button>
+                </td>
                 <td className="px-3.5 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded border font-semibold capitalize ${stMeta[m.status]}`}>{m.status}</span></td>
                 <td className="px-3.5 py-2.5 text-text2 text-[11px]">{m.done_by_name || '-'}{m.done_at && <div className="text-[10px]">{m.done_at}</div>}</td>
                 <td className="px-3.5 py-2.5">
                   <div className="flex gap-1.5 flex-wrap">
-                    {m.status !== 'selesai' && <button onClick={() => setCompleteFor(m)} className="border border-success/40 text-success rounded px-2 py-0.5">✅ Selesai</button>}
+                    {m.status !== 'selesai' && <button onClick={() => setPhotoModalFor(m)} className="border border-success/40 text-success rounded px-2 py-0.5">✅ Selesai</button>}
                     {m.status !== 'rencana' && <button onClick={() => setStatus(m.id, 'rencana')} className="border border-border text-text2 rounded px-2 py-0.5">↺ Rencana</button>}
                     {isManager && <button onClick={() => remove(m.id)} className="border border-danger/40 text-danger rounded px-2 py-0.5">🗑️</button>}
                   </div>
@@ -300,55 +304,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
       </div>
 
       {showAdd && <AddMaintenanceModal devices={devices} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
-      {completeFor && <CompleteMaintenanceModal item={completeFor} onClose={() => setCompleteFor(null)} onDone={(n) => { setCompleteFor(null); setMsg(`✅ Maintenance selesai. Notifikasi terkirim ke ${n} koordinator.`); setTimeout(() => setMsg(''), 6000); load(); }} />}
-    </div>
-  );
-}
-
-// Modal penyelesaian maintenance: wajib unggah dokumentasi (foto/PDF, bisa dari kamera).
-function CompleteMaintenanceModal({ item, onClose, onDone }: { item: MaintenanceRow; onClose: () => void; onDone: (notified: number) => void }) {
-  const [doc, setDoc] = useState<File | null>(null);
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const hasExisting = !!item.doc_url;
-
-  async function submit() {
-    if (!doc && !hasExisting) return setErr('Dokumentasi (foto/PDF) wajib diunggah untuk menyelesaikan maintenance.');
-    setBusy(true); setErr('');
-    try {
-      const fd = new FormData();
-      fd.append('status', 'selesai');
-      if (note.trim()) fd.append('note', note.trim());
-      if (doc) fd.append('doc', doc);
-      const r = await api.put(`/equipment/maintenance/${item.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      onDone(r.data.notified ?? 0);
-    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-bold mb-1">✅ Selesaikan Maintenance</h3>
-        <div className="text-[11px] text-text2 mb-4">{item.device_name} · {item.task}</div>
-
-        <label className="block text-[11px] text-text2 mb-1">📷 Dokumentasi * (foto/PDF — bisa langsung dari kamera)</label>
-        <input type="file" accept="image/*,application/pdf" capture="environment" onChange={(e) => setDoc(e.target.files?.[0] || null)}
-          className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white file:cursor-pointer" />
-        {doc && <div className="text-[10px] text-accent2 mb-2 flex items-center gap-1.5">{doc.type.startsWith('image') ? '🖼️' : '📄'} {doc.name}<button type="button" onClick={() => setDoc(null)} className="text-danger">✕</button></div>}
-        {!doc && hasExisting && <div className="text-[10px] text-text2 mb-2">Sudah ada dokumentasi terlampir; unggah baru untuk menggantinya (opsional).</div>}
-
-        <label className="block text-[11px] text-text2 mb-1">Catatan Hasil (opsional)</label>
-        <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Kondisi setelah maintenance…" />
-
-        <div className="text-[10px] text-text2 mb-3">ℹ️ Setelah selesai, notifikasi WhatsApp otomatis dikirim ke koordinator.</div>
-        {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
-        <div className="flex gap-2 justify-end">
-          <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
-          <button className="bg-success text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={submit} disabled={busy}>{busy ? 'Menyimpan…' : '✅ Selesai & Kirim Notifikasi'}</button>
-        </div>
-      </div>
+      {photoModalFor && <MaintenancePhotosModal item={photoModalFor} onClose={() => { setPhotoModalFor(null); load(); }} onCompleted={(n) => { setPhotoModalFor(null); setMsg(`✅ Maintenance selesai. Notifikasi terkirim ke ${n} koordinator.`); setTimeout(() => setMsg(''), 6000); load(); }} />}
     </div>
   );
 }
@@ -396,7 +352,7 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
         <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={note} onChange={(e) => setNote(e.target.value)} />
         <label className="block text-[11px] text-text2 mb-1">📎 Dokumentasi (foto/PDF — bisa langsung dari kamera)</label>
         <input type="file" accept="image/*,application/pdf" capture="environment" onChange={(e) => setDoc(e.target.files?.[0] || null)}
-          className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white file:cursor-pointer" />
+          className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text file:cursor-pointer" />
         {doc && <div className="text-[10px] text-accent2 mb-3 flex items-center gap-1.5">{doc.type.startsWith('image') ? '🖼️' : '📄'} {doc.name}<button type="button" onClick={() => setDoc(null)} className="text-danger">✕</button></div>}
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">

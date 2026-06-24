@@ -232,7 +232,7 @@ export default function Performa() {
                     <td className={`px-3 py-2 text-center ${r.eskalasi > 0 ? 'text-amber-400' : 'text-slate-500'}`}>{r.eskalasi}</td>
                     <td className="px-3 py-2 text-center"><span className="px-1.5 py-0.5 rounded font-bold text-[10px]" style={{ background: `${gradeColor(r.grade)}22`, color: gradeColor(r.grade) }}>{r.grade}</span></td>
                     <td className="px-3 py-2 font-extrabold" style={{ color: scoreColor(r.score) }}>{r.score}</td>
-                    <td className="px-3 py-2"><button onClick={() => setDetailFor(r.techId)} className="text-slate-500 hover:text-white text-[10px] border border-slate-700 rounded px-1.5 py-0.5">🔍</button></td>
+                    <td className="px-3 py-2"><button onClick={() => setDetailFor(r.techId)} className="text-slate-500 hover:text-text text-[10px] border border-slate-700 rounded px-1.5 py-0.5">🔍</button></td>
                   </tr>
                 ))}
               </tbody>

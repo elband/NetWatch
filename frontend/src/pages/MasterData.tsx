@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import LocationMap from '../components/LocationMap';
+import { confirmDialog } from '../components/dialog';
 import type { Asset, ServiceItem, LocationItem, User } from '../types';
 
 type Tab = 'aset' | 'layanan' | 'lokasi';
@@ -27,7 +28,7 @@ export default function MasterData() {
 
 const inputCls = 'bg-surface2 border border-border rounded-md px-3 py-2 text-xs outline-none focus:border-accent';
 const btnPrimary = 'bg-accent text-bg rounded-md px-3 py-2 text-xs font-semibold disabled:opacity-50';
-const btnGhost = 'border border-border text-text2 hover:text-white rounded px-2 py-1 text-[11px]';
+const btnGhost = 'border border-border text-text2 hover:text-text rounded px-2 py-1 text-[11px]';
 
 // ===================== ASET =====================
 function AssetsTab() {
@@ -51,7 +52,7 @@ function AssetsTab() {
     setForm(empty); setEditId(null); load();
   }
   async function del(id: number) {
-    if (!window.confirm('Hapus aset ini?')) return;
+    if (!(await confirmDialog({ title: 'Hapus aset', message: 'Aset ini akan dihapus dari master data.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     await api.delete(`/assets/${id}`); load();
   }
   function edit(a: Asset) {
@@ -127,7 +128,7 @@ function ServicesTab() {
     else await api.post('/services', form);
     setForm(empty); setEditId(null); load();
   }
-  async function del(id: number) { if (window.confirm('Hapus layanan ini?')) { await api.delete(`/services/${id}`); load(); } }
+  async function del(id: number) { if (await confirmDialog({ title: 'Hapus layanan', message: 'Layanan ini akan dihapus dari master data.', confirmText: '🗑️ Hapus', variant: 'danger' })) { await api.delete(`/services/${id}`); load(); } }
   function edit(s: ServiceItem) { setEditId(s.id); setForm({ name: s.name, icon: s.icon, status: s.status, isOk: !!s.is_ok, detail: s.detail || '', sortOrder: s.sort_order }); }
 
   return (
@@ -192,7 +193,7 @@ function LocationsTab() {
     else await api.post('/locations', form);
     setForm(empty); setEditId(null); load();
   }
-  async function del(id: number) { if (window.confirm('Hapus lokasi ini?')) { await api.delete(`/locations/${id}`); load(); } }
+  async function del(id: number) { if (await confirmDialog({ title: 'Hapus lokasi', message: 'Lokasi ini akan dihapus dari master data.', confirmText: '🗑️ Hapus', variant: 'danger' })) { await api.delete(`/locations/${id}`); load(); } }
   function edit(l: LocationItem) { setEditId(l.id); setForm({ name: l.name, icon: l.icon, sortOrder: l.sort_order }); }
 
   return (

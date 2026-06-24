@@ -83,7 +83,7 @@ export default function ConfirmDialog({
             </button>
             <button
               ref={confirmRef} onClick={onConfirm} disabled={loading}
-              className="flex-1 py-2.5 rounded-lg text-[13px] font-bold text-white transition active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 rounded-lg text-[13px] font-bold text-text transition active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-2"
               style={{ background: meta.color }}
             >
               {loading && <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}

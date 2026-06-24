@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { confirmDialog, alertDialog } from '../components/dialog';
 
 interface PelaksanaResp {
   valid: boolean;
@@ -24,13 +25,13 @@ export default function TtdPelaksana() {
   }, [token]);
 
   async function sign() {
-    if (!window.confirm('Konfirmasi: Anda akan menandatangani dokumen ini secara elektronik atas nama Anda sendiri. Lanjutkan?')) return;
+    if (!(await confirmDialog({ title: 'Tanda tangan elektronik', message: 'Anda akan menandatangani dokumen ini secara elektronik atas nama Anda sendiri. Lanjutkan?', confirmText: '✍️ Tanda tangani', variant: 'info' }))) return;
     setBusy(true);
     try {
       await api.post(`/surat/pelaksana-sign/${encodeURIComponent(token)}`, {});
       setDone(true);
     } catch (e: any) {
-      alert(e?.response?.data?.error || 'Gagal menandatangani. Coba lagi.');
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal menandatangani. Coba lagi.', variant: 'danger' });
     } finally {
       setBusy(false);
     }

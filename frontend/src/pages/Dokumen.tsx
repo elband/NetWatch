@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import { confirmDialog } from '../components/dialog';
 import type { Dokumen as Doc, DokumenStats, DocCategory, DocComment, DocVersion, DocStatus } from '../types';
 
 const STATUS: Record<DocStatus, { label: string; cls: string }> = {
@@ -154,7 +155,7 @@ const F = ({ label, children, full }: { label: string; children: React.ReactNode
 function CategoryPanel({ cats, onChange }: { cats: DocCategory[]; onChange: () => void }) {
   const [name, setName] = useState('');
   async function add() { if (!name.trim()) return; await api.post('/dokumen/categories', { name: name.trim() }); setName(''); onChange(); }
-  async function del(id: number) { if (!confirm('Hapus kategori?')) return; await api.delete(`/dokumen/categories/${id}`); onChange(); }
+  async function del(id: number) { if (!(await confirmDialog({ title: 'Hapus kategori', message: 'Kategori dokumen ini akan dihapus.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return; await api.delete(`/dokumen/categories/${id}`); onChange(); }
   return (
     <Panel title="🗂️ Kelola Kategori">
       <div className="space-y-1 mb-2 max-h-[160px] overflow-y-auto">{cats.map((c) => <div key={c.id} className="flex items-center justify-between text-[11px]"><span>{c.name} <span className="text-text2">({c.jumlah})</span></span><button onClick={() => del(c.id)} className="text-danger">✕</button></div>)}</div>
@@ -183,7 +184,7 @@ function DocForm({ cats, edit, onClose, onSaved }: { cats: DocCategory[]; edit: 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">📄 {edit ? 'Edit' : 'Tambah'} Dokumen</h3><button onClick={onClose} className="text-text2 hover:text-white text-lg">×</button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">📄 {edit ? 'Edit' : 'Tambah'} Dokumen</h3><button onClick={onClose} className="text-text2 hover:text-text text-lg">×</button></div>
         <div className="grid sm:grid-cols-2 gap-3">
           <F label="Judul Dokumen *" full><input className={inp} value={f.judul} onChange={(e) => set('judul', e.target.value)} /></F>
           <F label="Nomor Dokumen"><input className={inp} value={f.nomor} onChange={(e) => set('nomor', e.target.value)} /></F>
@@ -199,7 +200,7 @@ function DocForm({ cats, edit, onClose, onSaved }: { cats: DocCategory[]; edit: 
           <F label="Link Video Tutorial"><input className={inp} value={f.video_url} onChange={(e) => set('video_url', e.target.value)} placeholder="https://…" /></F>
           <F label="Link Referensi"><input className={inp} value={f.link_ref} onChange={(e) => set('link_ref', e.target.value)} /></F>
           <F label="Catatan Revisi" full><input className={inp} value={f.catatan_revisi} onChange={(e) => set('catatan_revisi', e.target.value)} /></F>
-          <F label="📎 Lampiran File (PDF/PPT/DOC/gambar)" full><input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white" /></F>
+          <F label="📎 Lampiran File (PDF/PPT/DOC/gambar)" full><input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text" /></F>
         </div>
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mt-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end mt-4"><button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button><button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan'}</button></div>
@@ -219,7 +220,7 @@ function DocDetail({ id, isManager, onClose, onChanged, onEdit }: { id: number; 
   async function setStatus(s: DocStatus) { const r = await api.patch(`/dokumen/${id}/status`, { status: s }); setD(r.data.document); onChanged(); }
   async function toggleFav() { const r = await api.post(`/dokumen/${id}/favorite`); setFav(r.data.favorited); }
   async function addComment() { if (!cmt.trim()) return; const r = await api.post(`/dokumen/${id}/comment`, { body: cmt }); setComments(r.data.comments); setCmt(''); }
-  async function hapus() { if (!confirm('Hapus dokumen ini?')) return; await api.delete(`/dokumen/${id}`); onChanged(); onClose(); }
+  async function hapus() { if (!(await confirmDialog({ title: 'Hapus dokumen', message: 'Dokumen ini akan dihapus permanen.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return; await api.delete(`/dokumen/${id}`); onChanged(); onClose(); }
   if (!d) return null;
   const NEXT: Record<string, DocStatus[]> = { draft: ['review'], review: ['disetujui', 'draft'], disetujui: ['aktif'], aktif: ['kadaluarsa', 'arsip'], kadaluarsa: ['aktif', 'arsip'], arsip: ['aktif'] };
   const LBL: Record<string, string> = { review: '📤 Ajukan Review', disetujui: '✔ Setujui', aktif: '✅ Aktifkan', kadaluarsa: '⚠️ Tandai Kadaluarsa', arsip: '🗄️ Arsipkan', draft: '↩ Kembalikan Draft' };

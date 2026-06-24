@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import { confirmDialog, promptDialog } from '../components/dialog';
 import type { KegiatanNr as Keg, KnrStats, KnrRecap, KnrStatus } from '../types';
 
 const STATUS: Record<KnrStatus, { label: string; cls: string }> = {
@@ -109,7 +110,7 @@ export default function KegiatanNonRutin() {
                 <td className={`px-3 py-2.5 font-semibold ${KESULITAN[d.tingkat_kesulitan]?.cls}`}>{KESULITAN[d.tingkat_kesulitan]?.label}</td>
                 <td className="px-3 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${STATUS[d.status].cls}`}>{STATUS[d.status].label}</span></td>
                 <td className="px-3 py-2.5 font-bold text-success">{d.poin}</td>
-                <td className="px-3 py-2.5"><button onClick={() => setDetail(d.id)} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5 text-[10px]">👁️ Lihat</button></td>
+                <td className="px-3 py-2.5"><button onClick={() => setDetail(d.id)} className="border border-border text-text2 hover:text-text rounded px-2 py-0.5 text-[10px]">👁️ Lihat</button></td>
               </tr>
             ))}
             {rows.length === 0 && <tr><td colSpan={12} className="px-3 py-6 text-center text-text2">{tab === 'persetujuan' ? 'Tidak ada kegiatan menunggu persetujuan.' : 'Belum ada kegiatan.'}</td></tr>}
@@ -173,7 +174,7 @@ function KegForm({ cats, edit, onClose, onSaved }: { cats: string[]; edit: Keg |
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">📝 {edit ? 'Edit' : 'Tambah'} Kegiatan Non-Rutin</h3><button onClick={onClose} className="text-text2 hover:text-white text-lg">×</button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">📝 {edit ? 'Edit' : 'Tambah'} Kegiatan Non-Rutin</h3><button onClick={onClose} className="text-text2 hover:text-text text-lg">×</button></div>
         <div className="grid sm:grid-cols-2 gap-3">
           <F label="Judul Kegiatan *" full><input className={inp} value={f.judul} onChange={(e) => set('judul', e.target.value)} /></F>
           <F label="Tanggal Kegiatan"><input type="date" className={inp} value={f.tanggal_kegiatan} onChange={(e) => set('tanggal_kegiatan', e.target.value)} /></F>
@@ -186,8 +187,8 @@ function KegForm({ cats, edit, onClose, onSaved }: { cats: string[]; edit: Keg |
           <F label="Jumlah Personel"><input type="number" className={inp} value={f.jumlah_personel} onChange={(e) => set('jumlah_personel', e.target.value)} /></F>
           <F label="Uraian Kegiatan" full><textarea className={`${inp} min-h-[60px]`} value={f.uraian} onChange={(e) => set('uraian', e.target.value)} /></F>
           <F label="Hasil Kegiatan" full><textarea className={`${inp} min-h-[50px]`} value={f.hasil} onChange={(e) => set('hasil', e.target.value)} /></F>
-          <F label="📷 Dokumentasi Foto (bisa banyak)"><input type="file" multiple accept="image/*" capture="environment" onChange={(e) => setFoto(Array.from(e.target.files || []))} className="w-full text-[11px] text-text2 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:bg-surface2 file:text-white" />{foto.length > 0 && <div className="text-[10px] text-accent2 mt-1">{foto.length} foto</div>}</F>
-          <F label="📎 Lampiran Dokumen (PDF, dll.)"><input type="file" multiple accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx" onChange={(e) => setDok(Array.from(e.target.files || []))} className="w-full text-[11px] text-text2 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:bg-surface2 file:text-white" />{dok.length > 0 && <div className="text-[10px] text-accent2 mt-1">{dok.length} file</div>}</F>
+          <F label="📷 Dokumentasi Foto (bisa banyak)"><input type="file" multiple accept="image/*" capture="environment" onChange={(e) => setFoto(Array.from(e.target.files || []))} className="w-full text-[11px] text-text2 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:bg-surface2 file:text-text" />{foto.length > 0 && <div className="text-[10px] text-accent2 mt-1">{foto.length} foto</div>}</F>
+          <F label="📎 Lampiran Dokumen (PDF, dll.)"><input type="file" multiple accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx" onChange={(e) => setDok(Array.from(e.target.files || []))} className="w-full text-[11px] text-text2 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:bg-surface2 file:text-text" />{dok.length > 0 && <div className="text-[10px] text-accent2 mt-1">{dok.length} file</div>}</F>
         </div>
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mt-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end mt-4"><button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button><button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan (Draft)'}</button></div>
@@ -203,13 +204,13 @@ function KegDetail({ id, isManager, userId, onClose, onChanged, onEdit }: { id: 
   useEffect(load, [id]);
   async function setStatus(next: KnrStatus, ask?: boolean, askPoin?: boolean) {
     let note = ''; let poin: string | undefined;
-    if (ask) { const v = window.prompt(next === 'ditolak' ? 'Alasan penolakan:' : 'Catatan koordinator (opsional):'); if (v === null) return; note = v; }
-    if (askPoin) { const p = window.prompt(`Bobot/poin penilaian (default ${d?.poin}):`, String(d?.poin || '')); if (p) poin = p; }
+    if (ask) { const v = await promptDialog(next === 'ditolak' ? { title: 'Tolak kegiatan', inputLabel: 'Alasan penolakan', confirmText: 'Tolak', variant: 'danger', required: true } : { title: 'Setujui kegiatan', inputLabel: 'Catatan koordinator (opsional)', confirmText: 'Setujui', variant: 'success' }); if (v === null) return; note = v; }
+    if (askPoin) { const p = await promptDialog({ title: 'Bobot / poin penilaian', inputLabel: `Poin (default ${d?.poin})`, confirmText: 'Simpan' }, String(d?.poin || '')); if (p) poin = p; }
     setBusy(true);
     try { const r = await api.patch(`/kegiatan-nr/${id}/status`, { status: next, note, poin }); setD(r.data.kegiatan); onChanged(); }
     catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal.'); setTimeout(() => setMsg(''), 4000); } finally { setBusy(false); }
   }
-  async function hapus() { if (!confirm('Hapus kegiatan ini?')) return; await api.delete(`/kegiatan-nr/${id}`); onChanged(); onClose(); }
+  async function hapus() { if (!(await confirmDialog({ title: 'Hapus kegiatan', message: 'Kegiatan non-rutin ini akan dihapus permanen.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return; await api.delete(`/kegiatan-nr/${id}`); onChanged(); onClose(); }
   if (!d) return null;
   const owner = d.created_by === userId || d.petugas_id === userId;
   const Row = ({ k, v }: { k: string; v: React.ReactNode }) => <div className="flex gap-2 text-[12px] py-0.5"><div className="text-text2 w-32 shrink-0">{k}</div><div className="flex-1">{v || '-'}</div></div>;
