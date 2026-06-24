@@ -209,6 +209,15 @@ CREATE TABLE IF NOT EXISTS locations (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- Master data tipe perangkat (dropdown "Tipe" pada form perangkat).
+CREATE TABLE IF NOT EXISTS device_types (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(80) NOT NULL UNIQUE,
+  icon VARCHAR(10) DEFAULT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS settings (
   setting_key VARCHAR(80) PRIMARY KEY,
   setting_value JSON NOT NULL,

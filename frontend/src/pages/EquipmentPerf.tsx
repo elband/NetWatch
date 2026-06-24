@@ -45,6 +45,8 @@ function InspeksiTab() {
   const [isToday, setIsToday] = useState(true);
   const [canInput, setCanInput] = useState(false);
   const [edit, setEdit] = useState<{ dev: EquipmentRow; slot: '09' | '12' | '15' } | null>(null);
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<'semua' | 'belum' | 'sudah'>('semua');
 
   function load() {
     api.get(`/equipment/inspections?date=${date}`).then((res) => {
@@ -58,6 +60,20 @@ function InspeksiTab() {
   }
   useEffect(load, [date]);
   const slotEditable = (s: string) => canInput && isToday && openSlots.includes(s);
+
+  const cur = currentSlot as '09' | '12' | '15';
+  const filtered = rows.filter((d) => {
+    if (q.trim()) {
+      const hay = `${d.name} ${d.type} ${d.ip} ${d.loc || ''}`.toLowerCase();
+      if (!hay.includes(q.trim().toLowerCase())) return false;
+    }
+    if (filter !== 'semua') {
+      const done = !!d.inspections[cur];
+      if (filter === 'sudah' && !done) return false;
+      if (filter === 'belum' && done) return false;
+    }
+    return true;
+  });
 
   return (
     <div>
@@ -75,44 +91,69 @@ function InspeksiTab() {
       </div>
       <div className="text-[10px] text-text2 mb-3">🔒 Tiap slot hanya bisa diisi pada jamnya (09:00 → 08:30–11:00, 12:00 → 11:00–14:00, 15:00 → 14:00–17:00). Foto wajib & tidak boleh foto yang sudah pernah dipakai.</div>
 
-      <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead><tr className="text-text2 uppercase text-[10px] border-b border-border">
-            <th className="px-3.5 py-2.5 text-left">Perangkat</th>
-            <th className="px-3.5 py-2.5 text-left">Lokasi</th>
-            {slots.map((s) => <th key={s} className="px-3.5 py-2.5 text-center">{SLOT_LABEL[s]}</th>)}
-          </tr></thead>
-          <tbody>
-            {rows.map((d) => (
-              <tr key={d.id} className="border-b border-border/50">
-                <td className="px-3.5 py-2.5"><div className="font-semibold">{d.name}</div><div className="text-text2 text-[10px]">{d.type} · {d.ip}</div></td>
-                <td className="px-3.5 py-2.5 text-text2 text-[11px]">{d.loc || '-'}</td>
+      {/* Pencarian + filter status inspeksi (mengacu slot berjalan) */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 Cari perangkat, IP, atau lokasi…"
+          className="flex-1 min-w-[200px] bg-surface2 border border-border rounded-md px-3 py-1.5 text-xs"
+        />
+        <div className="flex bg-surface2 border border-border rounded-lg p-0.5" title={`Status untuk slot berjalan (${SLOT_LABEL[currentSlot]})`}>
+          {([['semua', 'Semua'], ['belum', 'Belum'], ['sudah', 'Sudah']] as const).map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setFilter(v)}
+              className={`px-2.5 py-1 text-[11px] rounded ${filter === v ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}
+            >{l}</button>
+          ))}
+        </div>
+        <span className="text-[10px] text-text2 w-full sm:w-auto">Menampilkan {filtered.length} dari {rows.length} perangkat · status mengacu slot {SLOT_LABEL[currentSlot]}</span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        {filtered.map((d) => {
+          const doneCount = (slots as Array<'09' | '12' | '15'>).filter((s) => d.inspections[s]).length;
+          return (
+            <div key={d.id} className="bg-surface border border-border rounded-xl p-3.5 flex flex-col gap-2.5 hover:border-accent/40 transition-colors">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm truncate" title={d.name}>{d.name}</div>
+                  <div className="text-text2 text-[10px] truncate">{d.type} · {d.ip}</div>
+                </div>
+                <span className={`shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${doneCount >= slots.length ? 'text-success bg-success/10 border-success/30' : doneCount > 0 ? 'text-warn bg-warn/10 border-warn/30' : 'text-text2 border-border'}`}>{doneCount}/{slots.length}</span>
+              </div>
+              <div className="text-text2 text-[11px] flex items-center gap-1 truncate"><span>📍</span><span className="truncate">{d.loc || '-'}</span></div>
+              <div className="grid gap-1.5 mt-auto pt-2 border-t border-border/50" style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(0,1fr))` }}>
                 {(slots as Array<'09' | '12' | '15'>).map((s) => {
                   const insp = d.inspections[s];
                   const editable = slotEditable(s);
                   return (
-                    <td key={s} className="px-2 py-2 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          disabled={!editable}
-                          onClick={() => editable && setEdit({ dev: d, slot: s })}
-                          title={insp ? `${insp.status} — ${insp.inspector_name || ''}${insp.note ? ' · ' + insp.note : ''}` : editable ? 'Klik untuk isi inspeksi' : 'Terkunci (di luar jam slot / bukan hari ini)'}
-                          className={`min-w-[70px] border rounded px-2 py-1 text-[10px] font-semibold ${insp ? ST_META[insp.status].bg + ' ' + ST_META[insp.status].c : 'border-border text-text2'} ${editable ? 'hover:opacity-80' : 'opacity-60 cursor-not-allowed'}`}
-                        >
-                          {insp ? ST_META[insp.status].t : editable ? '+ isi' : '🔒'}
-                        </button>
-                        {insp?.photo_url && (
-                          <a href={insp.photo_url} target="_blank" rel="noreferrer" title={insp.verified ? `Terverifikasi${insp.distance_m != null ? ' · ' + insp.distance_m + ' m' : ''}` : 'Belum terverifikasi (EXIF/GPS)'} onClick={(e) => e.stopPropagation()} className="text-[12px]">📷{insp.verified ? '✅' : '⚠️'}</a>
-                        )}
-                      </div>
-                    </td>
+                    <div key={s} className="flex flex-col items-center gap-1">
+                      <span className="text-[9px] text-text2">{SLOT_LABEL[s]}</span>
+                      <button
+                        disabled={!editable}
+                        onClick={() => editable && setEdit({ dev: d, slot: s })}
+                        title={insp ? `${insp.status} — ${insp.inspector_name || ''}${insp.note ? ' · ' + insp.note : ''}` : editable ? 'Klik untuk isi inspeksi' : 'Terkunci (di luar jam slot / bukan hari ini)'}
+                        className={`w-full border rounded px-1.5 py-1 text-[10px] font-semibold ${insp ? ST_META[insp.status].bg + ' ' + ST_META[insp.status].c : 'border-border text-text2'} ${editable ? 'hover:opacity-80' : 'opacity-60 cursor-not-allowed'}`}
+                      >
+                        {insp ? ST_META[insp.status].t : editable ? '+ isi' : '🔒'}
+                      </button>
+                      {insp?.photo_url
+                        ? <a href={insp.photo_url} target="_blank" rel="noreferrer" title={insp.verified ? `Terverifikasi${insp.distance_m != null ? ' · ' + insp.distance_m + ' m' : ''}` : 'Belum terverifikasi (EXIF/GPS)'} onClick={(e) => e.stopPropagation()} className="text-[11px] leading-none">📷{insp.verified ? '✅' : '⚠️'}</a>
+                        : <span className="h-[11px]" />}
+                    </div>
                   );
                 })}
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={5} className="text-center py-6 text-text2">Tidak ada perangkat.</td></tr>}
-          </tbody>
-        </table>
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="col-span-full text-center py-10 text-text2 text-sm bg-surface border border-border rounded-xl">
+            {rows.length === 0 ? 'Tidak ada perangkat.' : 'Tidak ada perangkat yang cocok dengan pencarian/filter.'}
+          </div>
+        )}
       </div>
 
       {edit && (
@@ -310,7 +351,8 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
 }
 
 function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[]; onClose: () => void; onSaved: () => void }) {
-  const [deviceId, setDeviceId] = useState<number | ''>('');
+  const [deviceIds, setDeviceIds] = useState<number[]>([]);
+  const [q, setQ] = useState('');
   const [scheduledDate, setScheduledDate] = useState(todayKey());
   const [task, setTask] = useState('');
   const [note, setNote] = useState('');
@@ -319,16 +361,19 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
   const [err, setErr] = useState('');
 
   async function save() {
-    if (!deviceId || !task.trim()) return setErr('Perangkat dan tugas wajib diisi.');
+    if (deviceIds.length === 0 || !task.trim()) return setErr('Pilih minimal satu perangkat dan isi tugas.');
     setBusy(true); setErr('');
     try {
-      const fd = new FormData();
-      fd.append('deviceId', String(deviceId));
-      fd.append('scheduledDate', scheduledDate);
-      fd.append('task', task.trim());
-      if (note.trim()) fd.append('note', note.trim());
-      if (doc) fd.append('doc', doc);
-      await api.post('/equipment/maintenance', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // Satu rencana maintenance dibuat untuk tiap perangkat yang dipilih.
+      for (const id of deviceIds) {
+        const fd = new FormData();
+        fd.append('deviceId', String(id));
+        fd.append('scheduledDate', scheduledDate);
+        fd.append('task', task.trim());
+        if (note.trim()) fd.append('note', note.trim());
+        if (doc) fd.append('doc', doc);
+        await api.post('/equipment/maintenance', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -339,11 +384,44 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-4">+ Rencana Maintenance</h3>
-        <label className="block text-[11px] text-text2 mb-1">Perangkat *</label>
-        <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={deviceId} onChange={(e) => setDeviceId(Number(e.target.value))}>
-          <option value="">Pilih perangkat…</option>
-          {devices.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.ip})</option>)}
-        </select>
+        <label className="block text-[11px] text-text2 mb-1">Perangkat * <span className="text-text2">({deviceIds.length} dipilih)</span></label>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 Cari perangkat…"
+          className="w-full bg-surface2 border border-border rounded-md px-3 py-1.5 text-xs mb-1.5"
+        />
+        {(() => {
+          const filtered = devices.filter((d) => { const t = `${d.name} ${d.ip}`.toLowerCase(); return !q.trim() || t.includes(q.trim().toLowerCase()); });
+          const allSel = filtered.length > 0 && filtered.every((d) => deviceIds.includes(d.id));
+          return (
+            <>
+              <div className="flex items-center justify-between mb-1">
+                <button
+                  type="button"
+                  onClick={() => setDeviceIds(allSel
+                    ? deviceIds.filter((id) => !filtered.some((d) => d.id === id))
+                    : Array.from(new Set([...deviceIds, ...filtered.map((d) => d.id)])))}
+                  className="text-[10px] text-accent2 hover:underline"
+                >{allSel ? '✕ Hapus pilihan (hasil cari)' : '✓ Pilih semua (hasil cari)'}</button>
+                {deviceIds.length > 0 && <button type="button" onClick={() => setDeviceIds([])} className="text-[10px] text-danger hover:underline">Kosongkan</button>}
+              </div>
+              <div className="max-h-40 overflow-y-auto border border-border rounded-md mb-3 divide-y divide-border/50">
+                {filtered.length === 0 ? (
+                  <div className="text-center text-text2 text-[11px] py-4">Tidak ada perangkat cocok.</div>
+                ) : filtered.map((d) => {
+                  const checked = deviceIds.includes(d.id);
+                  return (
+                    <label key={d.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs cursor-pointer hover:bg-surface2">
+                      <input type="checkbox" checked={checked} onChange={() => setDeviceIds((ids) => checked ? ids.filter((x) => x !== d.id) : [...ids, d.id])} className="accent-[var(--color-accent)]" />
+                      <span className="truncate">{d.name} <span className="text-text2 font-mono text-[10px]">{d.ip}</span></span>
+                    </label>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
         <label className="block text-[11px] text-text2 mb-1">Tanggal *</label>
         <input type="date" className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
         <label className="block text-[11px] text-text2 mb-1">Tugas *</label>

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import LocationMap from '../components/LocationMap';
-import { confirmDialog } from '../components/dialog';
+import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Asset, ServiceItem, LocationItem, User } from '../types';
 
-type Tab = 'aset' | 'layanan' | 'lokasi';
+type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe';
+interface DeviceTypeItem { id: number; name: string; icon: string | null; sort_order: number }
 
 export default function MasterData() {
   const [tab, setTab] = useState<Tab>('aset');
@@ -15,13 +16,14 @@ export default function MasterData() {
         <div className="text-[11px] text-text2 mt-0.5">Kelola inventaris aset, layanan kritis, dan lokasi/area gangguan</div>
       </div>
       <div className="flex gap-2 mb-4">
-        {([['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi']] as [Tab, string][]).map(([t, label]) => (
+        {([['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat']] as [Tab, string][]).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className={`px-3.5 py-1.5 text-xs rounded-md border ${tab === t ? 'bg-accent text-bg border-accent font-semibold' : 'border-border text-text2 hover:text-white'}`}>{label}</button>
         ))}
       </div>
       {tab === 'aset' && <AssetsTab />}
       {tab === 'layanan' && <ServicesTab />}
       {tab === 'lokasi' && <LocationsTab />}
+      {tab === 'tipe' && <DeviceTypesTab />}
     </div>
   );
 }
@@ -246,6 +248,58 @@ function LocationsTab() {
             <div className="text-[9px] text-text2">insiden aktif</div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ===================== TIPE PERANGKAT =====================
+function DeviceTypesTab() {
+  const [items, setItems] = useState<DeviceTypeItem[]>([]);
+  const empty = { name: '', icon: '🖥️', sortOrder: 0 };
+  const [form, setForm] = useState<any>(empty);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [err, setErr] = useState('');
+
+  function load() { api.get('/device-types').then((r) => setItems(r.data.deviceTypes)); }
+  useEffect(load, []);
+
+  async function save() {
+    if (!form.name.trim()) return;
+    setErr('');
+    try {
+      if (editId) await api.put(`/device-types/${editId}`, form);
+      else await api.post('/device-types', form);
+      setForm(empty); setEditId(null); load();
+    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
+  }
+  async function del(id: number, name: string) {
+    if (!(await confirmDialog({ title: 'Hapus tipe perangkat', message: `Tipe "${name}" akan dihapus dari master data.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    try { await api.delete(`/device-types/${id}`); load(); }
+    catch (e: any) { alertDialog({ title: 'Tidak bisa dihapus', message: e?.response?.data?.error || 'Gagal menghapus.', variant: 'warning' }); }
+  }
+  function edit(t: DeviceTypeItem) { setEditId(t.id); setForm({ name: t.name, icon: t.icon || '🖥️', sortOrder: t.sort_order }); }
+
+  return (
+    <div>
+      <div className="bg-surface border border-border rounded-lg p-3.5 mb-3 flex gap-2 items-end flex-wrap">
+        <input className={`${inputCls} w-16`} placeholder="Icon" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} />
+        <input className={inputCls} placeholder="Nama tipe * (mis. Switch)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className={`${inputCls} w-24`} type="number" placeholder="Urutan" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: Number(e.target.value) })} />
+        <button className={btnPrimary} onClick={save}>{editId ? '💾 Update' : '+ Tambah'}</button>
+        {editId && <button className={btnGhost} onClick={() => { setForm(empty); setEditId(null); }}>Batal</button>}
+      </div>
+      {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+      <div className="text-[11px] text-text2 mb-3">Daftar ini menjadi sumber dropdown <b>Tipe</b> pada form Tambah/Edit Perangkat. Mengubah nama tipe otomatis memperbarui perangkat yang memakainya. Tipe yang masih dipakai tidak bisa dihapus.</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+        {items.map((t) => (
+          <div key={t.id} className="rounded-lg border border-border bg-surface2 p-3 text-center">
+            <div className="flex justify-end gap-1"><button className={btnGhost} onClick={() => edit(t)}>✏️</button><button className={`${btnGhost} text-danger`} onClick={() => del(t.id, t.name)}>🗑️</button></div>
+            <div className="text-2xl">{t.icon || '🖥️'}</div>
+            <div className="text-[11px] font-semibold break-words">{t.name}</div>
+          </div>
+        ))}
+        {items.length === 0 && <div className="col-span-full text-center text-text2 text-xs py-6">Belum ada tipe perangkat.</div>}
       </div>
     </div>
   );

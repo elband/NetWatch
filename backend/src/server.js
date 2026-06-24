@@ -11,6 +11,8 @@ import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
 import { purgeOldWaLogs } from './jobs/waQueue.js';
 import { initTimezoneFromSettings } from './services/timezone.js';
+import { loadShiftWindows } from './config/shifts.js';
+import { pool } from './db/pool.js';
 
 const app = createApp();
 const server = http.createServer(app);
@@ -42,6 +44,9 @@ io.on('connection', (socket) => {
 attachSshNamespace(io);
 // Pulihkan zona waktu server dari Pengaturan (semua instance, sebelum melayani request).
 await initTimezoneFromSettings();
+// Muat aturan jam dinas (shift_windows) dari Pengaturan agar logika on-duty memakai
+// jam kustom yang diatur Koordinator (fallback ke default bila belum diatur).
+await loadShiftWindows(pool).catch(() => {});
 // Worker latar belakang & penjadwal hanya jalan di SATU instance (PM2 primary),
 // agar tidak terjadi duplikasi ping/notifikasi saat di-scale ke cluster.
 const isPrimary = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';

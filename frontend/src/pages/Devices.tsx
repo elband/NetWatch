@@ -22,6 +22,7 @@ export default function Devices() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [serviceNames, setServiceNames] = useState<string[]>([]);
   const [locs, setLocs] = useState<string[]>([]);
+  const [deviceTypes, setDeviceTypes] = useState<{ name: string; icon: string | null }[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -111,6 +112,7 @@ export default function Devices() {
     api.get('/devices').then((res) => setDevices(res.data.devices));
     api.get('/services').then((res) => setServiceNames(res.data.services.map((s: { name: string }) => s.name)));
     api.get('/locations').then((res) => setLocs((res.data.locations || []).map((l: { name: string }) => l.name))).catch(() => {});
+    api.get('/device-types').then((res) => setDeviceTypes(res.data.deviceTypes || [])).catch(() => {});
     const socket = getSocket();
     const onUpdate = (d: Device) => setDevices((prev) => prev.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
     socket.on('device:update', onUpdate);
@@ -242,8 +244,13 @@ export default function Devices() {
               <Field label="Nama *"><input className="dev-inp" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="SW-Core-03" /></Field>
               <Field label="IP *"><input className="dev-inp" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} placeholder="192.168.1.3" /></Field>
               <Field label="Tipe">
-                <select className="dev-inp" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                  {DEVICE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                <select className="dev-inp" value={form.type} onChange={(e) => {
+                  const t = e.target.value;
+                  const dt = deviceTypes.find((x) => x.name === t);
+                  setForm((f) => ({ ...f, type: t, icon: f.icon || dt?.icon || '' }));
+                }}>
+                  {(deviceTypes.length ? deviceTypes.map((d) => d.name) : DEVICE_TYPES).map((t) => <option key={t} value={t}>{t}</option>)}
+                  {form.type && !(deviceTypes.length ? deviceTypes.some((d) => d.name === form.type) : DEVICE_TYPES.includes(form.type)) && <option value={form.type}>{form.type} (lama)</option>}
                 </select>
               </Field>
               <Field label="Lokasi (penanda di Peta)">
