@@ -315,34 +315,47 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
       </div>
       {msg && <div className="bg-accent2/10 border border-accent2/30 rounded-md px-3 py-2 text-[11px] text-accent2 mb-3">{msg}</div>}
 
-      <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead><tr className="text-text2 uppercase text-[10px] border-b border-border">
-            {['Tanggal', 'Perangkat', 'Tugas', 'Status', 'Pelaksana', 'Aksi'].map((h) => <th key={h} className="px-3.5 py-2.5 text-left">{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {rows.map((m) => (
-              <tr key={m.id} className="border-b border-border/50">
-                <td className="px-3.5 py-2.5 font-mono text-[11px]">{m.scheduled_date}</td>
-                <td className="px-3.5 py-2.5"><strong>{m.device_name}</strong><div className="text-text2 text-[10px]">{m.device_type}</div></td>
-                <td className="px-3.5 py-2.5">{m.task}{m.note && <div className="text-text2 text-[10px]">{m.note}</div>}
-                  <button onClick={() => setPhotoModalFor(m)} className="block text-accent2 text-[10px] hover:underline mt-0.5">📷 {m.photo_count || 0} foto dokumentasi{m.doc_url ? ' + lampiran' : ''}</button>
-                </td>
-                <td className="px-3.5 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded border font-semibold capitalize ${stMeta[m.status]}`}>{m.status}</span></td>
-                <td className="px-3.5 py-2.5 text-text2 text-[11px]">{m.done_by_name || '-'}{m.done_at && <div className="text-[10px]">{m.done_at}</div>}</td>
-                <td className="px-3.5 py-2.5">
-                  <div className="flex gap-1.5 flex-wrap">
-                    {m.status !== 'selesai' && <button onClick={() => setPhotoModalFor(m)} className="border border-success/40 text-success rounded px-2 py-0.5">✅ Selesai</button>}
-                    {m.status !== 'rencana' && <button onClick={() => setStatus(m.id, 'rencana')} className="border border-border text-text2 rounded px-2 py-0.5">↺ Rencana</button>}
-                    {isManager && <button onClick={() => remove(m.id)} className="border border-danger/40 text-danger rounded px-2 py-0.5">🗑️</button>}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-text2">Belum ada rencana maintenance bulan ini.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {rows.length === 0 ? (
+        <div className="bg-surface border border-border rounded-xl text-center py-10 text-text2 text-sm">Belum ada rencana maintenance bulan ini.</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {rows.map((m) => (
+            <div key={m.id} className="bg-surface border border-border rounded-xl p-3.5 flex flex-col gap-2.5 hover:border-accent/40 transition-colors">
+              {/* Header: perangkat + status */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm truncate" title={m.device_name}>{m.device_name}</div>
+                  <div className="text-text2 text-[10px] truncate">{m.device_type}</div>
+                </div>
+                <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded border font-semibold capitalize ${stMeta[m.status]}`}>{m.status}</span>
+              </div>
+
+              {/* Tanggal */}
+              <div className="text-text2 text-[11px] flex items-center gap-1"><span>📅</span><span className="font-mono">{m.scheduled_date}</span></div>
+
+              {/* Tugas */}
+              <div className="text-[11px]">
+                <div>{m.task}</div>
+                {m.note && <div className="text-text2 text-[10px] mt-0.5">{m.note}</div>}
+                <button onClick={() => setPhotoModalFor(m)} className="block text-accent2 text-[10px] hover:underline mt-1">📷 {m.photo_count || 0} foto dokumentasi{m.doc_url ? ' + lampiran' : ''}</button>
+              </div>
+
+              {/* Pelaksana */}
+              <div className="text-text2 text-[10px] pt-2 border-t border-border/50">
+                Pelaksana: <span className="text-text">{m.done_by_name || '-'}</span>
+                {m.done_at && <span className="font-mono"> · {m.done_at}</span>}
+              </div>
+
+              {/* Aksi */}
+              <div className="flex gap-1.5 flex-wrap text-[11px] mt-auto">
+                {m.status !== 'selesai' && <button onClick={() => setPhotoModalFor(m)} className="border border-success/40 text-success rounded px-2 py-1">✅ Selesai</button>}
+                {m.status !== 'rencana' && <button onClick={() => setStatus(m.id, 'rencana')} className="border border-border text-text2 rounded px-2 py-1">↺ Rencana</button>}
+                {isManager && <button onClick={() => remove(m.id)} className="border border-danger/40 text-danger rounded px-2 py-1">🗑️</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {showAdd && <AddMaintenanceModal devices={devices} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {photoModalFor && <MaintenancePhotosModal item={photoModalFor} onClose={() => { setPhotoModalFor(null); load(); }} onCompleted={(n) => { setPhotoModalFor(null); setMsg(`✅ Maintenance selesai. Notifikasi terkirim ke ${n} koordinator.`); setTimeout(() => setMsg(''), 6000); load(); }} />}
