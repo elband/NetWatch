@@ -48,7 +48,7 @@ export default function IncidentDetailModal({
         {/* Header — tetap terlihat */}
         <div className="flex justify-between items-center gap-3 px-6 pt-5 pb-3 border-b border-border shrink-0">
           <span className="text-[15px] font-bold">{inc.id} — {inc.device_name}</span>
-          <button onClick={onClose} className="text-text2 hover:text-white text-lg leading-none shrink-0">✕</button>
+          <button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none shrink-0">✕</button>
         </div>
 
         {/* Isi yang bisa di-scroll */}
@@ -144,7 +144,7 @@ export default function IncidentDetailModal({
               className={`border rounded-md px-3 py-1.5 text-xs font-medium ${
                 inc.awaiting_part
                   ? 'text-warn border-warn/40 bg-warn/10'
-                  : 'text-text2 border-border hover:text-white'
+                  : 'text-text2 border-border hover:text-text'
               }`}
               onClick={onToggleSparepart}
             >

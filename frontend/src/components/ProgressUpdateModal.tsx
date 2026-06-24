@@ -63,7 +63,7 @@ export default function ProgressUpdateModal({ incident, onClose, onDone }: { inc
       <div className="bg-surface border border-border rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-sm font-bold">Tindakan · {incident.device_name}</h3>
-          <button type="button" className="text-text2 hover:text-white text-lg leading-none" onClick={onClose}>×</button>
+          <button type="button" className="text-text2 hover:text-text text-lg leading-none" onClick={onClose}>×</button>
         </div>
         <p className="text-[11px] text-text2 mb-3">Pilih tindakan yang dilakukan{!hasIp(incident.ip) && ' (perangkat tanpa IP — langsung visit)'}:</p>
 
@@ -100,7 +100,7 @@ export default function ProgressUpdateModal({ incident, onClose, onDone }: { inc
             {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
 
             <div className="flex gap-2 justify-end">
-              <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white" onClick={onClose} disabled={busy}>Batal</button>
+              <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text" onClick={onClose} disabled={busy}>Batal</button>
               <button type="button" className={`rounded-md px-3 py-1.5 text-xs font-semibold text-bg disabled:opacity-50 ${sel?.final ? 'bg-success' : 'bg-accent'}`} onClick={submit} disabled={busy}>{busy ? 'Menyimpan…' : sel?.final ? '✅ Selesaikan' : 'Simpan Tindakan'}</button>
             </div>
           </>

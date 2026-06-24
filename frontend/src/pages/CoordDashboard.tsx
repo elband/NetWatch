@@ -5,6 +5,7 @@ import { getSocket } from '../api/socket';
 import { activityStatusBadge } from '../components/ActivityModal';
 import LocationMap from '../components/LocationMap';
 import { DeviceStatusBadge } from '../components/StatusBadge';
+import { promptDialog } from '../components/dialog';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
 import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity, PerformaRow } from '../types';
 
@@ -60,7 +61,7 @@ export default function CoordDashboard() {
 
   async function decideActivity(id: number, action: 'approve' | 'reject') {
     let note: string | undefined;
-    if (action === 'reject') { note = window.prompt('Alasan penolakan (opsional):') || undefined; }
+    if (action === 'reject') { note = (await promptDialog({ title: 'Tolak aktivitas', inputLabel: 'Alasan penolakan (opsional)', confirmText: 'Tolak', variant: 'danger' })) || undefined; }
     setActing(id);
     try {
       await api.patch(`/activities/${id}/${action}`, { note });
@@ -248,7 +249,7 @@ export default function CoordDashboard() {
               {/* Header */}
               <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 border-b border-border shrink-0">
                 <span className="text-sm font-bold">📊 Rincian Performa Koordinator · {monthLabel}</span>
-                <button onClick={() => setShowRincian(false)} className="text-text2 hover:text-white text-lg leading-none shrink-0">×</button>
+                <button onClick={() => setShowRincian(false)} className="text-text2 hover:text-text text-lg leading-none shrink-0">×</button>
               </div>
               {/* Body */}
               <div className="px-5 py-4 overflow-y-auto flex-1 space-y-4">
@@ -371,7 +372,7 @@ export default function CoordDashboard() {
           </div>
         </Panel>
 
-        <Panel title="PETA LOKASI GANGGUAN" right={<Link to="/master" className="text-[11px] text-text2 hover:text-white">Kelola →</Link>}>
+        <Panel title="PETA LOKASI GANGGUAN" right={<Link to="/master" className="text-[11px] text-text2 hover:text-text">Kelola →</Link>}>
           {mapUrl ? (
             <LocationMap mapUrl={mapUrl} locations={locations} />
           ) : locations.length === 0 ? (
@@ -391,7 +392,7 @@ export default function CoordDashboard() {
       </div>
 
       {/* Perangkat bermasalah (dari dashboard admin) */}
-      <Panel title="⚠️ PERANGKAT BERMASALAH" right={<Link to="/devices" className="text-[11px] text-text2 hover:text-white">Semua →</Link>}>
+      <Panel title="⚠️ PERANGKAT BERMASALAH" right={<Link to="/devices" className="text-[11px] text-text2 hover:text-text">Semua →</Link>}>
         {devices.filter((d) => d.status !== 'online').length === 0 ? (
           <div className="text-center py-4 text-success text-xs">✅ Semua perangkat online.</div>
         ) : (
@@ -516,7 +517,7 @@ export default function CoordDashboard() {
       </Panel>
 
       {/* Performa teknisi (dari dashboard admin) */}
-      <Panel title="🏆 PERFORMA TEKNISI" right={<Link to="/performa" className="text-[11px] text-text2 hover:text-white">Detail →</Link>}>
+      <Panel title="🏆 PERFORMA TEKNISI" right={<Link to="/performa" className="text-[11px] text-text2 hover:text-text">Detail →</Link>}>
         {performa.length === 0 ? (
           <div className="text-center py-4 text-text2 text-xs">Belum ada data performa.</div>
         ) : (

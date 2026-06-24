@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { confirmDialog } from '../components/dialog';
 
 const LKP_FIELDS: [keyof LkpForm, string][] = [
   ['kantor', 'Nama Kantor / Bandara'], ['unit', 'Unit'], ['kota', 'Kota'], ['fasilitas', 'Fasilitas'],
@@ -36,7 +37,7 @@ export default function Settings() {
     try { const r = await api.get('/settings/tz-migration/status'); setMigStatus(r.data); } catch { /* abaikan */ }
   }
   async function runMig(apply: boolean) {
-    if (apply && !window.confirm(`Geser SEMUA timestamp historis ${migShift > 0 ? '+' : ''}${migShift} jam?\n\nTindakan ini MENGUBAH data dan tidak otomatis bisa dibatalkan. Pastikan sudah BACKUP database.`)) return;
+    if (apply && !(await confirmDialog({ title: `Geser semua timestamp ${migShift > 0 ? '+' : ''}${migShift} jam`, message: 'Tindakan ini MENGUBAH data historis dan tidak otomatis bisa dibatalkan. Pastikan sudah BACKUP database.', confirmText: 'Geser data', variant: 'danger' }))) return;
     setMigBusy(true); setMigMsg('');
     try {
       const r = await api.post('/settings/tz-migration', { shift: migShift, apply, force: migForce });

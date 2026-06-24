@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { api } from '../api/client';
 import type { Surat } from '../types';
+import { confirmDialog } from '../components/dialog';
 import { buildReportHtml, SECTIONS, type LaporanData, type SectionKey, type LkpHead, type CoverInfo } from '../utils/laporanReport';
 
 const LKP_DEFAULT: LkpHead = {
@@ -74,7 +75,7 @@ export default function LaporanBulanan() {
   // Sahkan Nota Dinas dengan TTE → QR koordinator tampil di SEMUA halaman laporan.
   async function sahkanTte() {
     if (!cover?.id) return;
-    if (!window.confirm('Sahkan laporan ini dengan Tanda Tangan Elektronik (TTE)? Tidak bisa dibatalkan.')) return;
+    if (!(await confirmDialog({ title: 'Sahkan laporan bulanan', message: 'Laporan akan ditandatangani secara elektronik (TTE). Tidak bisa dibatalkan.', confirmText: '🔏 Sahkan', variant: 'success' }))) return;
     setBusy(true); setMsg('');
     try {
       const { data: r } = await api.post(`/surat/${cover.id}/sign`, { signerName: lkp.koord_nama, signerNip: lkp.koord_nip });
@@ -116,13 +117,13 @@ export default function LaporanBulanan() {
           {SECTIONS.map((s) => (
             <label key={s.key} className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded hover:bg-surface2 cursor-pointer">
               <input type="checkbox" checked={sel.has(s.key)} onChange={() => toggle(s.key)} className="accent-accent" />
-              <span className={sel.has(s.key) ? 'text-white' : 'text-text2'}>{s.label}</span>
+              <span className={sel.has(s.key) ? 'text-text' : 'text-text2'}>{s.label}</span>
             </label>
           ))}
         </div>
 
         <div className="space-y-2">
-          <button onClick={() => susun(false)} disabled={busy} className="w-full border border-border text-white rounded-md px-3 py-2 text-xs font-semibold hover:bg-surface2 disabled:opacity-50">{busy ? 'Menyusun…' : '👁️ Susun Pratinjau'}</button>
+          <button onClick={() => susun(false)} disabled={busy} className="w-full border border-border text-text rounded-md px-3 py-2 text-xs font-semibold hover:bg-surface2 disabled:opacity-50">{busy ? 'Menyusun…' : '👁️ Susun Pratinjau'}</button>
           <button onClick={() => susun(true)} disabled={busy} className="w-full bg-accent2 text-bg rounded-md px-3 py-2 text-xs font-semibold disabled:opacity-50">📋 Terbitkan Nota Dinas (beri nomor)</button>
           {cover?.id && !cover.sign_token && (
             <button onClick={sahkanTte} disabled={busy} className="w-full bg-success text-bg rounded-md px-3 py-2 text-xs font-semibold disabled:opacity-50">🔏 Sahkan TTE (semua halaman)</button>

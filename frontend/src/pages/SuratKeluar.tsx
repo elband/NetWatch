@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { api } from '../api/client';
 import type { Surat, Incident } from '../types';
 import { buildReportHtml, SECTIONS, type LaporanData, type LkpHead } from '../utils/laporanReport';
+import { confirmDialog, promptDialog } from '../components/dialog';
 
 const LKP_DEFAULT: LkpHead = {
   kantor: 'BANDAR UDARA A.P.T. PRANOTO - SAMARINDA', kota: 'Samarinda',
@@ -165,7 +166,7 @@ export default function SuratKeluar() {
   }
   async function kirimKasi(s: Surat) {
     let phone: string | undefined;
-    if (!window.confirm('Kirim permohonan TTD ke Kepala Seksi via WhatsApp?\n(Nomor diambil dari Pengaturan bila sudah diatur.)')) return;
+    if (!(await confirmDialog({ title: 'Kirim permohonan TTD', message: 'Kirim permohonan tanda tangan ke Kepala Seksi via WhatsApp? Nomor diambil dari Pengaturan bila sudah diatur.', confirmText: '📲 Kirim', variant: 'info' }))) return;
     try {
       const r = await api.post(`/surat/${s.id}/request-kasi`, { baseUrl: location.origin, phone });
       setDetail(r.data.surat); load();
@@ -173,7 +174,7 @@ export default function SuratKeluar() {
     } catch (e: any) {
       const err = e?.response?.data?.error || 'Gagal mengirim.';
       if (/nomor wa/i.test(err)) {
-        phone = window.prompt('Nomor WA Kepala Seksi (mis. 0812xxxx):') || undefined;
+        phone = (await promptDialog({ title: 'Nomor WhatsApp Kepala Seksi', inputLabel: 'Nomor WA', placeholder: 'mis. 0812xxxx', required: true })) || undefined;
         if (!phone) return;
         try {
           const r = await api.post(`/surat/${s.id}/request-kasi`, { baseUrl: location.origin, phone });
@@ -184,7 +185,7 @@ export default function SuratKeluar() {
     }
   }
   async function notifyPelaksana(s: Surat) {
-    if (!window.confirm('Kirim notifikasi tanda tangan ke semua pelaksana lembur? Link unik akan dibuat untuk setiap pegawai.')) return;
+    if (!(await confirmDialog({ title: 'Kirim notifikasi TTD', message: 'Kirim notifikasi tanda tangan ke semua pelaksana lembur? Link unik akan dibuat untuk setiap pegawai.', confirmText: '📲 Kirim', variant: 'info' }))) return;
     try {
       const r = await api.post(`/surat/${s.id}/notify-pelaksana`, { baseUrl: location.origin });
       setDetail(r.data.surat); load();
@@ -208,7 +209,7 @@ export default function SuratKeluar() {
     finally { setKopBusy(false); if (kopInputRef.current) kopInputRef.current.value = ''; }
   }
   async function removeKop() {
-    if (!window.confirm('Hapus kop surat? Dokumen akan digenerate tanpa header sampai kop baru diunggah.')) return;
+    if (!(await confirmDialog({ title: 'Hapus kop surat', message: 'Dokumen akan digenerate tanpa header sampai kop baru diunggah.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     setKopBusy(true);
     try {
       await api.delete('/surat/kop');
@@ -228,7 +229,7 @@ export default function SuratKeluar() {
     } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal menambah lampiran.'); }
   }
   async function delLampiran(s: Surat, lampId: number) {
-    if (!window.confirm('Hapus lampiran ini?')) return;
+    if (!(await confirmDialog({ title: 'Hapus lampiran', message: 'Lampiran bukti dukung ini akan dihapus permanen.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     try {
       await api.delete(`/surat/${s.id}/lampiran/${lampId}`);
       const upd = { ...s, lampiran: (s.lampiran || []).filter((l) => l.id !== lampId) };
@@ -236,7 +237,7 @@ export default function SuratKeluar() {
     } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal menghapus lampiran.'); }
   }
   async function hapus(s: Surat) {
-    if (!window.confirm(`Hapus surat "${s.nomor}" — ${s.hal}?\nLampiran ikut terhapus. Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!(await confirmDialog({ title: `Hapus surat ${s.nomor}`, message: `"${s.hal}"\n\nLampiran ikut terhapus. Tindakan ini tidak bisa dibatalkan.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     try {
       await api.delete(`/surat/${s.id}`);
       setDetail(null); load();
@@ -244,7 +245,7 @@ export default function SuratKeluar() {
     } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal menghapus surat.'); }
   }
   async function sign(s: Surat) {
-    if (!window.confirm(`Sahkan "${s.nomor}" dengan TTE? Tidak bisa dibatalkan.`)) return;
+    if (!(await confirmDialog({ title: `Sahkan ${s.nomor}`, message: 'Dokumen akan ditandatangani secara elektronik (TTE). Tindakan ini tidak bisa dibatalkan.', confirmText: '🔏 Sahkan', variant: 'success' }))) return;
     try {
       await api.post(`/surat/${s.id}/sign`, { signerName: lkp.koord_nama, signerNip: lkp.koord_nip });
       setMsg('Surat disahkan (TTE).'); load();
@@ -582,7 +583,7 @@ export default function SuratKeluar() {
             <button onClick={() => setFilter('tte')} className={`px-2.5 py-1 text-[11px] rounded ${filter === 'tte' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}>Ber-TTE</button>
           </div>
           <button onClick={() => navigate('/laporan-bulanan')} className="border border-accent2/50 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">📅 Laporan Bulanan</button>
-          <button onClick={() => setShowKop(true)} className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs font-semibold">🖼️ Kop Surat</button>
+          <button onClick={() => setShowKop(true)} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs font-semibold">🖼️ Kop Surat</button>
           <button onClick={() => { setShowForm(true); setSplData(defaultSplData()); setSplPegawai([{nama:'',nip:'',mulai:'18:00',selesai:'23:00'}]); }} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Buat Surat</button>
         </div>
       </div>
@@ -593,7 +594,7 @@ export default function SuratKeluar() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold">🖼️ Kop Surat (Header Dokumen)</h3>
-              <button onClick={() => setShowKop(false)} className="text-text2 hover:text-white text-lg leading-none">×</button>
+              <button onClick={() => setShowKop(false)} className="text-text2 hover:text-text text-lg leading-none">×</button>
             </div>
             <p className="text-[11px] text-text2 mb-3 leading-relaxed">
               Unggah gambar kop/kepala surat resmi (JPG/PNG/WebP). Gambar akan tampil sebagai header di dokumen yang digenerate (mis. Surat Pernyataan Lembur). Disarankan gambar lebar penuh dengan rasio kop (mis. 1500×360 px).
@@ -651,10 +652,10 @@ export default function SuratKeluar() {
 
               {/* Aksi */}
               <div className="flex gap-1.5 flex-wrap mt-auto">
-                <button onClick={() => openInWindow(s)} disabled={busy} className="border border-border text-text2 hover:text-white rounded px-2 py-1 text-[11px]" title="Buka dokumen lengkap (Nota Dinas + LKP + Lampiran)">👁️ Lihat</button>
-                <button onClick={() => setDetail(s)} className="border border-border text-text2 hover:text-white rounded px-2 py-1 text-[11px]" title="Kelola TTE, lampiran, dan persetujuan Kasi">⚙️ Detail</button>
+                <button onClick={() => openInWindow(s)} disabled={busy} className="border border-border text-text2 hover:text-text rounded px-2 py-1 text-[11px]" title="Buka dokumen lengkap (Nota Dinas + LKP + Lampiran)">👁️ Lihat</button>
+                <button onClick={() => setDetail(s)} className="border border-border text-text2 hover:text-text rounded px-2 py-1 text-[11px]" title="Kelola TTE, lampiran, dan persetujuan Kasi">⚙️ Detail</button>
                 {!s.sign_token && <button onClick={() => sign(s)} className="border border-success/40 text-success rounded px-2 py-1 text-[11px]">🔏 Sahkan</button>}
-                <button onClick={() => openInWindow(s, true)} disabled={busy} className="border border-border text-text2 hover:text-white rounded px-2 py-1 text-[11px]">🖨️ Cetak</button>
+                <button onClick={() => openInWindow(s, true)} disabled={busy} className="border border-border text-text2 hover:text-text rounded px-2 py-1 text-[11px]">🖨️ Cetak</button>
                 <button onClick={() => hapus(s)} className="border border-danger/40 text-danger hover:bg-danger/10 rounded px-2 py-1 text-[11px]" title="Hapus surat">🗑️ Hapus</button>
               </div>
             </div>
@@ -665,7 +666,7 @@ export default function SuratKeluar() {
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center overflow-y-auto p-4" onClick={() => setShowForm(false)}>
           <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 my-auto max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">📤 Buat Surat Keluar</h3><button onClick={() => setShowForm(false)} className="text-text2 hover:text-white text-lg leading-none">×</button></div>
+            <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">📤 Buat Surat Keluar</h3><button onClick={() => setShowForm(false)} className="text-text2 hover:text-text text-lg leading-none">×</button></div>
             <label className="block text-[11px] text-text2 mb-1">Jenis Surat</label>
             <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={form.jenis} onChange={(e) => setForm({ ...form, jenis: e.target.value })}>{JENIS.map((j) => <option key={j} value={j}>{j}</option>)}</select>
             <label className="block text-[11px] text-text2 mb-1">Hal / Perihal *</label>
@@ -764,7 +765,7 @@ export default function SuratKeluar() {
             <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3 font-mono" value={form.incident_id} onChange={(e) => setForm({ ...form, incident_id: e.target.value.toUpperCase() })} placeholder="INC-001" />
             <label className="block text-[11px] text-text2 mb-1">📎 Lampiran Bukti Dukung (gambar/PDF, opsional)</label>
             <input type="file" multiple accept="image/*,application/pdf" onChange={(e) => setFiles(Array.from(e.target.files || []))}
-              className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white file:cursor-pointer" />
+              className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text file:cursor-pointer" />
             {files.length > 0 && (
               <div className="mb-3 space-y-1">
                 {files.map((f, i) => (
@@ -789,7 +790,7 @@ export default function SuratKeluar() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-5xl xl:max-w-6xl 2xl:max-w-7xl p-4 sm:p-5 flex flex-col" style={{ height: 'calc(100vh - 2rem)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3 shrink-0">
               <h3 className="text-sm font-bold">👁️ Detail Dokumen</h3>
-              <button onClick={() => setDetail(null)} className="text-text2 hover:text-white text-lg leading-none">×</button>
+              <button onClick={() => setDetail(null)} className="text-text2 hover:text-text text-lg leading-none">×</button>
             </div>
 
             <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
@@ -931,7 +932,7 @@ export default function SuratKeluar() {
                         {pg.map((p, i) => (
                           <div key={i} className={`flex items-center justify-between rounded-md px-2.5 py-1.5 text-[11px] ${p.signed_at ? 'bg-success/10 border border-success/30' : p.pelaksana_token ? 'bg-warn/5 border border-warn/20' : 'bg-surface2 border border-border'}`}>
                             <div>
-                              <span className={p.signed_at ? 'text-success font-semibold' : 'text-white'}>{p.signed_at ? '🔏' : p.pelaksana_token ? '⏳' : '○'} {p.nama}</span>
+                              <span className={p.signed_at ? 'text-success font-semibold' : 'text-text'}>{p.signed_at ? '🔏' : p.pelaksana_token ? '⏳' : '○'} {p.nama}</span>
                               {p.nip && <span className="text-text2 font-mono ml-1.5 text-[9px]">{p.nip}</span>}
                             </div>
                             <div className="text-right">

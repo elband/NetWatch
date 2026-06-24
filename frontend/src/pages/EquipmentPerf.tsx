@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import MaintenancePhotosModal from '../components/MaintenancePhotosModal';
+import { confirmDialog, alertDialog } from '../components/dialog';
 import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
@@ -43,6 +45,8 @@ function InspeksiTab() {
   const [isToday, setIsToday] = useState(true);
   const [canInput, setCanInput] = useState(false);
   const [edit, setEdit] = useState<{ dev: EquipmentRow; slot: '09' | '12' | '15' } | null>(null);
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<'semua' | 'belum' | 'sudah'>('semua');
 
   function load() {
     api.get(`/equipment/inspections?date=${date}`).then((res) => {
@@ -56,6 +60,20 @@ function InspeksiTab() {
   }
   useEffect(load, [date]);
   const slotEditable = (s: string) => canInput && isToday && openSlots.includes(s);
+
+  const cur = currentSlot as '09' | '12' | '15';
+  const filtered = rows.filter((d) => {
+    if (q.trim()) {
+      const hay = `${d.name} ${d.type} ${d.ip} ${d.loc || ''}`.toLowerCase();
+      if (!hay.includes(q.trim().toLowerCase())) return false;
+    }
+    if (filter !== 'semua') {
+      const done = !!d.inspections[cur];
+      if (filter === 'sudah' && !done) return false;
+      if (filter === 'belum' && done) return false;
+    }
+    return true;
+  });
 
   return (
     <div>
@@ -73,44 +91,69 @@ function InspeksiTab() {
       </div>
       <div className="text-[10px] text-text2 mb-3">🔒 Tiap slot hanya bisa diisi pada jamnya (09:00 → 08:30–11:00, 12:00 → 11:00–14:00, 15:00 → 14:00–17:00). Foto wajib & tidak boleh foto yang sudah pernah dipakai.</div>
 
-      <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead><tr className="text-text2 uppercase text-[10px] border-b border-border">
-            <th className="px-3.5 py-2.5 text-left">Perangkat</th>
-            <th className="px-3.5 py-2.5 text-left">Lokasi</th>
-            {slots.map((s) => <th key={s} className="px-3.5 py-2.5 text-center">{SLOT_LABEL[s]}</th>)}
-          </tr></thead>
-          <tbody>
-            {rows.map((d) => (
-              <tr key={d.id} className="border-b border-border/50">
-                <td className="px-3.5 py-2.5"><div className="font-semibold">{d.name}</div><div className="text-text2 text-[10px]">{d.type} · {d.ip}</div></td>
-                <td className="px-3.5 py-2.5 text-text2 text-[11px]">{d.loc || '-'}</td>
+      {/* Pencarian + filter status inspeksi (mengacu slot berjalan) */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 Cari perangkat, IP, atau lokasi…"
+          className="flex-1 min-w-[200px] bg-surface2 border border-border rounded-md px-3 py-1.5 text-xs"
+        />
+        <div className="flex bg-surface2 border border-border rounded-lg p-0.5" title={`Status untuk slot berjalan (${SLOT_LABEL[currentSlot]})`}>
+          {([['semua', 'Semua'], ['belum', 'Belum'], ['sudah', 'Sudah']] as const).map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setFilter(v)}
+              className={`px-2.5 py-1 text-[11px] rounded ${filter === v ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}
+            >{l}</button>
+          ))}
+        </div>
+        <span className="text-[10px] text-text2 w-full sm:w-auto">Menampilkan {filtered.length} dari {rows.length} perangkat · status mengacu slot {SLOT_LABEL[currentSlot]}</span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        {filtered.map((d) => {
+          const doneCount = (slots as Array<'09' | '12' | '15'>).filter((s) => d.inspections[s]).length;
+          return (
+            <div key={d.id} className="bg-surface border border-border rounded-xl p-3.5 flex flex-col gap-2.5 hover:border-accent/40 transition-colors">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm truncate" title={d.name}>{d.name}</div>
+                  <div className="text-text2 text-[10px] truncate">{d.type} · {d.ip}</div>
+                </div>
+                <span className={`shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${doneCount >= slots.length ? 'text-success bg-success/10 border-success/30' : doneCount > 0 ? 'text-warn bg-warn/10 border-warn/30' : 'text-text2 border-border'}`}>{doneCount}/{slots.length}</span>
+              </div>
+              <div className="text-text2 text-[11px] flex items-center gap-1 truncate"><span>📍</span><span className="truncate">{d.loc || '-'}</span></div>
+              <div className="grid gap-1.5 mt-auto pt-2 border-t border-border/50" style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(0,1fr))` }}>
                 {(slots as Array<'09' | '12' | '15'>).map((s) => {
                   const insp = d.inspections[s];
                   const editable = slotEditable(s);
                   return (
-                    <td key={s} className="px-2 py-2 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          disabled={!editable}
-                          onClick={() => editable && setEdit({ dev: d, slot: s })}
-                          title={insp ? `${insp.status} — ${insp.inspector_name || ''}${insp.note ? ' · ' + insp.note : ''}` : editable ? 'Klik untuk isi inspeksi' : 'Terkunci (di luar jam slot / bukan hari ini)'}
-                          className={`min-w-[70px] border rounded px-2 py-1 text-[10px] font-semibold ${insp ? ST_META[insp.status].bg + ' ' + ST_META[insp.status].c : 'border-border text-text2'} ${editable ? 'hover:opacity-80' : 'opacity-60 cursor-not-allowed'}`}
-                        >
-                          {insp ? ST_META[insp.status].t : editable ? '+ isi' : '🔒'}
-                        </button>
-                        {insp?.photo_url && (
-                          <a href={insp.photo_url} target="_blank" rel="noreferrer" title={insp.verified ? `Terverifikasi${insp.distance_m != null ? ' · ' + insp.distance_m + ' m' : ''}` : 'Belum terverifikasi (EXIF/GPS)'} onClick={(e) => e.stopPropagation()} className="text-[12px]">📷{insp.verified ? '✅' : '⚠️'}</a>
-                        )}
-                      </div>
-                    </td>
+                    <div key={s} className="flex flex-col items-center gap-1">
+                      <span className="text-[9px] text-text2">{SLOT_LABEL[s]}</span>
+                      <button
+                        disabled={!editable}
+                        onClick={() => editable && setEdit({ dev: d, slot: s })}
+                        title={insp ? `${insp.status} — ${insp.inspector_name || ''}${insp.note ? ' · ' + insp.note : ''}` : editable ? 'Klik untuk isi inspeksi' : 'Terkunci (di luar jam slot / bukan hari ini)'}
+                        className={`w-full border rounded px-1.5 py-1 text-[10px] font-semibold ${insp ? ST_META[insp.status].bg + ' ' + ST_META[insp.status].c : 'border-border text-text2'} ${editable ? 'hover:opacity-80' : 'opacity-60 cursor-not-allowed'}`}
+                      >
+                        {insp ? ST_META[insp.status].t : editable ? '+ isi' : '🔒'}
+                      </button>
+                      {insp?.photo_url
+                        ? <a href={insp.photo_url} target="_blank" rel="noreferrer" title={insp.verified ? `Terverifikasi${insp.distance_m != null ? ' · ' + insp.distance_m + ' m' : ''}` : 'Belum terverifikasi (EXIF/GPS)'} onClick={(e) => e.stopPropagation()} className="text-[11px] leading-none">📷{insp.verified ? '✅' : '⚠️'}</a>
+                        : <span className="h-[11px]" />}
+                    </div>
                   );
                 })}
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={5} className="text-center py-6 text-text2">Tidak ada perangkat.</td></tr>}
-          </tbody>
-        </table>
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="col-span-full text-center py-10 text-text2 text-sm bg-surface border border-border rounded-xl">
+            {rows.length === 0 ? 'Tidak ada perangkat.' : 'Tidak ada perangkat yang cocok dengan pencarian/filter.'}
+          </div>
+        )}
       </div>
 
       {edit && (
@@ -165,7 +208,7 @@ function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: 
       fd.append('photo', file);
       if (geo) { fd.append('lat', String(geo.lat)); fd.append('lng', String(geo.lng)); }
       const res = await api.post('/equipment/inspections', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      if (res.data?.warning) alert('Tersimpan, namun: ' + res.data.warning + '\n(ditandai BELUM TERVERIFIKASI untuk koordinator)');
+      if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -209,7 +252,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
   const [rows, setRows] = useState<MaintenanceRow[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [completeFor, setCompleteFor] = useState<MaintenanceRow | null>(null);
+  const [photoModalFor, setPhotoModalFor] = useState<MaintenanceRow | null>(null);
   const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -224,7 +267,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
     load();
   }
   async function remove(id: number) {
-    if (!confirm('Hapus rencana maintenance ini?')) return;
+    if (!(await confirmDialog({ title: 'Hapus rencana maintenance', message: 'Rencana maintenance ini akan dihapus.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     await api.delete(`/equipment/maintenance/${id}`);
     load();
   }
@@ -264,7 +307,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
         {isManager && (
           <div className="flex gap-2 ml-auto flex-wrap">
             <button onClick={() => setShowAdd(true)} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Tambah</button>
-            <button onClick={downloadTemplate} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white">⬇️ Template Excel</button>
+            <button onClick={downloadTemplate} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text">⬇️ Template Excel</button>
             <button onClick={() => fileRef.current?.click()} className="border border-accent2/40 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">⬆️ Import Excel</button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} />
           </div>
@@ -282,12 +325,14 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
               <tr key={m.id} className="border-b border-border/50">
                 <td className="px-3.5 py-2.5 font-mono text-[11px]">{m.scheduled_date}</td>
                 <td className="px-3.5 py-2.5"><strong>{m.device_name}</strong><div className="text-text2 text-[10px]">{m.device_type}</div></td>
-                <td className="px-3.5 py-2.5">{m.task}{m.note && <div className="text-text2 text-[10px]">{m.note}</div>}{m.doc_url && <a href={m.doc_url} target="_blank" rel="noreferrer" className="text-accent2 text-[10px] hover:underline">📎 Dokumentasi</a>}</td>
+                <td className="px-3.5 py-2.5">{m.task}{m.note && <div className="text-text2 text-[10px]">{m.note}</div>}
+                  <button onClick={() => setPhotoModalFor(m)} className="block text-accent2 text-[10px] hover:underline mt-0.5">📷 {m.photo_count || 0} foto dokumentasi{m.doc_url ? ' + lampiran' : ''}</button>
+                </td>
                 <td className="px-3.5 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded border font-semibold capitalize ${stMeta[m.status]}`}>{m.status}</span></td>
                 <td className="px-3.5 py-2.5 text-text2 text-[11px]">{m.done_by_name || '-'}{m.done_at && <div className="text-[10px]">{m.done_at}</div>}</td>
                 <td className="px-3.5 py-2.5">
                   <div className="flex gap-1.5 flex-wrap">
-                    {m.status !== 'selesai' && <button onClick={() => setCompleteFor(m)} className="border border-success/40 text-success rounded px-2 py-0.5">✅ Selesai</button>}
+                    {m.status !== 'selesai' && <button onClick={() => setPhotoModalFor(m)} className="border border-success/40 text-success rounded px-2 py-0.5">✅ Selesai</button>}
                     {m.status !== 'rencana' && <button onClick={() => setStatus(m.id, 'rencana')} className="border border-border text-text2 rounded px-2 py-0.5">↺ Rencana</button>}
                     {isManager && <button onClick={() => remove(m.id)} className="border border-danger/40 text-danger rounded px-2 py-0.5">🗑️</button>}
                   </div>
@@ -300,61 +345,14 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
       </div>
 
       {showAdd && <AddMaintenanceModal devices={devices} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
-      {completeFor && <CompleteMaintenanceModal item={completeFor} onClose={() => setCompleteFor(null)} onDone={(n) => { setCompleteFor(null); setMsg(`✅ Maintenance selesai. Notifikasi terkirim ke ${n} koordinator.`); setTimeout(() => setMsg(''), 6000); load(); }} />}
-    </div>
-  );
-}
-
-// Modal penyelesaian maintenance: wajib unggah dokumentasi (foto/PDF, bisa dari kamera).
-function CompleteMaintenanceModal({ item, onClose, onDone }: { item: MaintenanceRow; onClose: () => void; onDone: (notified: number) => void }) {
-  const [doc, setDoc] = useState<File | null>(null);
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const hasExisting = !!item.doc_url;
-
-  async function submit() {
-    if (!doc && !hasExisting) return setErr('Dokumentasi (foto/PDF) wajib diunggah untuk menyelesaikan maintenance.');
-    setBusy(true); setErr('');
-    try {
-      const fd = new FormData();
-      fd.append('status', 'selesai');
-      if (note.trim()) fd.append('note', note.trim());
-      if (doc) fd.append('doc', doc);
-      const r = await api.put(`/equipment/maintenance/${item.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      onDone(r.data.notified ?? 0);
-    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-bold mb-1">✅ Selesaikan Maintenance</h3>
-        <div className="text-[11px] text-text2 mb-4">{item.device_name} · {item.task}</div>
-
-        <label className="block text-[11px] text-text2 mb-1">📷 Dokumentasi * (foto/PDF — bisa langsung dari kamera)</label>
-        <input type="file" accept="image/*,application/pdf" capture="environment" onChange={(e) => setDoc(e.target.files?.[0] || null)}
-          className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white file:cursor-pointer" />
-        {doc && <div className="text-[10px] text-accent2 mb-2 flex items-center gap-1.5">{doc.type.startsWith('image') ? '🖼️' : '📄'} {doc.name}<button type="button" onClick={() => setDoc(null)} className="text-danger">✕</button></div>}
-        {!doc && hasExisting && <div className="text-[10px] text-text2 mb-2">Sudah ada dokumentasi terlampir; unggah baru untuk menggantinya (opsional).</div>}
-
-        <label className="block text-[11px] text-text2 mb-1">Catatan Hasil (opsional)</label>
-        <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Kondisi setelah maintenance…" />
-
-        <div className="text-[10px] text-text2 mb-3">ℹ️ Setelah selesai, notifikasi WhatsApp otomatis dikirim ke koordinator.</div>
-        {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
-        <div className="flex gap-2 justify-end">
-          <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
-          <button className="bg-success text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={submit} disabled={busy}>{busy ? 'Menyimpan…' : '✅ Selesai & Kirim Notifikasi'}</button>
-        </div>
-      </div>
+      {photoModalFor && <MaintenancePhotosModal item={photoModalFor} onClose={() => { setPhotoModalFor(null); load(); }} onCompleted={(n) => { setPhotoModalFor(null); setMsg(`✅ Maintenance selesai. Notifikasi terkirim ke ${n} koordinator.`); setTimeout(() => setMsg(''), 6000); load(); }} />}
     </div>
   );
 }
 
 function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[]; onClose: () => void; onSaved: () => void }) {
-  const [deviceId, setDeviceId] = useState<number | ''>('');
+  const [deviceIds, setDeviceIds] = useState<number[]>([]);
+  const [q, setQ] = useState('');
   const [scheduledDate, setScheduledDate] = useState(todayKey());
   const [task, setTask] = useState('');
   const [note, setNote] = useState('');
@@ -363,16 +361,19 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
   const [err, setErr] = useState('');
 
   async function save() {
-    if (!deviceId || !task.trim()) return setErr('Perangkat dan tugas wajib diisi.');
+    if (deviceIds.length === 0 || !task.trim()) return setErr('Pilih minimal satu perangkat dan isi tugas.');
     setBusy(true); setErr('');
     try {
-      const fd = new FormData();
-      fd.append('deviceId', String(deviceId));
-      fd.append('scheduledDate', scheduledDate);
-      fd.append('task', task.trim());
-      if (note.trim()) fd.append('note', note.trim());
-      if (doc) fd.append('doc', doc);
-      await api.post('/equipment/maintenance', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // Satu rencana maintenance dibuat untuk tiap perangkat yang dipilih.
+      for (const id of deviceIds) {
+        const fd = new FormData();
+        fd.append('deviceId', String(id));
+        fd.append('scheduledDate', scheduledDate);
+        fd.append('task', task.trim());
+        if (note.trim()) fd.append('note', note.trim());
+        if (doc) fd.append('doc', doc);
+        await api.post('/equipment/maintenance', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -383,11 +384,44 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-4">+ Rencana Maintenance</h3>
-        <label className="block text-[11px] text-text2 mb-1">Perangkat *</label>
-        <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={deviceId} onChange={(e) => setDeviceId(Number(e.target.value))}>
-          <option value="">Pilih perangkat…</option>
-          {devices.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.ip})</option>)}
-        </select>
+        <label className="block text-[11px] text-text2 mb-1">Perangkat * <span className="text-text2">({deviceIds.length} dipilih)</span></label>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 Cari perangkat…"
+          className="w-full bg-surface2 border border-border rounded-md px-3 py-1.5 text-xs mb-1.5"
+        />
+        {(() => {
+          const filtered = devices.filter((d) => { const t = `${d.name} ${d.ip}`.toLowerCase(); return !q.trim() || t.includes(q.trim().toLowerCase()); });
+          const allSel = filtered.length > 0 && filtered.every((d) => deviceIds.includes(d.id));
+          return (
+            <>
+              <div className="flex items-center justify-between mb-1">
+                <button
+                  type="button"
+                  onClick={() => setDeviceIds(allSel
+                    ? deviceIds.filter((id) => !filtered.some((d) => d.id === id))
+                    : Array.from(new Set([...deviceIds, ...filtered.map((d) => d.id)])))}
+                  className="text-[10px] text-accent2 hover:underline"
+                >{allSel ? '✕ Hapus pilihan (hasil cari)' : '✓ Pilih semua (hasil cari)'}</button>
+                {deviceIds.length > 0 && <button type="button" onClick={() => setDeviceIds([])} className="text-[10px] text-danger hover:underline">Kosongkan</button>}
+              </div>
+              <div className="max-h-40 overflow-y-auto border border-border rounded-md mb-3 divide-y divide-border/50">
+                {filtered.length === 0 ? (
+                  <div className="text-center text-text2 text-[11px] py-4">Tidak ada perangkat cocok.</div>
+                ) : filtered.map((d) => {
+                  const checked = deviceIds.includes(d.id);
+                  return (
+                    <label key={d.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs cursor-pointer hover:bg-surface2">
+                      <input type="checkbox" checked={checked} onChange={() => setDeviceIds((ids) => checked ? ids.filter((x) => x !== d.id) : [...ids, d.id])} className="accent-[var(--color-accent)]" />
+                      <span className="truncate">{d.name} <span className="text-text2 font-mono text-[10px]">{d.ip}</span></span>
+                    </label>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
         <label className="block text-[11px] text-text2 mb-1">Tanggal *</label>
         <input type="date" className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
         <label className="block text-[11px] text-text2 mb-1">Tugas *</label>
@@ -396,7 +430,7 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
         <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={note} onChange={(e) => setNote(e.target.value)} />
         <label className="block text-[11px] text-text2 mb-1">📎 Dokumentasi (foto/PDF — bisa langsung dari kamera)</label>
         <input type="file" accept="image/*,application/pdf" capture="environment" onChange={(e) => setDoc(e.target.files?.[0] || null)}
-          className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white file:cursor-pointer" />
+          className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text file:cursor-pointer" />
         {doc && <div className="text-[10px] text-accent2 mb-3 flex items-center gap-1.5">{doc.type.startsWith('image') ? '🖼️' : '📄'} {doc.name}<button type="button" onClick={() => setDoc(null)} className="text-danger">✕</button></div>}
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">

@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import { confirmDialog, promptDialog } from '../components/dialog';
 import type { PengajuanDiklat, DiklatStatus } from '../types';
 
 const LKP_DEFAULT = {
@@ -71,7 +72,7 @@ export default function Diklat() {
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div className="text-[17px] font-bold">🎓 Pengajuan Diklat</div>
         <div className="flex items-center gap-2">
-          {isManager && <button onClick={exportExcel} className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs">⬇️ Export Excel</button>}
+          {isManager && <button onClick={exportExcel} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs">⬇️ Export Excel</button>}
           <button onClick={() => { setEditId(null); setShowForm(true); }} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Ajukan Diklat</button>
         </div>
       </div>
@@ -109,7 +110,7 @@ export default function Diklat() {
                 <td className="px-3 py-2.5 font-mono text-[10px]">{d.tanggal_mulai || '-'}{d.tanggal_selesai ? ` → ${d.tanggal_selesai}` : ''}</td>
                 <td className="px-3 py-2.5 font-mono text-[11px]">{rupiah(d.biaya)}</td>
                 <td className="px-3 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${STATUS[d.status].cls}`}>{STATUS[d.status].label}</span></td>
-                <td className="px-3 py-2.5"><button onClick={() => setDetail(d)} className="border border-border text-text2 hover:text-white rounded px-2 py-0.5 text-[10px]">👁️ Lihat</button></td>
+                <td className="px-3 py-2.5"><button onClick={() => setDetail(d)} className="border border-border text-text2 hover:text-text rounded px-2 py-0.5 text-[10px]">👁️ Lihat</button></td>
               </tr>
             ))}
             {rows.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-text2">Belum ada pengajuan diklat.</td></tr>}
@@ -155,7 +156,7 @@ function DiklatForm({ lkp: _lkp, edit, onClose, onSaved }: { lkp: any; edit: Pen
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">🎓 {edit ? 'Edit' : 'Form'} Pengajuan Diklat</h3><button onClick={onClose} className="text-text2 hover:text-white text-lg leading-none">×</button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">🎓 {edit ? 'Edit' : 'Form'} Pengajuan Diklat</h3><button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button></div>
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nama Pegawai *"><input className={inp} value={f.pegawai_nama} onChange={(e) => set('pegawai_nama', e.target.value)} /></Field>
           <Field label="NIP / NIK"><input className={inp} value={f.nip} onChange={(e) => set('nip', e.target.value)} /></Field>
@@ -170,7 +171,7 @@ function DiklatForm({ lkp: _lkp, edit, onClose, onSaved }: { lkp: any; edit: Pen
           <Field label="Estimasi Biaya (Rp)"><input type="number" className={inp} value={f.biaya} onChange={(e) => set('biaya', e.target.value)} /></Field>
           <Field label="Tujuan & Manfaat Diklat" full><textarea className={`${inp} min-h-[60px]`} value={f.tujuan} onChange={(e) => set('tujuan', e.target.value)} /></Field>
           <Field label="Keterangan Tambahan" full><textarea className={`${inp} min-h-[50px]`} value={f.keterangan} onChange={(e) => set('keterangan', e.target.value)} /></Field>
-          <Field label="📎 Dokumen Pendukung (foto/PDF)" full><input type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white" /></Field>
+          <Field label="📎 Dokumen Pendukung (foto/PDF)" full><input type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text" /></Field>
         </div>
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mt-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end mt-4">
@@ -191,7 +192,7 @@ function DiklatDetail({ id, isManager, userId, lkp, onClose, onChanged, onEdit }
 
   async function setStatus(next: DiklatStatus, ask?: boolean) {
     let note = '';
-    if (ask) { const v = window.prompt(next === 'ditolak' ? 'Alasan penolakan:' : 'Catatan (opsional):'); if (v === null) return; note = v; }
+    if (ask) { const v = await promptDialog(next === 'ditolak' ? { title: 'Tolak pengajuan', inputLabel: 'Alasan penolakan', confirmText: 'Tolak', variant: 'danger', required: true } : { title: 'Setujui pengajuan', inputLabel: 'Catatan (opsional)', confirmText: 'Setujui', variant: 'success' }); if (v === null) return; note = v; }
     setBusy(true);
     try { const r = await api.patch(`/diklat/${id}/status`, { status: next, note }); setD(r.data.diklat); onChanged(); }
     catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal.'); setTimeout(() => setMsg(''), 4000); }
@@ -214,12 +215,12 @@ function DiklatDetail({ id, isManager, userId, lkp, onClose, onChanged, onEdit }
   }
   async function signNota() {
     if (!d?.nota_dinas_id) return;
-    if (!window.confirm('Sahkan Nota Dinas dengan TTE? Tidak bisa dibatalkan.')) return;
+    if (!(await confirmDialog({ title: 'Sahkan Nota Dinas', message: 'Dokumen akan ditandatangani secara elektronik (TTE). Tidak bisa dibatalkan.', confirmText: '🔏 Sahkan', variant: 'success' }))) return;
     try { await api.post(`/surat/${d.nota_dinas_id}/sign`, { signerName: lkp.koord_nama, signerNip: lkp.koord_nip }); load(); onChanged(); }
     catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal TTE.'); }
   }
   async function hapus() {
-    if (!window.confirm('Hapus pengajuan ini?')) return;
+    if (!(await confirmDialog({ title: 'Hapus pengajuan', message: 'Pengajuan diklat ini akan dihapus permanen.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     try { await api.delete(`/diklat/${id}`); onChanged(); onClose(); } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal hapus.'); }
   }
 
@@ -290,7 +291,7 @@ function DiklatDetail({ id, isManager, userId, lkp, onClose, onChanged, onEdit }
           <div className="border border-accent2/30 bg-accent2/5 rounded-lg p-3 mb-3">
             <div className="text-[11px] text-text2 mb-1.5">📤 {d.laporan_url ? 'Ganti' : 'Upload'} Laporan Hasil Diklat (foto/PDF){d.status === 'disetujui' ? ' — wajib sebelum menandai Selesai' : ''}</div>
             <input type="file" accept="image/*,application/pdf" disabled={busy} onChange={(e) => e.target.files?.[0] && uploadLaporan(e.target.files[0])}
-              className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white file:cursor-pointer" />
+              className="w-full text-[11px] text-text2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text file:cursor-pointer" />
           </div>
         )}
 
@@ -315,7 +316,7 @@ function DiklatDetail({ id, isManager, userId, lkp, onClose, onChanged, onEdit }
           {d.status === 'disetujui' && isManager && <button onClick={() => setStatus('selesai', true)} disabled={busy} className="bg-[#14b8a6] text-bg rounded-md px-3 py-1.5 text-xs font-semibold">🏁 Selesai</button>}
           {isManager && ['diverifikasi', 'disetujui', 'selesai'].includes(d.status) && !d.nomor_nota_dinas && <button onClick={genNota} disabled={busy} className="border border-accent2/50 text-accent2 rounded-md px-3 py-1.5 text-xs">📋 Buat Nota Dinas</button>}
           {isManager && d.nota_dinas_id && !d.nota?.sign_token && <button onClick={signNota} disabled={busy} className="border border-success/40 text-success rounded-md px-3 py-1.5 text-xs">🔏 Sahkan TTE</button>}
-          {d.nomor_nota_dinas && <button onClick={cetakNota} className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs">🖨️ Cetak Nota Dinas</button>}
+          {d.nomor_nota_dinas && <button onClick={cetakNota} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs">🖨️ Cetak Nota Dinas</button>}
           {canEditOwn && <button onClick={() => onEdit(d)} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs">✏️ Edit</button>}
           {(isManager || (owner && d.status === 'draft')) && <button onClick={hapus} className="border border-danger/40 text-danger rounded-md px-3 py-1.5 text-xs ml-auto">🗑️ Hapus</button>}
           <button onClick={onClose} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs">Tutup</button>

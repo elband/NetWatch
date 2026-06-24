@@ -94,6 +94,20 @@ async function migrate() {
   // Laporan hasil diklat (diunggah setelah pelaksanaan).
   await addColumnIfMissing(conn, env.db.database, 'pengajuan_diklat', 'laporan_url', 'VARCHAR(255) DEFAULT NULL AFTER file_pendukung');
   await addColumnIfMissing(conn, env.db.database, 'pengajuan_diklat', 'laporan_at', 'DATETIME DEFAULT NULL AFTER laporan_url');
+  // Master data tipe perangkat: pastikan tabel ada (idempoten, di luar batch schema)
+  // + seed daftar default. INSERT IGNORE agar edit/penghapusan oleh user tidak tertimpa.
+  await conn.query(`CREATE TABLE IF NOT EXISTS device_types (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(80) NOT NULL UNIQUE,
+    icon VARCHAR(10) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB`);
+  const DEV_TYPES = [['Switch', '🔀'], ['Router', '📡'], ['Firewall', '🧱'], ['AP', '📶'], ['Server', '🖥️'], ['NAS', '💾'], ['CCTV', '📹'], ['PC Client', '💻'], ['Printer', '🖨️']];
+  for (let i = 0; i < DEV_TYPES.length; i++) {
+    await conn.query('INSERT IGNORE INTO device_types (name, icon, sort_order) VALUES (?, ?, ?)', [DEV_TYPES[i][0], DEV_TYPES[i][1], i]);
+  }
+
   // Seed kategori dokumen (12 kategori default).
   const DOC_CATS = ['SOP', 'Work Instruction', 'Knowledge Base', 'Materi Diklat', 'Dokumentasi Sistem', 'Dokumentasi Infrastruktur', 'Troubleshooting Guide', 'Diagram Jaringan', 'Form dan Template', 'Kebijakan dan Regulasi', 'Manual Vendor', 'Video Tutorial'];
   for (let i = 0; i < DOC_CATS.length; i++) {

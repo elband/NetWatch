@@ -203,7 +203,8 @@ router.get('/maintenance', async (req, res) => {
     : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
   const [rows] = await pool.query(
     `SELECT m.*, d.name AS device_name, d.ip AS device_ip, d.type AS device_type,
-            ub.name AS done_by_name
+            ub.name AS done_by_name,
+            (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id = m.id) AS photo_count
        FROM equipment_maintenance m
        JOIN devices d ON d.id = m.device_id
        LEFT JOIN users ub ON ub.id = m.done_by
@@ -244,7 +245,8 @@ router.put('/maintenance/:id', maintUpload.single('doc'), async (req, res) => {
   const docUrl = req.file ? `/uploads/maintenance/${req.file.filename}` : null;
 
   if (status === 'selesai') {
-    if (!docUrl && !m.doc_url) return res.status(400).json({ error: 'Dokumentasi wajib diunggah saat menandai maintenance selesai.' });
+    const [[pc]] = await pool.query('SELECT COUNT(*) AS c FROM equipment_maintenance_photos WHERE maintenance_id = ?', [req.params.id]);
+    if (pc.c === 0 && !docUrl && !m.doc_url) return res.status(400).json({ error: 'Unggah minimal 1 foto dokumentasi sebelum menandai maintenance selesai.' });
     await pool.query(
       'UPDATE equipment_maintenance SET status=?, note=COALESCE(?, note), doc_url=COALESCE(?, doc_url), done_by=?, done_at=NOW() WHERE id=?',
       [status, note?.trim() || null, docUrl, req.user.id, req.params.id]
@@ -252,7 +254,8 @@ router.put('/maintenance/:id', maintUpload.single('doc'), async (req, res) => {
     // Notifikasi ke seluruh koordinator (WA + tercatat di Log WhatsApp).
     const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
     const when = new Date().toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-    const msg = `🛠️ *Maintenance Selesai*\nPerangkat: ${m.device_name}\nTugas: ${m.task}\nOleh: ${req.user.name}\nWaktu: ${when}\nDokumentasi telah dilampirkan di sistem.`;
+    const docInfo = pc.c > 0 ? `${pc.c} foto dokumentasi dilampirkan` : 'Dokumentasi telah dilampirkan';
+    const msg = `🛠️ *Maintenance Selesai*\nPerangkat: ${m.device_name}\nTugas: ${m.task}\nOleh: ${req.user.name}\nWaktu: ${when}\n${docInfo} di sistem.`;
     for (const c of coords) { try { await queueWaNotification({ type: 'report', toUserId: c.id, message: msg }); } catch { /* abaikan */ } }
     req.app.get('io')?.emit('maintenance:done', { id: m.id, device: m.device_name, by: req.user.name });
     return res.json({ ok: true, doc_url: docUrl, notified: coords.length });
@@ -263,6 +266,49 @@ router.put('/maintenance/:id', maintUpload.single('doc'), async (req, res) => {
     [status, note?.trim() || null, docUrl, req.params.id]
   );
   res.json({ ok: true, doc_url: docUrl });
+});
+
+// ── Dokumentasi foto maintenance (banyak foto per rencana) ──
+// Daftar foto sebuah maintenance.
+router.get('/maintenance/:id/photos', async (req, res) => {
+  const [photos] = await pool.query(
+    `SELECT p.id, p.url, p.caption, p.created_at, u.name AS uploaded_by_name
+       FROM equipment_maintenance_photos p
+       LEFT JOIN users u ON u.id = p.uploaded_by
+      WHERE p.maintenance_id = ? ORDER BY p.id ASC`,
+    [req.params.id]
+  );
+  res.json({ photos });
+});
+
+// Unggah satu/banyak foto sekaligus untuk sebuah maintenance.
+router.post('/maintenance/:id/photos', maintUpload.array('photos', 20), async (req, res) => {
+  const [[m]] = await pool.query('SELECT id FROM equipment_maintenance WHERE id = ?', [req.params.id]);
+  if (!m) return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: 'Tidak ada foto yang diunggah.' });
+  for (const f of files) {
+    await pool.query(
+      'INSERT INTO equipment_maintenance_photos (maintenance_id, url, uploaded_by) VALUES (?, ?, ?)',
+      [req.params.id, `/uploads/maintenance/${f.filename}`, req.user.id]
+    );
+  }
+  const [photos] = await pool.query(
+    `SELECT p.id, p.url, p.caption, p.created_at, u.name AS uploaded_by_name
+       FROM equipment_maintenance_photos p LEFT JOIN users u ON u.id = p.uploaded_by
+      WHERE p.maintenance_id = ? ORDER BY p.id ASC`,
+    [req.params.id]
+  );
+  res.status(201).json({ photos });
+});
+
+// Hapus satu foto dokumentasi (+ berkas di disk).
+router.delete('/maintenance/photos/:photoId', async (req, res) => {
+  const [[ph]] = await pool.query('SELECT url FROM equipment_maintenance_photos WHERE id = ?', [req.params.photoId]);
+  if (!ph) return res.status(404).json({ error: 'Foto tidak ditemukan.' });
+  await pool.query('DELETE FROM equipment_maintenance_photos WHERE id = ?', [req.params.photoId]);
+  try { fs.unlinkSync(path.join(MAINT_DIR, path.basename(ph.url))); } catch { /* berkas mungkin sudah tiada */ }
+  res.json({ ok: true });
 });
 
 router.delete('/maintenance/:id', requireRole('admin', 'koordinator'), async (req, res) => {

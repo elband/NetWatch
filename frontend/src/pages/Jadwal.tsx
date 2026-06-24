@@ -22,6 +22,7 @@ export default function Jadwal() {
   const [techs, setTechs] = useState<User[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [msg, setMsg] = useState('');
+  const [showRules, setShowRules] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const today = new Date();
@@ -121,7 +122,8 @@ export default function Jadwal() {
         </div>
         {canEdit && (
           <div className="flex items-center gap-2">
-            <button onClick={downloadTemplate} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-white">⬇️ Template Excel</button>
+            <button onClick={() => setShowRules(true)} className="border border-accent2/40 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">⏰ Atur Jam Dinas</button>
+            <button onClick={downloadTemplate} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text">⬇️ Template Excel</button>
             <button onClick={() => fileRef.current?.click()} className="border border-accent2/40 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">⬆️ Import Excel</button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} />
           </div>
@@ -184,6 +186,99 @@ export default function Jadwal() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {showRules && <ShiftRulesModal onClose={() => setShowRules(false)} />}
+    </div>
+  );
+}
+
+// ===================== ATUR JAM DINAS (SHIFT WINDOWS) =====================
+type ShiftKey = 'malam' | 'pagi' | 'siang';
+interface Win { start: number; end: number }
+const RULE_ROWS: Array<{ key: ShiftKey; abbr: string; label: string; color: string }> = [
+  { key: 'malam', abbr: 'N', label: 'Dinas Kantor', color: 'var(--color-accent2)' },
+  { key: 'pagi', abbr: 'P', label: 'Dinas Pagi', color: 'var(--color-success)' },
+  { key: 'siang', abbr: 'S', label: 'Dinas Siang', color: 'var(--color-warn)' },
+];
+const hourToTime = (h: number) => {
+  const hh = Math.floor(h); const mm = Math.round((h - hh) * 60);
+  return `${String(hh).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
+};
+const timeToHour = (t: string) => {
+  const [hh, mm] = (t || '0:0').split(':').map(Number);
+  return (hh || 0) + (mm || 0) / 60;
+};
+
+function ShiftRulesModal({ onClose }: { onClose: () => void }) {
+  const [wins, setWins] = useState<Record<ShiftKey, Win> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState(false);
+
+  useEffect(() => {
+    api.get('/jadwal/shift-windows').then((r) => setWins(r.data.windows)).catch(() => setErr('Gagal memuat aturan jam.'));
+  }, []);
+
+  function setField(key: ShiftKey, field: 'start' | 'end', time: string) {
+    setWins((w) => (w ? { ...w, [key]: { ...w[key], [field]: timeToHour(time) } } : w));
+    setOk(false);
+  }
+
+  async function save() {
+    if (!wins) return;
+    setBusy(true); setErr(''); setOk(false);
+    try {
+      await api.put('/jadwal/shift-windows', wins);
+      setOk(true);
+      setTimeout(onClose, 900);
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Gagal menyimpan.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-bold">⏰ Atur Jam Dinas</h3>
+          <button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button>
+        </div>
+        <p className="text-[11px] text-text2 mb-4 leading-relaxed">
+          Atur rentang jam tiap shift. Jam inilah yang menentukan siapa teknisi <b>on-duty</b> (penerima insiden &amp; SLA). Libur, Dinas Luar, dan Cuti tidak punya jam dinas.
+        </p>
+
+        {!wins ? (
+          <div className="text-text2 text-xs py-6 text-center">{err || 'Memuat…'}</div>
+        ) : (
+          <>
+            <div className="space-y-2.5">
+              {RULE_ROWS.map(({ key, abbr, label, color }) => {
+                const w = wins[key];
+                const overnight = w.start > w.end;
+                return (
+                  <div key={key} className="flex items-center gap-2.5 bg-surface2 border border-border rounded-lg px-3 py-2.5">
+                    <span className="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-[12px] font-bold" style={{ background: `color-mix(in srgb, ${color} 18%, transparent)`, color }}>{abbr}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold leading-tight">{label}</div>
+                      {overnight && <div className="text-[9px] text-warn">↦ lintas tengah malam</div>}
+                    </div>
+                    <input type="time" value={hourToTime(w.start)} onChange={(e) => setField(key, 'start', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
+                    <span className="text-text2 text-xs">–</span>
+                    <input type="time" value={hourToTime(w.end)} onChange={(e) => setField(key, 'end', e.target.value)} className="bg-surface border border-border rounded px-2 py-1 text-xs" />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-text2 mt-3 leading-relaxed">💡 Jika jam <b>mulai &gt; selesai</b> (mis. 20:00–05:00), shift dianggap melewati tengah malam. Perubahan langsung berlaku tanpa restart.</div>
+            {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mt-3">⚠️ {err}</div>}
+            {ok && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mt-3">✓ Tersimpan & diterapkan.</div>}
+            <div className="flex gap-2 justify-end mt-4">
+              <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Tutup</button>
+              <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan'}</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

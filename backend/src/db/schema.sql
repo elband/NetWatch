@@ -209,6 +209,15 @@ CREATE TABLE IF NOT EXISTS locations (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- Master data tipe perangkat (dropdown "Tipe" pada form perangkat).
+CREATE TABLE IF NOT EXISTS device_types (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(80) NOT NULL UNIQUE,
+  icon VARCHAR(10) DEFAULT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS settings (
   setting_key VARCHAR(80) PRIMARY KEY,
   setting_value JSON NOT NULL,
@@ -590,6 +599,19 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance (
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Dokumentasi foto maintenance (banyak foto per rencana maintenance).
+CREATE TABLE IF NOT EXISTS equipment_maintenance_photos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  maintenance_id INT NOT NULL,
+  url VARCHAR(255) NOT NULL,
+  caption VARCHAR(255) DEFAULT NULL,
+  uploaded_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_mphoto_maint (maintenance_id),
+  FOREIGN KEY (maintenance_id) REFERENCES equipment_maintenance(id) ON DELETE CASCADE,
+  FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- Notification Center: notifikasi per-user, dikirim real-time via Socket.IO.

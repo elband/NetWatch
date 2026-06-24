@@ -109,7 +109,7 @@ export default function Incidents() {
     if (!k) return <th className="px-3.5 py-2.5 text-left">{label}</th>;
     return (
       <th
-        className="px-3.5 py-2.5 text-left cursor-pointer hover:text-white select-none"
+        className="px-3.5 py-2.5 text-left cursor-pointer hover:text-text select-none"
         onClick={() => toggleSort(k)}
       >
         {label}<SortIcon k={k} />
@@ -133,7 +133,7 @@ export default function Incidents() {
         </div>
         <button
           onClick={() => { setLoading(true); load(); }}
-          className="text-xs text-text2 hover:text-white border border-border rounded px-2.5 py-1 flex items-center gap-1.5"
+          className="text-xs text-text2 hover:text-text border border-border rounded px-2.5 py-1 flex items-center gap-1.5"
         >
           {loading ? <span className="animate-spin">⟳</span> : '⟳'} Muat Ulang
         </button>
@@ -158,7 +158,7 @@ export default function Incidents() {
             onChange={(e) => setSearch(e.target.value)}
           />
           {search && (
-            <button className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text2 hover:text-white" onClick={() => setSearch('')}>✕</button>
+            <button className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text2 hover:text-text" onClick={() => setSearch('')}>✕</button>
           )}
         </div>
         <select
@@ -173,7 +173,7 @@ export default function Incidents() {
         </select>
         {(filter !== 'all' || search) && (
           <button
-            className="text-xs text-text2 hover:text-white border border-border rounded px-2.5 py-1"
+            className="text-xs text-text2 hover:text-text border border-border rounded px-2.5 py-1"
             onClick={() => { setFilter('all'); setSearch(''); }}
           >
             Reset ✕
@@ -256,7 +256,7 @@ export default function Incidents() {
                   <td className="px-3.5 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <div className="flex gap-1.5">
                       <button
-                        className="text-text2 hover:text-white border border-border rounded px-2 py-0.5 hover:border-accent/40 transition-colors"
+                        className="text-text2 hover:text-text border border-border rounded px-2 py-0.5 hover:border-accent/40 transition-colors"
                         onClick={() => setSelected(i)}
                       >
                         Detail →

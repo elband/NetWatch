@@ -57,7 +57,7 @@ export default function Dashboard() {
         <div className="nw-card bg-surface border border-border rounded-[10px] overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex justify-between items-center">
             <span className="text-[13px] font-semibold">🚨 Insiden Aktif</span>
-            <Link to="/incidents" className="text-xs text-text2 hover:text-white">Semua →</Link>
+            <Link to="/incidents" className="text-xs text-text2 hover:text-text">Semua →</Link>
           </div>
           <table className="w-full text-xs">
             <thead><tr className="text-text2 uppercase text-[10px] border-b border-border"><th className="px-3.5 py-2 text-left">Perangkat</th><th className="px-3.5 py-2 text-left">Prioritas</th><th className="px-3.5 py-2 text-left">Status</th></tr></thead>
@@ -76,7 +76,7 @@ export default function Dashboard() {
         <div className="nw-card bg-surface border border-border rounded-[10px] overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex justify-between items-center">
             <span className="text-[13px] font-semibold">⚠️ Perangkat Bermasalah</span>
-            <Link to="/devices" className="text-xs text-text2 hover:text-white">Semua →</Link>
+            <Link to="/devices" className="text-xs text-text2 hover:text-text">Semua →</Link>
           </div>
           <table className="w-full text-xs">
             <thead><tr className="text-text2 uppercase text-[10px] border-b border-border"><th className="px-3.5 py-2 text-left">Nama</th><th className="px-3.5 py-2 text-left">IP</th><th className="px-3.5 py-2 text-left">Status</th></tr></thead>
@@ -96,7 +96,7 @@ export default function Dashboard() {
       <div className="nw-card bg-surface border border-border rounded-[10px] overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex justify-between items-center">
           <span className="text-[13px] font-semibold">🏆 Performa Teknisi</span>
-          <Link to="/performa" className="text-xs text-text2 hover:text-white">Detail →</Link>
+          <Link to="/performa" className="text-xs text-text2 hover:text-text">Detail →</Link>
         </div>
         <div className="p-3.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 nw-stagger">
           {performa.map((p) => (

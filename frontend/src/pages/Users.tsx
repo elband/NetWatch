@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Role, User } from '../types';
 
 const ROLE_COLOR: Record<Role, string> = { admin: '#ef4444', koordinator: '#00d4aa', teknisi: '#0ea5e9', viewer: '#a78bfa' };
@@ -60,12 +61,12 @@ export default function Users() {
     load();
   }
   async function hapusUser(u: User) {
-    if (!window.confirm(`Hapus akun "${u.name}" (@${u.username}) secara permanen?\nData yang tertaut (insiden, jadwal, dll.) tidak ikut terhapus. Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!(await confirmDialog({ title: `Hapus akun ${u.name}`, message: `@${u.username}\n\nData yang tertaut (insiden, jadwal, dll.) tidak ikut terhapus. Tindakan ini tidak bisa dibatalkan.`, confirmText: '🗑️ Hapus permanen', variant: 'danger' }))) return;
     try {
       await api.delete(`/users/${u.id}`);
       load();
     } catch (e: any) {
-      alert(e?.response?.data?.error || 'Gagal menghapus akun.');
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal menghapus akun.', variant: 'danger' });
     }
   }
 
@@ -107,7 +108,7 @@ export default function Users() {
               </div>
             </div>
             <div className="flex gap-1.5">
-              <button className="border border-border text-text2 rounded px-2.5 py-1 text-xs hover:text-white" onClick={() => openEdit(u)}>✎ Edit</button>
+              <button className="border border-border text-text2 rounded px-2.5 py-1 text-xs hover:text-text" onClick={() => openEdit(u)}>✎ Edit</button>
               <button className={`rounded px-2.5 py-1 text-xs border ${u.active ? 'border-warn/30 text-warn bg-warn/10' : 'border-success/30 text-success bg-success/10'}`} onClick={() => toggleActive(u.id)}>
                 {u.active ? 'Nonaktifkan' : 'Aktifkan'}
               </button>
@@ -124,7 +125,7 @@ export default function Users() {
           <div className="bg-surface border border-border rounded-xl p-6 w-[520px] max-w-[95vw] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4">
               <span className="text-[15px] font-bold">{editId ? 'Edit User' : 'Tambah User'}</span>
-              <button onClick={() => setOpen(false)} className="text-text2 hover:text-white">✕</button>
+              <button onClick={() => setOpen(false)} className="text-text2 hover:text-text">✕</button>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <input className="col-span-2 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="Nama Lengkap" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

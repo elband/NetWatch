@@ -62,7 +62,7 @@ export default function MyIncidents() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div className="text-[17px] font-bold">🚨 Insiden Saya</div>
-        <button onClick={load} className="text-xs text-text2 hover:text-white border border-border rounded px-2.5 py-1">⟳ Muat ulang</button>
+        <button onClick={load} className="text-xs text-text2 hover:text-text border border-border rounded px-2.5 py-1">⟳ Muat ulang</button>
       </div>
 
       {/* Banner status on-duty */}
@@ -104,7 +104,7 @@ export default function MyIncidents() {
                     <td className="px-3.5 py-2.5 text-text2 font-mono text-[10px]">{i.created_at}</td>
                     <td className="px-3.5 py-2.5">
                       <div className="flex gap-1.5">
-                        <button className="text-text2 hover:text-white border border-border rounded px-2 py-0.5 text-xs" onClick={() => setSelected(i)}>Detail →</button>
+                        <button className="text-text2 hover:text-text border border-border rounded px-2 py-0.5 text-xs" onClick={() => setSelected(i)}>Detail →</button>
                         <button
                           disabled={!duty?.onDuty || taking === i.id}
                           title={duty?.onDuty ? '' : 'Hanya bisa saat on-duty'}
@@ -145,7 +145,7 @@ export default function MyIncidents() {
                     <td className="px-3.5 py-2.5"><IncidentStatusBadge status={i.status} /></td>
                     <td className="px-3.5 py-2.5">
                       <div className="flex gap-1.5 flex-wrap">
-                        <button className="text-text2 hover:text-white border border-border rounded px-2 py-0.5" onClick={() => setSelected(i)}>Detail →</button>
+                        <button className="text-text2 hover:text-text border border-border rounded px-2 py-0.5" onClick={() => setSelected(i)}>Detail →</button>
                         <button className={`border rounded px-2 py-0.5 ${i.report ? 'text-success border-success/40' : 'text-accent2 border-accent2/40'}`} onClick={() => setReportFor(i)}>
                           {i.report ? '📝 Laporan ✓' : '📝 Laporan'}
                         </button>

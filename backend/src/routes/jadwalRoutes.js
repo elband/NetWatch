@@ -3,7 +3,7 @@ import multer from 'multer';
 import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { dateKey } from '../config/shifts.js';
+import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -38,6 +38,35 @@ router.get('/', async (req, res) => {
   sql += ' ORDER BY s.shift_date';
   const [rows] = await pool.query(sql, params);
   res.json({ shifts: rows });
+});
+
+// ----- Aturan jam dinas (shift windows) -----
+// GET: window aktif + default (untuk modal "Atur Jam Dinas").
+router.get('/shift-windows', (req, res) => {
+  res.json({ windows: SHIFT_WINDOWS, defaults: DEFAULT_SHIFT_WINDOWS });
+});
+
+// PUT: ubah jam dinas (admin/koordinator). Simpan ke settings + refresh cache on-duty.
+router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, res) => {
+  const body = req.body || {};
+  const out = {};
+  for (const k of ['pagi', 'siang', 'malam']) {
+    const o = body[k];
+    if (!o || typeof o !== 'object') return res.status(400).json({ error: `Jam untuk shift "${k}" wajib diisi.` });
+    const start = Number(o.start), end = Number(o.end);
+    if (![start, end].every((n) => Number.isFinite(n) && n >= 0 && n <= 24)) {
+      return res.status(400).json({ error: `Jam shift "${k}" tidak valid (gunakan 0–24).` });
+    }
+    if (start === end) return res.status(400).json({ error: `Jam mulai & selesai shift "${k}" tidak boleh sama.` });
+    out[k] = { start, end };
+  }
+  await pool.query(
+    `INSERT INTO settings (setting_key, setting_value) VALUES ('shift_windows', ?)
+     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+    [JSON.stringify(out)]
+  );
+  await loadShiftWindows(pool); // terapkan langsung tanpa restart
+  res.json({ ok: true, windows: SHIFT_WINDOWS });
 });
 
 router.put('/:userId/:date', requireRole('admin', 'koordinator'), async (req, res) => {

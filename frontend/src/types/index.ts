@@ -108,6 +108,7 @@ export interface MaintenanceRow {
   done_by: number | null;
   done_by_name: string | null;
   done_at: string | null;
+  photo_count?: number;
 }
 
 export interface IncidentReport {

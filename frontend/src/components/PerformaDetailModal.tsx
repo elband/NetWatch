@@ -40,7 +40,7 @@ export default function PerformaDetailModal({ techId, month, onClose }: { techId
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold">🔍 Rincian Perhitungan Skor {data && `· ${data.name}`}</h3>
-          <button className="text-text2 hover:text-white text-lg leading-none" onClick={onClose}>×</button>
+          <button className="text-text2 hover:text-text text-lg leading-none" onClick={onClose}>×</button>
         </div>
 
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger">⚠️ {err}</div>}

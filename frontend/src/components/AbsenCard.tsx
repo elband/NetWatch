@@ -69,7 +69,7 @@ export default function AbsenCard() {
       <div className="flex gap-2">
         <button onClick={() => act('check-in')} disabled={busy || masuk} className="flex-1 bg-success text-bg rounded-lg py-2 text-xs font-semibold disabled:opacity-40">{busy && !masuk ? 'Memproses…' : '✅ Absen Masuk'}</button>
         <button onClick={() => act('check-out')} disabled={busy || !masuk || pulang} className="flex-1 bg-accent2 text-bg rounded-lg py-2 text-xs font-semibold disabled:opacity-40">🏁 Absen Pulang</button>
-        <button onClick={() => setShowLeave(true)} className="border border-border text-text2 hover:text-white rounded-lg py-2 px-3 text-xs">📝 Izin/Cuti</button>
+        <button onClick={() => setShowLeave(true)} className="border border-border text-text2 hover:text-text rounded-lg py-2 px-3 text-xs">📝 Izin/Cuti</button>
       </div>
 
       {msg && <div className={`mt-3 rounded-md px-3 py-2 text-[11px] border ${msg.type === 'ok' ? 'bg-success/10 border-success/30 text-success' : 'bg-danger/10 border-danger/30 text-danger'}`}>{msg.type === 'ok' ? '✓ ' : '⚠️ '}{msg.text}</div>}
@@ -131,7 +131,7 @@ function LeaveModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
         <label className="block text-[11px] text-text2 mb-1">Alasan</label>
         <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Keperluan…" />
         <label className="block text-[11px] text-text2 mb-1">📎 Bukti (surat sakit/tugas — opsional)</label>
-        <input type="file" accept="image/*,application/pdf" capture="environment" onChange={(e) => setDoc(e.target.files?.[0] || null)} className="w-full text-[11px] text-text2 mb-3 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-white" />
+        <input type="file" accept="image/*,application/pdf" capture="environment" onChange={(e) => setDoc(e.target.files?.[0] || null)} className="w-full text-[11px] text-text2 mb-3 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text" />
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>

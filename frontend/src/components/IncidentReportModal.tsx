@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import { confirmDialog } from './dialog';
 import type { Incident, IncidentReport, RepairResult } from '../types';
 
 const HASIL_LABEL: Record<RepairResult, string> = {
@@ -62,7 +63,7 @@ export default function IncidentReportModal({
   }, []);
 
   async function signReport() {
-    if (!window.confirm('Sahkan laporan ini dengan tanda tangan elektronik (TTE) Anda? Tindakan ini tidak bisa dibatalkan.')) return;
+    if (!(await confirmDialog({ title: 'Sahkan laporan', message: 'Laporan ini akan ditandatangani secara elektronik (TTE) atas nama Anda. Tindakan ini tidak bisa dibatalkan.', confirmText: '🔏 Sahkan', variant: 'success' }))) return;
     setSigning(true); setError('');
     try {
       const res = await api.post(`/incidents/${incident.id}/report/sign`, { signerName: lkp.koord_nama, signerNip: lkp.koord_nip });
@@ -237,7 +238,7 @@ export default function IncidentReportModal({
       <div className="bg-surface border border-border rounded-xl p-6 w-[560px] max-w-[95vw] max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-1">
           <span className="text-[15px] font-bold">📝 Laporan Kerusakan & Perbaikan</span>
-          <button onClick={onClose} className="text-text2 hover:text-white">✕</button>
+          <button onClick={onClose} className="text-text2 hover:text-text">✕</button>
         </div>
         <div className="text-[11px] text-text2 mb-4">{incident.id} — {incident.device_name}</div>
 
@@ -314,7 +315,7 @@ export default function IncidentReportModal({
             </button>
           )}
           {existing && (
-            <button className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs font-medium" onClick={printReport}>
+            <button className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs font-medium" onClick={printReport}>
               🖨️ Cetak {signed ? '(TTE)' : ''}
             </button>
           )}
@@ -323,7 +324,7 @@ export default function IncidentReportModal({
               📄 Nota Dinas
             </button>
           )}
-          <button className="border border-border text-text2 hover:text-white rounded-md px-3 py-1.5 text-xs font-medium ml-auto" onClick={onClose}>
+          <button className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs font-medium ml-auto" onClick={onClose}>
             Tutup
           </button>
         </div>

@@ -227,7 +227,7 @@ export default function MyDashboard() {
           </div>
         </Panel>
 
-        <Panel title="PETA LOKASI GANGGUAN" right={<Link to="/master" className="text-[11px] text-text2 hover:text-white">Kelola →</Link>}>
+        <Panel title="PETA LOKASI GANGGUAN" right={<Link to="/master" className="text-[11px] text-text2 hover:text-text">Kelola →</Link>}>
           {mapUrl ? (
             <LocationMap mapUrl={mapUrl} locations={locations} />
           ) : locations.length === 0 ? (
@@ -355,7 +355,7 @@ export default function MyDashboard() {
                     {remotable && (
                       <Link to={`/ssh?device=${i.device_id}&incident=${i.id}`} title="Remote SSH Virtual" className="text-center border border-accent2/40 text-accent2 rounded px-2 py-1 text-[11px] font-semibold hover:bg-accent2/10">🖥️ SSH</Link>
                     )}
-                    <Link to="/my-incidents" className="flex-1 text-center border border-border rounded px-2 py-1 text-[11px] text-text2 hover:text-white">Detail</Link>
+                    <Link to="/my-incidents" className="flex-1 text-center border border-border rounded px-2 py-1 text-[11px] text-text2 hover:text-text">Detail</Link>
                     {i.tech_id === user?.id && i.status !== 'selesai' && (
                       <button title="Ajak teknisi lain (kerjakan bersama)" className="border border-accent2/40 text-accent2 rounded px-2 py-1 text-[11px] font-semibold hover:bg-accent2/10" onClick={() => setInviteFor(i)}>👥</button>
                     )}

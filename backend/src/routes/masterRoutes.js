@@ -163,4 +163,57 @@ router.delete('/locations/:id', requireRole('admin'), async (req, res) => {
   res.json({ ok: true });
 });
 
+// ===================== DEVICE TYPES / TIPE PERANGKAT =====================
+// Dipakai sebagai sumber dropdown "Tipe" pada form perangkat (variabel terhubung).
+router.get('/device-types', async (req, res) => {
+  const [rows] = await pool.query('SELECT * FROM device_types ORDER BY sort_order, name');
+  res.json({ deviceTypes: rows });
+});
+
+router.post('/device-types', requireRole('admin'), async (req, res) => {
+  const { name, icon, sortOrder } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nama tipe wajib diisi' });
+  try {
+    const [r] = await pool.query(
+      'INSERT INTO device_types (name, icon, sort_order) VALUES (?, ?, ?)',
+      [name.trim(), icon || null, sortOrder || 0]
+    );
+    res.status(201).json({ id: r.insertId });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Tipe dengan nama itu sudah ada.' });
+    res.status(500).json({ error: 'Gagal menyimpan tipe.' });
+  }
+});
+
+router.put('/device-types/:id', requireRole('admin'), async (req, res) => {
+  const { name, icon, sortOrder } = req.body;
+  try {
+    // Bila nama diubah, sinkronkan perangkat yang masih memakai nama lama.
+    if (name?.trim()) {
+      const [[old]] = await pool.query('SELECT name FROM device_types WHERE id = ?', [req.params.id]);
+      if (old && old.name !== name.trim()) {
+        await pool.query('UPDATE devices SET type = ? WHERE type = ?', [name.trim(), old.name]);
+      }
+    }
+    await pool.query(
+      'UPDATE device_types SET name=COALESCE(?,name), icon=?, sort_order=COALESCE(?,sort_order) WHERE id=?',
+      [name?.trim() || null, icon || null, sortOrder ?? null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Tipe dengan nama itu sudah ada.' });
+    res.status(500).json({ error: 'Gagal memperbarui tipe.' });
+  }
+});
+
+router.delete('/device-types/:id', requireRole('admin'), async (req, res) => {
+  const [[t]] = await pool.query('SELECT name FROM device_types WHERE id = ?', [req.params.id]);
+  if (t) {
+    const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM devices WHERE type = ?', [t.name]);
+    if (c.n > 0) return res.status(409).json({ error: `Tipe "${t.name}" masih dipakai ${c.n} perangkat. Ubah perangkat itu dulu.` });
+  }
+  await pool.query('DELETE FROM device_types WHERE id = ?', [req.params.id]);
+  res.json({ ok: true });
+});
+
 export default router;

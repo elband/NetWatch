@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import { confirmDialog } from '../components/dialog';
 import type { PublicReport, User } from '../types';
 
 const URGENSI_ICON: Record<string, string> = { kritis: '🔴', tinggi: '🟠', sedang: '🟡', rendah: '🟢' };
@@ -33,7 +34,7 @@ export default function PublicReports() {
   }
 
   async function deleteAll() {
-    if (!window.confirm(`Hapus SEMUA ${reports.length} laporan publik? Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!(await confirmDialog({ title: 'Hapus semua laporan publik', message: `Seluruh ${reports.length} laporan publik akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.`, confirmText: '🗑️ Hapus semua', variant: 'danger' }))) return;
     setDeleting(true);
     try {
       await api.delete('/public-reports');
