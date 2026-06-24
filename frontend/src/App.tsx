@@ -33,6 +33,7 @@ import Diklat from './pages/Diklat';
 import Dokumen from './pages/Dokumen';
 import KegiatanNonRutin from './pages/KegiatanNonRutin';
 import PelaporanQR from './pages/PelaporanQR';
+import Notifikasi from './pages/Notifikasi';
 
 function HomeRedirect() {
   const { user } = useAuth();
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/diklat" element={<Diklat />} />
           <Route path="/dokumen" element={<Dokumen />} />
           <Route path="/kegiatan-nr" element={<KegiatanNonRutin />} />
+          <Route path="/notifikasi" element={<Notifikasi />} />
 
           {/* SSH: admin/koordinator/teknisi (bukan viewer) */}
           <Route element={<ProtectedRoute roles={['admin', 'koordinator', 'teknisi']} />}>

@@ -176,6 +176,11 @@ export default function NotificationCenter() {
             {loading && <div className="text-center text-text2 text-[11px] py-3">Memuat…</div>}
             {!loading && hasMore && <button onClick={() => load(false)} className="w-full text-center text-[11px] text-accent2 hover:underline py-3">Muat lebih banyak</button>}
           </div>
+          {/* Footer → halaman penuh */}
+          <button onClick={() => { setOpen(false); nav('/notifikasi'); }}
+            className="w-full text-center text-[11px] font-semibold text-accent border-t border-border py-2.5 hover:bg-accent/10 transition">
+            Lihat semua notifikasi →
+          </button>
         </div>
       )}
     </div>
