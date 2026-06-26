@@ -48,5 +48,7 @@ export const env = {
     sessionId: process.env.WABARIER_SESSION_ID || '',
   },
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  // URL publik aplikasi — dipakai untuk menyusun link di notifikasi WA (klik utk ambil/ingatkan).
+  appUrl: (process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173').replace(/\/$/, ''),
   pingIntervalMs: Number(process.env.PING_INTERVAL_MS || 15000),
 };

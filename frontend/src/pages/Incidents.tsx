@@ -28,9 +28,12 @@ export default function Incidents() {
   const [progressFor, setProgressFor] = useState<Incident | null>(null);
   const [inviteFor, setInviteFor] = useState<Incident | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const focusId = searchParams.get('focus');
+  const focusAction = searchParams.get('action');
   const lastFocus = useRef<string | null>(null);
+  const lastAutoRemind = useRef<string | null>(null);
+  const [toast, setToast] = useState('');
 
   function load() {
     api.get('/incidents').then((res) => {
@@ -60,6 +63,28 @@ export default function Incidents() {
     const inc = incidents.find((i) => i.id === focusId);
     if (inc) { setSelected(inc); lastFocus.current = focusId; }
   }, [incidents, focusId]);
+
+  // Klik link "INGATKAN" dari notifikasi WA koordinator (?focus=INC-…&action=remind):
+  // ingatkan teknisi on-duty, atau teknisi yang sudah ditugaskan langsung bila ada.
+  useEffect(() => {
+    if (!focusId || focusAction !== 'remind' || !incidents.length || lastAutoRemind.current === focusId) return;
+    const inc = incidents.find((i) => i.id === focusId);
+    if (!inc) return;
+    lastAutoRemind.current = focusId;
+    if (inc.status === 'selesai') {
+      setToast('Insiden ini sudah selesai.');
+    } else if (inc.tech_id) {
+      // Sudah diambil/ditugaskan ke teknisi — tidak perlu mengingatkan lagi.
+      setToast(`Insiden sudah ditangani teknisi #${inc.tech_id}.`);
+    } else {
+      api.post(`/incidents/${focusId}/remind`, {})
+        .then((res) => setToast(res.data?.message || 'Pengingat dikirim.'))
+        .catch((e) => setToast(e?.response?.data?.error || 'Gagal mengirim pengingat.'))
+        .finally(load);
+    }
+    setTimeout(() => setToast(''), 5000);
+    setSearchParams((p) => { p.delete('action'); return p; }, { replace: true });
+  }, [incidents, focusId, focusAction]);
 
   // Close modal on Escape
   useEffect(() => {
@@ -117,6 +142,7 @@ export default function Incidents() {
 
   return (
     <div>
+      {toast && <div className="bg-accent2/10 border border-accent2/30 rounded-md px-3 py-2 text-[11px] text-accent2 mb-3">🔔 {toast}</div>}
       {/* ===== Header ===== */}
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>

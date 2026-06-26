@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { IncidentStatusBadge, PriorityBadge } from '../components/StatusBadge';
 import IncidentReportModal from '../components/IncidentReportModal';
@@ -22,11 +22,29 @@ export default function MyIncidents() {
   const [taking, setTaking] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [now, setNow] = useState(() => Date.now());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusId = searchParams.get('focus');
+  const focusAction = searchParams.get('action');
+  const lastAutoTake = useRef<string | null>(null);
 
   function load() {
     api.get('/incidents/queue').then((res) => setQueue(res.data));
   }
   useEffect(load, []);
+
+  // Klik link "AMBIL" dari notifikasi WA (?focus=INC-…&action=take) — ambil otomatis.
+  useEffect(() => {
+    if (!focusId || focusAction !== 'take' || !queue || lastAutoTake.current === focusId) return;
+    lastAutoTake.current = focusId;
+    const inPool = queue.pool.find((i) => i.id === focusId);
+    if (inPool) {
+      take(focusId);
+    } else {
+      const mineInc = queue.mine.find((i) => i.id === focusId);
+      if (mineInc) setSelected(mineInc);
+    }
+    setSearchParams((p) => { p.delete('action'); return p; }, { replace: true });
+  }, [queue, focusId, focusAction]);
   useEffect(() => {
     api.get('/devices').then((res) => setDevices(res.data.devices));
   }, []);

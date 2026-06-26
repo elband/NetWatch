@@ -24,6 +24,12 @@ const ACTION_LABEL = {
   resolve: '✅ Selesai – Peralatan Normal Kembali',
 };
 
+// Link "klik untuk ambil" (teknisi) — buka NetWatch & langsung eksekusi aksi take.
+const takeLink = (id) => `${env.appUrl}/my-incidents?focus=${id}&action=take`;
+// Link "klik untuk mengingatkan" (koordinator) — ingatkan teknisi on-duty
+// (atau yang sudah ditugaskan langsung, bila insiden sudah punya tech_id).
+const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
+
 // Kirim WA ke koordinator (pakai coord_id bila ada, jika tidak broadcast ke
 // semua koordinator aktif).
 async function notifyCoordinators(conn, incident, message, type = 'alert') {
@@ -56,7 +62,7 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
     await queueWaNotification({
       type: 'alert',
       toUserId: uid,
-      message: `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nSegera AMBIL di aplikasi NetWatch.`,
+      message: `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nSegera AMBIL: ${takeLink(id)}`,
       relatedIncidentId: id,
     });
     await createNotification({ userId: uid, type: 'ticket_assigned', priority: prio, title: `Tiket baru: ${deviceName}`, message: issue, refId: id, refType: 'incident', link: '/my-incidents' });
@@ -274,7 +280,7 @@ export async function remindIncident(req, res) {
     await queueWaNotification({
       type: 'alert',
       toUserId: techId,
-      message: `📋 PERINTAH PENANGANAN (${(incident.priority || 'sedang').toUpperCase()})\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nSudah ${mins} menit belum diambil.${note ? `\nCatatan: ${note}` : ''}\nDitugaskan oleh ${req.user.name} — mohon segera AMBIL & tangani di aplikasi NetWatch.`,
+      message: `📋 PERINTAH PENANGANAN (${(incident.priority || 'sedang').toUpperCase()})\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nSudah ${mins} menit belum diambil.${note ? `\nCatatan: ${note}` : ''}\nDitugaskan oleh ${req.user.name} — mohon segera AMBIL: ${takeLink(incident.id)}`,
       relatedIncidentId: incident.id,
     });
     await createNotification({
@@ -323,7 +329,7 @@ export async function createIncident(req, res) {
     );
     await conn.query(`INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)`, [id, 'Insiden dibuat.']);
 
-    await notifyCoordinators(conn, { id, coord_id: coordId || null }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}`, 'alert');
+    await notifyCoordinators(conn, { id, coord_id: coordId || null }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
 
     if (assigned) {
       await queueWaNotification({

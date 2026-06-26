@@ -1,7 +1,11 @@
 import { pool } from '../db/pool.js';
+import { env } from '../config/env.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification } from './notify.js';
 import { COORD_SLA_MINUTES, REMIND_MINUTES, getOnDutyTechIds } from '../config/shifts.js';
+
+const takeLink = (id) => `${env.appUrl}/my-incidents?focus=${id}&action=take`;
+const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
 
 // Kirim WA pengingat ke teknisi on-duty agar insiden segera diambil.
 // Dipakai oleh auto-reminder (coordWatcher) maupun tombol manual koordinator.
@@ -21,7 +25,7 @@ export async function remindOnDutyTechs(inc, { manual = false, by = null } = {})
     await queueWaNotification({
       type: 'alert',
       toUserId: uid,
-      message: `🔔 PENGINGAT — SEGERA AMBIL INSIDEN (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit belum diambil. Mohon segera ditangani di aplikasi NetWatch.`,
+      message: `🔔 PENGINGAT — SEGERA AMBIL INSIDEN (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit belum diambil. Mohon segera AMBIL: ${takeLink(inc.id)}`,
       relatedIncidentId: inc.id,
     });
     await createNotification({ userId: uid, type: 'ticket_sla', priority: 'warning', title: `Reminder SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit — segera tangani.`, refId: inc.id, refType: 'incident', link: '/my-incidents' });
@@ -73,7 +77,7 @@ export async function checkUnclaimedIncidents(io) {
       await queueWaNotification({
         type: 'alert',
         toUserId: c.id,
-        message: `⏰ INSIDEN BELUM DIAMBIL (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit tanpa teknisi. Mohon koordinasikan penanganan.`,
+        message: `⏰ INSIDEN BELUM DIAMBIL (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit tanpa teknisi. Ingatkan teknisi: ${remindLink(inc.id)}`,
         relatedIncidentId: inc.id,
       });
       await createNotification({ userId: c.id, type: 'ticket_sla', priority: 'kritis', title: `Tiket melewati SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit (>${COORD_SLA_MINUTES} mnt). Perlu koordinasi.`, refId: inc.id, refType: 'incident', link: `/incidents?focus=${inc.id}` });
