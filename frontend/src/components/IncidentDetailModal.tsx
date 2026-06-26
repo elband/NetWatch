@@ -128,7 +128,7 @@ export default function IncidentDetailModal({
               className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-medium"
               onClick={onProgress}
             >
-              ▶ {stepLabels[Math.min(inc.step + 1, maxStep)]}
+              ▶ {inc.step === 0 ? 'Mulai' : stepLabels[Math.min(inc.step + 1, maxStep)]}
             </button>
           )}
           {inc.status !== 'selesai' && remotable && device && (

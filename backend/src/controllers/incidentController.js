@@ -7,18 +7,20 @@ import { getOnDutyTechIds, getDutyStatus } from '../config/shifts.js';
 import { remindOnDutyTechs } from '../services/coordWatcher.js';
 
 // Alur tindakan insiden berbasis pilihan/cabang (solusi perbaikan peralatan):
-// - Ber-IP: "Coba Lewat SSH" → bila gagal "Visit ke Perangkat".
-// - Lanjut: "Analisa Kerusakan" → pilih "Menunggu Suku Cadang" / "Selesai – Normal Kembali".
+// - Mulai: "Coba SSH" (bila ber-IP) atau "Langsung Kunjungan".
+// - SSH berhasil → langsung selesai. SSH gagal / kunjungan → "Bongkar & Analisa".
+// - Setelah Bongkar & Analisa, laporan kerusakan WAJIB diisi dulu sebelum bisa
+//   "Selesai" atau "Tidak Bisa Ditangani" (menunggu suku cadang).
 // Tiap akhir (menunggu suku cadang / selesai) otomatis kirim WA ke koordinator.
-const FINAL_STEP = 4;
-const STEP_BY_ACTION = { ssh: 1, visit: 2, analisa: 3 };
+const FINAL_STEP = 2;
+const STEP_BY_ACTION = { ssh_fail: 1, visit: 1 };
 // Ber-IP valid (IPv4) → boleh jalur SSH. Placeholder ("N/A …") dianggap tanpa IP.
 const hasValidIp = (ip) => !!ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip).trim());
 const ACTION_LABEL = {
-  ssh: '💻 Dicoba Lewat SSH',
-  visit: '📍 Visit ke Perangkat',
-  analisa: '🔧 Analisa Kerusakan',
-  awaiting: '📦 Menunggu Suku Cadang',
+  ssh_fail: '💻 Dicoba via SSH (gagal, lanjut Bongkar & Analisa)',
+  ssh_ok: '✅ SSH Berhasil – Peralatan Normal Kembali',
+  visit: '📍 Langsung Kunjungan – Bongkar & Analisa',
+  awaiting: '📦 Tidak Bisa Ditangani – Menunggu Suku Cadang',
   resolve: '✅ Selesai – Peralatan Normal Kembali',
 };
 
@@ -345,8 +347,10 @@ export async function createIncident(req, res) {
   }
 }
 
-// Catat satu tindakan pada insiden. body.action ∈ ssh|visit|handover|awaiting|resolve.
+// Catat satu tindakan pada insiden. body.action ∈ ssh_fail|ssh_ok|visit|awaiting|resolve.
 // Tiap tindakan wajib foto + penjelasan. SSH hanya untuk perangkat ber-IP.
+// "resolve"/"awaiting" (setelah Bongkar & Analisa) wajib laporan kerusakan
+// sudah diisi lebih dulu — kecuali "ssh_ok" yang menutup insiden langsung dari step 0.
 export async function advanceStep(req, res) {
   const id = req.params.id;
   const action = req.body.action || '';
@@ -362,11 +366,17 @@ export async function advanceStep(req, res) {
     const incident = rows[0];
     if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
     if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai.' });
-    if (action === 'ssh' && !hasValidIp(incident.ip)) return res.status(400).json({ error: 'Tindakan SSH hanya untuk perangkat yang punya IP valid.' });
+    if ((action === 'ssh_fail' || action === 'ssh_ok') && !hasValidIp(incident.ip)) {
+      return res.status(400).json({ error: 'Tindakan SSH hanya untuk perangkat yang punya IP valid.' });
+    }
+    if ((action === 'resolve' || action === 'awaiting') && incident.step !== FINAL_STEP - 1) {
+      const [repRows] = await conn.query('SELECT id FROM incident_reports WHERE incident_id = ?', [id]);
+      if (!repRows[0]) return res.status(400).json({ error: 'Laporan Kerusakan & Perbaikan wajib diisi sebelum menutup/menunda insiden.' });
+    }
 
     const label = ACTION_LABEL[action];
 
-    if (action === 'resolve') {
+    if (action === 'resolve' || action === 'ssh_ok') {
       // Selesai diperbaiki / teratasi: tutup insiden + WA koordinator.
       await conn.query(
         `UPDATE incidents SET step = ?, status = 'selesai', awaiting_part = 0, resolved_at = NOW(),
@@ -380,14 +390,14 @@ export async function advanceStep(req, res) {
       ]);
       await notifyCoordinatorsDone(conn, incident, duration);
     } else if (action === 'awaiting') {
-      // Menunggu suku cadang: tetap terbuka, ditandai pending. WA ke koordinator.
+      // Tidak bisa ditangani / menunggu suku cadang: tetap terbuka. WA ke koordinator.
       await conn.query("UPDATE incidents SET awaiting_part = 1, status = 'proses' WHERE id = ?", [id]);
       await conn.query('INSERT INTO incident_notes (incident_id, step, note, doc_url) VALUES (?, ?, ?, ?)', [
         id, incident.step || 0, `${label} (oleh ${req.user.name}): ${explanation}`, docUrl,
       ]);
       await notifyCoordinators(conn, incident, `📦 MENUNGGU SUKU CADANG\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nOleh ${req.user.name}: ${explanation}\nMohon koordinasi pengadaan suku cadang.`);
     } else {
-      // ssh / visit / handover.
+      // ssh_fail / visit → masuk ke tahap "Bongkar & Analisa".
       const step = STEP_BY_ACTION[action];
       await conn.query("UPDATE incidents SET step = ?, status = 'proses' WHERE id = ?", [step, id]);
       await conn.query('INSERT INTO incident_notes (incident_id, step, note, doc_url) VALUES (?, ?, ?, ?)', [

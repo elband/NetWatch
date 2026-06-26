@@ -7,22 +7,22 @@ import type { Incident } from '../types';
 // Definisi tindakan. `key` = nilai dikirim ke backend (action).
 interface ActionDef { id: string; key: string; label: string; desc: string; final?: boolean; ssh?: boolean }
 const ACTIONS: Record<string, ActionDef> = {
-  ssh: { id: 'ssh', key: 'ssh', label: '💻 Coba Lewat SSH', desc: 'Coba atasi dari jarak jauh via SSH terlebih dulu.', ssh: true },
-  visit: { id: 'visit', key: 'visit', label: '📍 Visit ke Perangkat', desc: 'Datang langsung ke lokasi perangkat (unggah dokumentasi).' },
-  analisa: { id: 'analisa', key: 'analisa', label: '🔧 Analisa Kerusakan', desc: 'Analisa & dokumentasikan penanganan kerusakan.' },
-  awaiting: { id: 'awaiting', key: 'awaiting', label: '📦 Menunggu Suku Cadang', desc: 'Tunda — menunggu sparepart. Insiden tetap terbuka, koordinator diberi tahu.' },
-  resolve_ssh: { id: 'resolve_ssh', key: 'resolve', label: '✅ Teratasi via SSH (Selesai)', desc: 'Masalah beres dari remote, tutup insiden.', final: true },
+  ssh_ok: { id: 'ssh_ok', key: 'ssh_ok', label: '✅ Coba SSH — Berhasil (Selesai)', desc: 'Masalah beres dari remote via SSH, tutup insiden langsung.', final: true, ssh: true },
+  ssh_fail: { id: 'ssh_fail', key: 'ssh_fail', label: '💻 Coba SSH — Gagal, lanjut Kunjungan', desc: 'Sudah dicoba via SSH tapi gagal, lanjut Bongkar & Analisa di lokasi.', ssh: true },
+  visit: { id: 'visit', key: 'visit', label: '📍 Langsung Kunjungan', desc: 'Datang langsung ke lokasi untuk Bongkar & Analisa perangkat.' },
+  awaiting: { id: 'awaiting', key: 'awaiting', label: '📦 Tidak Bisa Ditangani — Menunggu Suku Cadang', desc: 'Tunda — menunggu sparepart. Insiden tetap terbuka, koordinator diberi tahu.' },
   resolve_fixed: { id: 'resolve_fixed', key: 'resolve', label: '✅ Selesai – Peralatan Normal Kembali', desc: 'Perbaikan selesai & peralatan normal, tutup insiden.', final: true },
 };
 
 // Pilihan tindakan berdasarkan tahap insiden + ketersediaan IP.
+// Step 0 = Belum Mulai (pilih SSH/Kunjungan) · Step 1 = Bongkar & Analisa selesai
+// (laporan kerusakan wajib diisi dulu sebelum bisa Selesai / Tidak Bisa Ditangani).
 function actionsFor(inc: Incident): ActionDef[] {
   if (inc.status === 'selesai') return [];
   const s = inc.step || 0;
-  if (s === 0) return hasIp(inc.ip) ? [ACTIONS.ssh] : [ACTIONS.visit];
-  if (s === 1) return [ACTIONS.resolve_ssh, ACTIONS.visit];   // setelah SSH dicoba
-  if (s === 2) return [ACTIONS.analisa];                      // setelah visit
-  return inc.awaiting_part ? [ACTIONS.resolve_fixed] : [ACTIONS.awaiting, ACTIONS.resolve_fixed]; // setelah analisa
+  if (s === 0) return hasIp(inc.ip) ? [ACTIONS.ssh_ok, ACTIONS.ssh_fail, ACTIONS.visit] : [ACTIONS.visit];
+  if (!inc.report) return []; // setelah Bongkar & Analisa: laporan wajib diisi dulu
+  return inc.awaiting_part ? [ACTIONS.resolve_fixed] : [ACTIONS.awaiting, ACTIONS.resolve_fixed];
 }
 
 export default function ProgressUpdateModal({ incident, onClose, onDone }: { incident: Incident; onClose: () => void; onDone: () => void }) {
@@ -67,8 +67,13 @@ export default function ProgressUpdateModal({ incident, onClose, onDone }: { inc
         </div>
         <p className="text-[11px] text-text2 mb-3">Pilih tindakan yang dilakukan{!hasIp(incident.ip) && ' (perangkat tanpa IP — langsung visit)'}:</p>
 
-        {options.length === 0 ? (
+        {options.length === 0 && incident.status === 'selesai' ? (
           <div className="text-success text-xs py-4 text-center">✅ Insiden sudah selesai.</div>
+        ) : options.length === 0 ? (
+          <div className="text-warn text-xs py-4 text-center px-2">
+            🔧 Bongkar & Analisa sudah dicatat.<br />
+            Isi <strong>Laporan Kerusakan & Perbaikan</strong> dulu (tombol 📝 Laporan) sebelum bisa menutup / menunda insiden ini.
+          </div>
         ) : (
           <>
             <div className="space-y-2 mb-3">

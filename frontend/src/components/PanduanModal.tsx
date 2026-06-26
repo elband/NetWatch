@@ -209,11 +209,9 @@ export default function PanduanModal({ onClose }: Props) {
               {/* Step flow */}
               <div className="flex items-stretch gap-0 mb-6 rounded-xl overflow-hidden border border-gray-200">
                 {[
-                  { step: '0', label: 'Belum Mulai', color: 'bg-gray-100', icon: '⏳', desc: 'Insiden masuk ke pool, menunggu teknisi on-duty.' },
-                  { step: '1', label: 'Dicoba SSH', color: 'bg-blue-50', icon: '🖥️', desc: 'Coba akses remote via SSH sebelum ke lapangan.' },
-                  { step: '2', label: 'Visit Lapangan', color: 'bg-yellow-50', icon: '🔍', desc: 'Teknisi turun langsung ke lokasi perangkat.' },
-                  { step: '3', label: 'Analisa', color: 'bg-orange-50', icon: '🔧', desc: 'Identifikasi kerusakan & lakukan perbaikan.' },
-                  { step: '4', label: 'Selesai', color: 'bg-green-50', icon: '✅', desc: 'Insiden ditutup, laporan perbaikan diisi.' },
+                  { step: '0', label: 'Mulai', color: 'bg-gray-100', icon: '⏳', desc: 'Pilih: Coba SSH dulu, atau langsung kunjungan ke lokasi.' },
+                  { step: '1', label: 'Bongkar & Analisa', color: 'bg-orange-50', icon: '🔧', desc: 'SSH gagal / kunjungan langsung → bongkar & analisa kerusakan di lokasi.' },
+                  { step: '2', label: 'Selesai', color: 'bg-green-50', icon: '✅', desc: 'SSH berhasil → langsung selesai. Atau setelah laporan kerusakan diisi: tutup / tunggu sparepart.' },
                 ].map((s, idx, arr) => (
                   <div key={s.step} className={`flex-1 p-3 ${s.color} ${idx < arr.length - 1 ? 'border-r border-gray-200' : ''}`}>
                     <div className="text-xl mb-1 text-center">{s.icon}</div>
