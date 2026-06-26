@@ -29,23 +29,23 @@ export default function Monitor() {
           <div className="text-[11px] text-text2 mt-0.5">Update real-time via WebSocket</div>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {devices.map((d) => {
           const crit = d.status === 'offline';
           const warn = d.status === 'warning';
           return (
             <div
               key={d.id}
-              className={`bg-surface2 border rounded-lg p-3.5 transition-colors ${
+              className={`bg-surface2 border rounded-lg p-3.5 transition-colors min-w-0 ${
                 crit ? 'border-danger/50' : warn ? 'border-warn/40' : 'border-border'
               }`}
             >
-              <div className="flex justify-between items-start mb-2.5">
-                <div>
-                  <div className="text-xs font-semibold">{d.name}</div>
-                  <div className="text-[10px] text-text2 font-mono">{d.ip} · {d.type}</div>
+              <div className="flex justify-between items-start gap-2 mb-2.5">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold truncate">{d.name}</div>
+                  <div className="text-[10px] text-text2 font-mono truncate">{d.ip} · {d.type}</div>
                 </div>
-                <DeviceStatusBadge status={d.status} offReason={d.off_reason} />
+                <div className="flex-shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} /></div>
               </div>
               {d.status !== 'offline' ? (
                 <>
