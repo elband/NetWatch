@@ -134,10 +134,13 @@ body {
      modal (z-50) di bawah header aplikasi (z-30). `backwards` melepas konteks itu
      begitu animasi selesai, sehingga modal bisa menutupi header. */
   .nw-page-in { animation: nw-page-in 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
-  .nw-rise { animation: nw-rise 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
-  .nw-pop { animation: nw-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  /* `backwards` (bukan `both`) di semua animasi masuk di bawah ini — alasan
+     sama seperti .nw-page-in: mencegah modal fixed (mis. Izin/Cuti) terjebak
+     di dalam kotak kartu yang masih "memegang" transform animasi. */
+  .nw-rise { animation: nw-rise 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+  .nw-pop { animation: nw-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
   /* Anak langsung dari .nw-stagger muncul berurutan (efek "ketik masuk"). */
-  .nw-stagger > * { animation: nw-rise 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+  .nw-stagger > * { animation: nw-rise 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
   .nw-stagger > *:nth-child(1) { animation-delay: 0.04s; }
   .nw-stagger > *:nth-child(2) { animation-delay: 0.09s; }
   .nw-stagger > *:nth-child(3) { animation-delay: 0.14s; }
