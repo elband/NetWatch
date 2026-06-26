@@ -321,6 +321,8 @@ export async function createIncident(req, res) {
     );
     await conn.query(`INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)`, [id, 'Insiden dibuat.']);
 
+    await notifyCoordinators(conn, { id, coord_id: coordId || null }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}`, 'alert');
+
     if (assigned) {
       await queueWaNotification({
         type: 'alert',
