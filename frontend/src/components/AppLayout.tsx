@@ -186,7 +186,18 @@ function FloatingMenu({ navItems, user, allRoles, notif, onEditProfile, onLogout
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
   const openLeft = pos.x > vw / 2;
   const openUp = pos.y > vh / 2;
-  const popStyle: React.CSSProperties = { width: 320, transformOrigin: `${openLeft ? 'right' : 'left'} ${openUp ? 'bottom' : 'top'}` };
+  // Batasi tinggi popover ke ruang yang sebenarnya tersedia di sisi tempat ia
+  // mekar (atas/bawah tombol), bukan tinggi konten — kalau tidak, menu dengan
+  // banyak item (user multi-role) jadi lebih tinggi dari layar & terpotong di
+  // luar viewport (atas/bawah tak terlihat, tak bisa di-scroll).
+  const margin = 14;
+  const availUp = pos.y - margin;
+  const availDown = vh - (pos.y + SIZE + 10) - margin;
+  const popStyle: React.CSSProperties = {
+    width: 320,
+    maxHeight: Math.max(200, openUp ? availUp : availDown),
+    transformOrigin: `${openLeft ? 'right' : 'left'} ${openUp ? 'bottom' : 'top'}`,
+  };
   if (openLeft) popStyle.right = vw - pos.x - SIZE; else popStyle.left = pos.x;
   if (openUp) popStyle.bottom = vh - pos.y + 10; else popStyle.top = pos.y + SIZE + 10;
 
@@ -194,15 +205,15 @@ function FloatingMenu({ navItems, user, allRoles, notif, onEditProfile, onLogout
     <>
       {open && <div className="fixed inset-0 z-[39]" onClick={() => setOpen(false)} aria-hidden />}
       {open && (
-        <div className="fixed z-40 rounded-2xl border border-border shadow-2xl overflow-hidden nw-pop" style={{ ...popStyle, background: 'var(--glass-bg)', backdropFilter: 'blur(16px) saturate(140%)', WebkitBackdropFilter: 'blur(16px) saturate(140%)' }}>
-          <button onClick={() => { setOpen(false); onEditProfile(); }} className="w-full flex items-center gap-2.5 px-3.5 py-3 border-b border-border hover:bg-text/5 text-left">
+        <div className="fixed z-40 rounded-2xl border border-border shadow-2xl overflow-hidden nw-pop flex flex-col" style={{ ...popStyle, background: 'var(--glass-bg)', backdropFilter: 'blur(16px) saturate(140%)', WebkitBackdropFilter: 'blur(16px) saturate(140%)' }}>
+          <button onClick={() => { setOpen(false); onEditProfile(); }} className="w-full flex items-center gap-2.5 px-3.5 py-3 border-b border-border hover:bg-text/5 text-left shrink-0">
             <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center text-base shrink-0" style={{ background: `${color}33`, border: `2px solid ${color}` }}>{user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : user.emoji}</div>
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold truncate flex items-center gap-1">{user.name}<span className="text-text2 text-[10px]">✏️</span></div>
               <div className="flex flex-wrap gap-1 mt-0.5">{allRoles.map((r) => <span key={r} className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: `${ROLE_COLOR[r]}33`, color: ROLE_COLOR[r] }}>{r}</span>)}</div>
             </div>
           </button>
-          <nav className="grid grid-cols-2 gap-x-1 gap-y-0.5 px-1.5 py-2 nav-anim">
+          <nav className="grid grid-cols-2 gap-x-1 gap-y-0.5 px-1.5 py-2 nav-anim flex-1 min-h-0 overflow-y-auto">
             {navItems.map((n, idx) =>
               'section' in n ? (
                 <div key={idx} style={{ animationDelay: `${idx * 0.012}s` }} className="col-span-2 px-2 pt-1.5 pb-0.5 text-[9px] text-text2 uppercase tracking-[1.5px]">{n.section}</div>
@@ -214,7 +225,7 @@ function FloatingMenu({ navItems, user, allRoles, notif, onEditProfile, onLogout
               )
             )}
           </nav>
-          <button onClick={() => { setOpen(false); onLogout(); }} className="w-full border-t border-border px-3.5 py-2.5 text-[13px] text-left text-danger hover:bg-danger/10 flex items-center gap-2">⏻ Keluar</button>
+          <button onClick={() => { setOpen(false); onLogout(); }} className="w-full border-t border-border px-3.5 py-2.5 text-[13px] text-left text-danger hover:bg-danger/10 flex items-center gap-2 shrink-0">⏻ Keluar</button>
         </div>
       )}
       <button
