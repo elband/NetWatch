@@ -353,7 +353,7 @@ export default function PanduanModal({ onClose }: Props) {
           </div>
 
           {/* ── HALAMAN 5: REFERENSI CEPAT ── */}
-          <div className="bg-white text-gray-900 min-h-[1040px] flex flex-col">
+          <div className="panduan-page bg-white text-gray-900 min-h-[1040px] flex flex-col">
             <div className="h-2 bg-gradient-to-r from-blue-600 to-cyan-500" />
             <div className="flex-1 px-12 py-10">
 
@@ -446,7 +446,47 @@ export default function PanduanModal({ onClose }: Props) {
                 </p>
               </div>
             </div>
-            <PageFooter page={5} last />
+            <PageFooter page={5} />
+          </div>
+
+          {/* ── HALAMAN 6: INSTAL SEBAGAI APLIKASI (PWA) ── */}
+          <div className="panduan-page bg-white text-gray-900 min-h-[1040px] flex flex-col">
+            <div className="h-2 bg-gradient-to-r from-blue-600 to-cyan-500" />
+            <div className="flex-1 px-12 py-10">
+              <SectionTitle number="10" title="Instal sebagai Aplikasi (PWA)" />
+              <p className="text-gray-600 text-sm mb-6">
+                NetWatch ERP bisa dipasang seperti aplikasi native di HP/laptop — muncul ikon di home screen, bisa dibuka tanpa membuka browser, dan tetap bisa membuka tampilan dasar walau koneksi internet putus sebentar.
+              </p>
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <InfoCard
+                  title="Chrome / Edge (Android & Desktop)"
+                  icon="🤖"
+                  steps={[
+                    'Buka NetWatch ERP di browser Chrome atau Edge.',
+                    'Klik ikon "Install" (⊕) di address bar, atau buka menu ⋮ → "Tambahkan ke Layar Utama" / "Install app".',
+                    'Konfirmasi "Install" — ikon NetWatch akan muncul di home screen / desktop seperti aplikasi biasa.',
+                  ]}
+                />
+                <InfoCard
+                  title="Safari (iPhone / iPad)"
+                  icon="🍎"
+                  steps={[
+                    'Buka NetWatch ERP di Safari (wajib Safari, bukan Chrome di iOS).',
+                    'Ketuk ikon Share (kotak dengan tanda panah ke atas) di bar bawah.',
+                    'Pilih "Add to Home Screen" / "Tambah ke Layar Utama", lalu ketuk "Tambah".',
+                  ]}
+                />
+              </div>
+              <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-200 rounded-xl p-5">
+                <div className="font-bold text-blue-900 text-[14px] mb-2">💡 Catatan</div>
+                <ul className="text-[12px] text-blue-700 leading-relaxed space-y-1 list-disc pl-4">
+                  <li>Setelah terinstal, notifikasi & alur kerja (absen, ambil insiden, dsb.) tetap sama seperti versi web.</li>
+                  <li>Update aplikasi berjalan otomatis di belakang layar setiap kali ada versi baru — tidak perlu instal ulang.</li>
+                  <li>Data insiden/perangkat tetap butuh koneksi internet aktif (real-time), hanya tampilan dasar yang tersedia singkat saat offline.</li>
+                </ul>
+              </div>
+            </div>
+            <PageFooter page={6} last />
           </div>
         </div>
       </div>
