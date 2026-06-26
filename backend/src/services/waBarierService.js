@@ -14,7 +14,7 @@ export async function sendWaBarierMessage(phone, message) {
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
-      'x-api-key': env.waBarier.apiKey,
+      Authorization: `Bearer ${env.waBarier.apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ target: phone, message }),
