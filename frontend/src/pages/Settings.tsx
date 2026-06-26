@@ -17,7 +17,7 @@ const LKP_DEFAULT: LkpForm = {
 };
 
 export default function Settings() {
-  const [form, setForm] = useState({ wa_provider: 'fonnte', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000 });
+  const [form, setForm] = useState({ wa_provider: 'wabarier', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000 });
   const [lkp, setLkp] = useState<LkpForm>(LKP_DEFAULT);
   const [saved, setSaved] = useState(false);
   const [tz, setTz] = useState('Asia/Makassar');
@@ -103,13 +103,13 @@ export default function Settings() {
       <div className="mb-4"><div className="text-[17px] font-bold">⚙️ Pengaturan Sistem</div></div>
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-surface border border-border rounded-[10px] overflow-hidden">
-          <div className="px-4 py-3 border-b border-border text-[13px] font-semibold">📲 WhatsApp API (Fonnte)</div>
+          <div className="px-4 py-3 border-b border-border text-[13px] font-semibold">📲 WhatsApp API (WA Barier)</div>
           <div className="p-4 space-y-3">
             <div>
               <label className="text-[11px] text-text2 block mb-1">No. Koordinator</label>
               <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.wa_coord_phone} onChange={(e) => setForm({ ...form, wa_coord_phone: e.target.value })} />
             </div>
-            <p className="text-[10px] text-text2">Token Fonnte diatur lewat env backend (.env), tidak disimpan di sini agar tidak terekspos ke browser.</p>
+            <p className="text-[10px] text-text2">API key WA Barier diatur lewat env backend (.env), tidak disimpan di sini agar tidak terekspos ke browser.</p>
             <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold" onClick={save}>💾 Simpan</button>
           </div>
         </div>

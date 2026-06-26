@@ -42,9 +42,10 @@ export const env = {
     // Aktifkan TLS bila REDIS_TLS=true (Redis lintas host/terkelola).
     tls: process.env.REDIS_TLS === 'true' ? {} : undefined,
   },
-  fonnte: {
-    token: process.env.FONNTE_TOKEN || '',
-    apiUrl: process.env.FONNTE_API_URL || 'https://api.fonnte.com/send',
+  waBarier: {
+    apiKey: process.env.WABARIER_API_KEY || '',
+    baseUrl: process.env.WABARIER_BASE_URL || 'https://wa.aptpairport.id',
+    sessionId: process.env.WABARIER_SESSION_ID || '',
   },
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   pingIntervalMs: Number(process.env.PING_INTERVAL_MS || 15000),

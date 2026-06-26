@@ -104,7 +104,7 @@ async function seed() {
 
     await conn.query(
       `INSERT INTO settings (setting_key, setting_value) VALUES
-       ('wa_provider', '"fonnte"'),
+       ('wa_provider', '"wabarier"'),
        ('wa_coord_phone', '"+628987654321"'),
        ('threshold_cpu', '80'),
        ('threshold_mem', '85'),
