@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getIncident, listIncidents, createIncident, advanceStep, resolveIncident, getIncidentReport, saveIncidentReport, signIncidentReport, createNotaDinas, incidentQueue, dutyStatus, takeIncident, setAwaitingPart, remindIncident, addIncidentNote, listTeknisi, inviteCollaborators } from '../controllers/incidentController.js';
+import { getIncident, listIncidents, createIncident, advanceStep, resolveIncident, getIncidentReport, saveIncidentReport, signIncidentReport, createNotaDinas, incidentQueue, dutyStatus, takeIncident, setAwaitingPart, remindIncident, addIncidentNote, listTeknisi, inviteCollaborators, deleteIncident } from '../controllers/incidentController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { withIncidentDoc } from '../middleware/upload.js';
 import { validateBody } from '../middleware/validate.js';
@@ -24,5 +24,6 @@ router.get('/:id/report', getIncidentReport);
 router.put('/:id/report', saveIncidentReport);
 router.post('/:id/report/sign', requireRole('koordinator', 'admin'), signIncidentReport);
 router.post('/:id/nota-dinas', requireRole('koordinator', 'admin'), createNotaDinas);
+router.delete('/:id', requireRole('koordinator', 'admin'), deleteIncident);
 
 export default router;

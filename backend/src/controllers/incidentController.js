@@ -649,3 +649,11 @@ export async function resolveIncident(req, res) {
   const [updated] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
   res.json({ incident: (await attachNotes(updated))[0] });
 }
+
+export async function deleteIncident(req, res) {
+  const id = req.params.id;
+  const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  await pool.query('DELETE FROM incidents WHERE id = ?', [id]);
+  res.json({ ok: true });
+}

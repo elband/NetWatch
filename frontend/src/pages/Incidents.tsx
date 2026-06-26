@@ -6,6 +6,7 @@ import IncidentReportModal from '../components/IncidentReportModal';
 import ProgressUpdateModal from '../components/ProgressUpdateModal';
 import InviteCollabModal from '../components/InviteCollabModal';
 import IncidentDetailModal from '../components/IncidentDetailModal';
+import { confirmDialog } from '../components/dialog';
 import { downtimeMs, fmtDowntime, downtimeColor } from '../utils/downtime';
 import type { Incident } from '../types';
 
@@ -69,6 +70,19 @@ export default function Incidents() {
 
   async function resolve(id: string) {
     await api.post(`/incidents/${id}/resolve`);
+    load();
+    setSelected(null);
+  }
+
+  async function remove(id: string) {
+    const ok = await confirmDialog({
+      title: 'Hapus Insiden',
+      message: `Hapus insiden ${id} secara permanen? Tindakan ini tidak dapat dibatalkan.`,
+      variant: 'danger',
+      confirmText: 'Ya, hapus',
+    });
+    if (!ok) return;
+    await api.delete(`/incidents/${id}`);
     load();
     setSelected(null);
   }
@@ -241,6 +255,13 @@ export default function Incidents() {
                   onClick={() => setReportFor(i)}
                 >
                   {i.report ? 'Laporan ✓' : 'Laporan'}
+                </button>
+                <button
+                  className="text-danger border border-danger/40 rounded px-2 py-1 hover:bg-danger/10 transition-colors"
+                  title="Hapus insiden"
+                  onClick={() => remove(i.id)}
+                >
+                  🗑️
                 </button>
               </div>
             </div>
