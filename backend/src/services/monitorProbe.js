@@ -11,13 +11,25 @@ import { logger } from '../config/logger.js';
 // =============================================================================
 
 // --- ICMP ping ---------------------------------------------------------------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Probe ICMP yang tahan paket-hilang. Perangkat wireless (AP/klien) kerap men-drop
+// paket ICMP pertama (ARP resolve / power-save), sehingga probe 1-paket bisa salah
+// menyatakan offline walau perangkat hidup & balas ping manual. Strategi:
+//  • Jalur cepat: 1 paket. Perangkat sehat biasanya langsung membalas → cepat.
+//  • Bila tampak mati, coba ulang beberapa kali (jeda singkat untuk ARP) sebelum
+//    benar-benar menyimpulkan offline. Hanya perangkat yang tampak mati yang kena
+//    biaya retry, jadi sweep untuk perangkat sehat tetap ringan.
+const PING_ATTEMPTS = 3;
 async function probePing(ip) {
-  try {
-    const r = await ping.promise.probe(ip, { timeout: 2 });
-    return { alive: r.alive, avgMs: parseFloat(r.time) || 0 };
-  } catch {
-    return { alive: false, avgMs: 0 };
+  for (let attempt = 0; attempt < PING_ATTEMPTS; attempt++) {
+    try {
+      const r = await ping.promise.probe(ip, { timeout: 2 });
+      if (r.alive) return { alive: true, avgMs: parseFloat(r.time) || 0 };
+    } catch { /* anggap percobaan ini gagal, lanjut retry */ }
+    if (attempt < PING_ATTEMPTS - 1) await sleep(250);
   }
+  return { alive: false, avgMs: 0 };
 }
 
 // --- TCP connect (cek port service hidup, mis. 443/22/3306) ------------------
