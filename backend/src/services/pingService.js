@@ -40,6 +40,8 @@ export async function checkAllDevices(io) {
     // dideteksi otomatis offline/insiden. Tiket untuk perangkat ini hanya aktif
     // lewat aduan publik (lapor), bukan deteksi sistem.
     if (!device.ip || device.ip.startsWith('N/A')) continue;
+    // Mode standby (monitor_enabled=0): perangkat sengaja dijeda dari monitoring otomatis.
+    if (!device.monitor_enabled) continue;
 
     let alive = false;
     let avgMs = 0;

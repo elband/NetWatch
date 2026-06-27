@@ -6,7 +6,15 @@ const COLORS: Record<string, string> = {
   warning: 'text-warn bg-warn/10',
 };
 
-export function DeviceStatusBadge({ status, offReason }: { status: DeviceStatus; offReason?: string | null }) {
+export function DeviceStatusBadge({ status, offReason, monitorEnabled }: { status: DeviceStatus; offReason?: string | null; monitorEnabled?: number }) {
+  // Mode standby (dimonitor dimatikan manual): tampil netral, bukan status ping lama.
+  if (monitorEnabled === 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-slate-300 bg-slate-500/15" title="Mode standby — tidak dimonitor otomatis">
+        ⏸️ STANDBY
+      </span>
+    );
+  }
   // Perangkat dimatikan (bukan gangguan): tampil netral, bukan alarm merah.
   if (status === 'offline' && offReason === 'dimatikan') {
     return (

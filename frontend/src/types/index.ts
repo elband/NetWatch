@@ -45,6 +45,7 @@ export interface Device {
   inspect_required?: number;
   status: DeviceStatus;
   off_reason?: string | null;
+  monitor_enabled?: number;
   ping_ms: number;
   cpu: number;
   mem: number;

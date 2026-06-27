@@ -86,3 +86,16 @@ export async function requestAlarm(req, res) {
     conn.release();
   }
 }
+
+// Toggle mode standby: saat standby (monitor_enabled=0), perangkat tidak di-ping
+// otomatis dan tidak memicu insiden otomatis (lihat services/pingService.js).
+export async function toggleMonitor(req, res) {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  const device = rows[0];
+  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  const next = device.monitor_enabled ? 0 : 1;
+  await pool.query('UPDATE devices SET monitor_enabled=? WHERE id=?', [next, id]);
+  const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  res.json({ device: updated[0] });
+}

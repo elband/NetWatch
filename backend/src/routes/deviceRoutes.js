@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listDevices, createDevice, updateDevice, deleteDevice, requestAlarm } from '../controllers/deviceController.js';
+import { listDevices, createDevice, updateDevice, deleteDevice, requestAlarm, toggleMonitor } from '../controllers/deviceController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { createDeviceSchema } from '../schemas/index.js';
@@ -11,5 +11,6 @@ router.post('/', requireRole('admin', 'koordinator', 'teknisi'), validateBody(cr
 router.put('/:id', requireRole('admin', 'koordinator', 'teknisi'), updateDevice); // teknisi boleh edit perangkat
 router.delete('/:id', requireRole('admin', 'koordinator'), deleteDevice);
 router.post('/:id/request-alarm', requireRole('admin', 'koordinator', 'teknisi'), requestAlarm);
+router.post('/:id/toggle-monitor', requireRole('admin', 'koordinator', 'teknisi'), toggleMonitor);
 
 export default router;

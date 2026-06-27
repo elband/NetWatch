@@ -83,6 +83,8 @@ async function migrate() {
   // Override manual: paksa alarmkan perangkat non-server walau di jam malam (sekali pakai sampai online lagi).
   await addColumnIfMissing(conn, env.db.database, 'devices', 'alarm_override', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER off_reason');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'inspect_required', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER loc');
+  // Mode standby: saat 0, perangkat tidak di-ping/dimonitor otomatis dan tidak memicu insiden otomatis.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'monitor_enabled', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER alarm_override');
   // Dokumentasi (foto/PDF) untuk rencana/pelaksanaan maintenance.
   await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'doc_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
   // Device binding & akurasi GPS untuk absensi ketat.

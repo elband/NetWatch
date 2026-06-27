@@ -35,6 +35,17 @@ export default function Devices() {
   const canAdd = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh tambah perangkat
   const canAlarm = hasRole(user, 'admin', 'koordinator', 'teknisi');
 
+  async function toggleMonitor(d: Device) {
+    const turningOff = d.monitor_enabled !== 0;
+    if (turningOff && !(await confirmDialog({ title: `Mode standby ${d.name}`, message: 'Perangkat ini tidak akan dimonitor/di-ping otomatis dan tidak memicu insiden otomatis selama mode standby.', confirmText: '⏸️ Standby', variant: 'warning' }))) return;
+    try {
+      const r = await api.post(`/devices/${d.id}/toggle-monitor`);
+      setDevices((prev) => prev.map((x) => (x.id === d.id ? r.data.device : x)));
+    } catch (e: any) {
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mengubah mode monitor.', variant: 'danger' });
+    }
+  }
+
   async function requestAlarm(d: Device) {
     if (!(await confirmDialog({ title: `Alarmkan ${d.name}`, message: 'Perangkat ini terkategori "dimatikan" (jam malam). Tindakan ini membuat insiden alarm & memberi tahu teknisi on-duty.', confirmText: '🔔 Alarmkan', variant: 'warning' }))) return;
     try {
@@ -176,7 +187,7 @@ export default function Devices() {
                   <div className="font-semibold text-sm truncate" title={d.name}>{d.icon && <span className="mr-1.5">{d.icon}</span>}{d.name}</div>
                   <div className="text-[10px] text-text2 font-mono truncate mt-0.5">{d.ip}</div>
                 </div>
-                <div className="shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} /></div>
+                <div className="shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} monitorEnabled={d.monitor_enabled} /></div>
               </div>
 
               {/* Tipe + lokasi */}
@@ -202,6 +213,17 @@ export default function Devices() {
 
               {/* Aksi */}
               <div className="flex gap-1 flex-wrap pt-2 border-t border-border/50">
+                {canAlarm && (
+                  <button
+                    onClick={() => toggleMonitor(d)}
+                    title={d.monitor_enabled === 0 ? 'Aktifkan monitoring otomatis' : 'Jeda monitoring (mode standby)'}
+                    className={d.monitor_enabled === 0
+                      ? 'bg-success/10 text-success border border-success/40 rounded px-2 py-0.5 text-[10px]'
+                      : 'bg-surface2 text-text2 border border-border rounded px-2 py-0.5 text-[10px]'}
+                  >
+                    {d.monitor_enabled === 0 ? '▶️ Monitor' : '⏸️ Standby'}
+                  </button>
+                )}
                 {canAlarm && d.status === 'offline' && d.off_reason === 'dimatikan' && (
                   <button onClick={() => requestAlarm(d)} title="Minta dialarmkan (override aturan jam malam)" className="bg-amber-500/10 text-amber-400 border border-amber-500/40 rounded px-2 py-0.5 text-[10px]">
                     🔔 Alarmkan
