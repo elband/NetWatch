@@ -6,6 +6,7 @@ import { createNotification, notifyRoles } from '../services/notify.js';
 import { getOnDutyTechIds, getDutyStatus } from '../config/shifts.js';
 import { remindOnDutyTechs } from '../services/coordWatcher.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { nextIncidentId } from '../utils/incidentId.js';
 
 // Alur tindakan insiden berbasis pilihan/cabang (solusi perbaikan peralatan):
 // - Mulai: "Coba SSH" (bila ber-IP) atau "Langsung Kunjungan".
@@ -338,11 +339,6 @@ export async function remindIncident(req, res) {
     remindedCount: n,
     message: n ? `Pengingat dikirim ke ${n} teknisi on-duty.` : 'Tidak ada teknisi on-duty saat ini.',
   });
-}
-
-async function nextIncidentId(conn) {
-  const [rows] = await conn.query('SELECT COUNT(*) as c FROM incidents');
-  return 'INC-' + String(rows[0].c + 1).padStart(3, '0');
 }
 
 export async function createIncident(req, res) {

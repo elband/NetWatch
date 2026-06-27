@@ -3,6 +3,8 @@ import { snapshotAndNotifyOnDuty, notifyAutoResolved } from '../controllers/inci
 import { computeServices } from './servicesStatus.js';
 import { probeDevice } from './monitorProbe.js';
 import { loadActiveMaintenance } from './maintenanceService.js';
+import { logger } from '../config/logger.js';
+import { nextIncidentId } from '../utils/incidentId.js';
 
 // Step final insiden (selaras dengan incidentController.FINAL_STEP).
 const FINAL_STEP = 2;
@@ -64,11 +66,6 @@ async function autoResolveIncident(io, device, inc, stableSec) {
   } finally {
     conn.release();
   }
-}
-
-async function nextIncidentId(conn) {
-  const [rows] = await conn.query('SELECT COUNT(*) as c FROM incidents');
-  return 'INC-' + String(rows[0].c + 1).padStart(3, '0');
 }
 
 export async function checkAllDevices(io) {
@@ -152,6 +149,10 @@ export async function checkAllDevices(io) {
           ]);
           io?.emit('incident:new', { id, device: device.name });
         }
+      } catch (e) {
+        // Kegagalan membuat insiden untuk SATU perangkat tidak boleh menjatuhkan
+        // seluruh sweep (perangkat lain harus tetap dipantau). Catat & lanjut.
+        logger.error({ err: e?.message || String(e), deviceId: device.id }, '[pingSweep] gagal membuat insiden otomatis');
       } finally {
         conn.release();
       }

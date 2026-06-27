@@ -10,6 +10,7 @@ import { escapeLike } from '../utils/sql.js';
 import { notifyRoles } from '../services/notify.js';
 import { snapshotAndNotifyOnDuty } from '../controllers/incidentController.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { nextIncidentId } from '../utils/incidentId.js';
 
 const normPhone = (p) => { const d = String(p || '').replace(/[^\d]/g, ''); return d.length >= 8 ? d : null; };
 
@@ -47,8 +48,7 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
     );
     for (const f of req.files || []) await conn.query('INSERT INTO report_attachments (report_id, file_url, mimetype) VALUES (?,?,?)', [id, `/uploads/reports/${f.filename}`, f.mimetype]);
     // Tiket otomatis → insiden ke pool + notifikasi on-duty.
-    const [[c]] = await conn.query('SELECT COUNT(*) c FROM incidents');
-    const incId = 'INC-' + String(c.c + 1).padStart(3, '0');
+    const incId = await nextIncidentId(conn);
     const deviceName = `${b.jenis}${ruang ? ` - ${ruang}` : ''}`;
     const issue = `${b.judul.trim()} (Laporan QR ${id})`;
     const prio = b.urgensi === 'kritis' ? 'kritis' : b.urgensi === 'tinggi' ? 'tinggi' : 'sedang';
@@ -119,8 +119,7 @@ router.post('/:id/assign-incident', requireRole('admin', 'koordinator'), async (
       const [locRows] = await conn.query("SELECT id FROM locations WHERE name LIKE ? ESCAPE '\\\\' LIMIT 1", [`%${escapeLike(report.gedung)}%`]);
       locationId = locRows[0]?.id || null;
     }
-    const [countRows] = await conn.query('SELECT COUNT(*) as c FROM incidents');
-    const incId = 'INC-' + String(countRows[0].c + 1).padStart(3, '0');
+    const incId = await nextIncidentId(conn);
     await conn.query(
       `INSERT INTO incidents (id, device_name, ip, location_id, issue, priority, tech_id, status, step, source, public_report_id, taken_at)
        VALUES (?, ?, 'N/A (Laporan Publik)', ?, ?, ?, ?, ?, 0, 'public_report', ?, ${assigned ? 'NOW()' : 'NULL'})`,

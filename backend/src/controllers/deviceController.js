@@ -1,5 +1,6 @@
 import { pool } from '../db/pool.js';
 import { snapshotAndNotifyOnDuty } from './incidentController.js';
+import { nextIncidentId } from '../utils/incidentId.js';
 
 export async function listDevices(req, res) {
   // under_maintenance = perangkat sedang dalam jendela maintenance aktif
@@ -99,8 +100,7 @@ export async function requestAlarm(req, res) {
       const [ex] = await conn.query("SELECT id FROM incidents WHERE device_id=? AND status!='selesai' LIMIT 1", [id]);
       if (ex.length) incidentId = ex[0].id;
       else {
-        const [[c]] = await conn.query('SELECT COUNT(*) c FROM incidents');
-        incidentId = 'INC-' + String(c.c + 1).padStart(3, '0');
+        incidentId = await nextIncidentId(conn);
         const issue = 'Perangkat tidak merespons - dialarmkan manual (override jam malam)';
         await conn.query(
           `INSERT INTO incidents (id, device_id, device_name, ip, issue, priority, tech_id, status, step, source)
