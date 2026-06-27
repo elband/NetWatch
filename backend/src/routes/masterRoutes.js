@@ -149,9 +149,16 @@ router.put('/locations/:id', requireRole('admin'), async (req, res) => {
   res.json({ ok: true });
 });
 
-// Set / hapus posisi titik lokasi pada peta (admin). mapX/mapY = persen 0–100, null = hapus.
+// Set / hapus posisi titik lokasi pada peta (admin).
+// Peta live: kirim lat/lng (null = hapus). Legacy gambar: kirim mapX/mapY persen 0–100.
 router.put('/locations/:id/marker', requireRole('admin'), async (req, res) => {
-  const { mapX, mapY } = req.body;
+  const { mapX, mapY, lat, lng } = req.body;
+  if (lat !== undefined || lng !== undefined) {
+    const la = lat == null ? null : Number(lat);
+    const ln = lng == null ? null : Number(lng);
+    await pool.query('UPDATE locations SET lat=?, lng=? WHERE id=?', [la, ln, req.params.id]);
+    return res.json({ ok: true });
+  }
   const x = mapX == null ? null : Math.max(0, Math.min(100, Number(mapX)));
   const y = mapY == null ? null : Math.max(0, Math.min(100, Number(mapY)));
   await pool.query('UPDATE locations SET map_x=?, map_y=? WHERE id=?', [x, y, req.params.id]);

@@ -31,7 +31,6 @@ export default function CoordDashboard() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [performa, setPerforma] = useState<PerformaRow[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
-  const [mapUrl, setMapUrl] = useState<string | null>(null);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [stats, setStats] = useState<MonthlyStats | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -52,7 +51,7 @@ export default function CoordDashboard() {
     api.get('/dashboard/coordinator-sparkline').then((res) => setSpark(res.data.spark)).catch(() => {});
     api.get('/devices').then((res) => setDevices(res.data.devices)).catch(() => {});
     api.get('/performa').then((res) => setPerforma(res.data.performa)).catch(() => {});
-    api.get('/locations').then((res) => { setLocations(res.data.locations); setMapUrl(res.data.mapUrl || null); }).catch(() => {});
+    api.get('/locations').then((res) => { setLocations(res.data.locations); }).catch(() => {});
     api.get('/services').then((res) => setServices(res.data.services)).catch(() => {});
     api.get(`/dashboard/monthly?month=${month}`).then((res) => setStats(res.data)).catch(() => {});
     api.get('/activities').then((res) => setActivities(res.data.activities)).catch(() => {});
@@ -373,20 +372,10 @@ export default function CoordDashboard() {
         </Panel>
 
         <Panel title="PETA LOKASI GANGGUAN" right={<Link to="/master" className="text-[11px] text-text2 hover:text-text">Kelola →</Link>}>
-          {mapUrl ? (
-            <LocationMap mapUrl={mapUrl} locations={locations} />
-          ) : locations.length === 0 ? (
+          {locations.length === 0 ? (
             <div className="text-[11px] text-text2 py-4 text-center">Belum ada lokasi.</div>
           ) : (
-            <div className="grid grid-cols-3 gap-2.5">
-              {locations.map((loc) => (
-                <div key={loc.id} className={`rounded-lg border p-3 text-center ${loc.active_count > 0 ? 'border-danger/40 bg-danger/10' : 'border-border bg-surface2'}`}>
-                  <div className="text-lg">{loc.icon}</div>
-                  <div className="text-[11px] font-semibold mb-1">{loc.name}</div>
-                  <div className={`text-xl font-extrabold ${loc.active_count > 0 ? 'text-danger' : 'text-text2'}`}>{loc.active_count}</div>
-                </div>
-              ))}
-            </div>
+            <LocationMap locations={locations} />
           )}
         </Panel>
       </div>
@@ -620,7 +609,7 @@ function Panel({ title, right, children }: { title: string; right?: ReactNode; c
   return (
     <div className="nw-card bg-surface border border-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[12px] font-bold tracking-wide">{title}</span>
+        <span className="font-head text-[12px] font-bold tracking-wide">{title}</span>
         {right}
       </div>
       {children}

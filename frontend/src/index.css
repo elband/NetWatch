@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 @theme {
+  /* Font: Inter = body/UI (default sans), Poppins = judul/heading. */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-head: 'Poppins', 'Inter', system-ui, sans-serif;
+
   --color-bg: #0d1117;
   --color-surface: #161b22;
   --color-surface2: #1c2128;
@@ -47,8 +51,14 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Judul/heading pakai Poppins. Tag heading semantik + utility .font-head
+   (dipakai pada judul berbasis div seperti judul Panel & brand). */
+h1, h2, h3, h4, h5, h6, .font-head {
+  font-family: var(--font-head);
 }
 
 #root {

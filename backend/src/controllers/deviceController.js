@@ -5,15 +5,17 @@ export async function listDevices(req, res) {
   // under_maintenance = perangkat sedang dalam jendela maintenance aktif
   // (cocok per-device, per-lokasi via nama, atau site-wide bila kedua kolom NULL).
   const [rows] = await pool.query(
-    `SELECT d.*, EXISTS(
+    `SELECT d.*, loc.name AS location_name, loc.lat AS location_lat, loc.lng AS location_lng, EXISTS(
         SELECT 1 FROM maintenance_windows mw
         LEFT JOIN locations l ON l.id = mw.location_id
         WHERE NOW() BETWEEN mw.starts_at AND mw.ends_at
           AND (mw.device_id = d.id
                OR (mw.device_id IS NULL AND mw.location_id IS NULL)
-               OR (mw.location_id IS NOT NULL AND l.name = d.loc))
+               OR (mw.location_id IS NOT NULL AND (mw.location_id = d.location_id OR l.name = d.loc)))
       ) AS under_maintenance
-     FROM devices d ORDER BY d.id`
+     FROM devices d
+     LEFT JOIN locations loc ON loc.id = d.location_id
+     ORDER BY d.id`
   );
   res.json({ devices: rows });
 }
@@ -22,15 +24,16 @@ const CHECK_TYPES = ['ping', 'tcp', 'http'];
 function normCheckType(v) { return CHECK_TYPES.includes(v) ? v : 'ping'; }
 
 export async function createDevice(req, res) {
-  const { name, ip, type, category, icon, loc, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
+  const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   if (!name || !ip || !type) return res.status(400).json({ error: 'Nama, IP, tipe wajib diisi' });
   const inspReq = inspect_required == null ? 1 : (inspect_required ? 1 : 0);
+  const locId = location_id === '' || location_id == null ? null : Number(location_id);
   const [result] = await pool.query(
-    `INSERT INTO devices (name, ip, type, category, icon, loc, inspect_required, status, ssh_host, ssh_port, ssh_username, lat, lng,
+    `INSERT INTO devices (name, ip, type, category, icon, loc, location_id, inspect_required, status, ssh_host, ssh_port, ssh_username, lat, lng,
        check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, inspReq, ssh_host || ip, ssh_port || 22, ssh_username || null,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, locId, inspReq, ssh_host || ip, ssh_port || 22, ssh_username || null,
      lat === '' || lat == null ? null : Number(lat), lng === '' || lng == null ? null : Number(lng),
      normCheckType(check_type), check_port ? Number(check_port) : null, check_url?.trim() || null,
      snmp_enabled ? 1 : 0, snmp_community?.trim() || 'public', snmp_port ? Number(snmp_port) : 161]
@@ -41,12 +44,12 @@ export async function createDevice(req, res) {
 
 export async function updateDevice(req, res) {
   const id = Number(req.params.id);
-  const { name, ip, type, category, icon, loc, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
+  const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   const [existing] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   if (!existing[0]) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   await pool.query(
-    `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, inspect_required=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=?,
+    `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, location_id=?, inspect_required=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=?,
        check_type=?, check_port=?, check_url=?, snmp_enabled=?, snmp_community=?, snmp_port=? WHERE id=?`,
     [
       name ?? existing[0].name,
@@ -55,6 +58,7 @@ export async function updateDevice(req, res) {
       category === '' ? null : (category ?? existing[0].category),
       icon === '' ? null : (icon ?? existing[0].icon),
       loc ?? existing[0].loc,
+      location_id === undefined ? existing[0].location_id : (location_id === '' || location_id == null ? null : Number(location_id)),
       inspect_required == null ? existing[0].inspect_required : (inspect_required ? 1 : 0),
       ssh_host ?? existing[0].ssh_host,
       ssh_port ?? existing[0].ssh_port,

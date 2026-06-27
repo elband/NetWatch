@@ -180,13 +180,13 @@ function LocationsTab() {
     const r = await api.post('/locations/map', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
     setMapUrl(r.data.mapUrl);
   }
-  async function placeMarker(id: number, x: number, y: number) {
-    await api.put(`/locations/${id}/marker`, { mapX: x, mapY: y });
-    setItems((prev) => prev.map((l) => (l.id === id ? { ...l, map_x: x, map_y: y } : l)));
+  async function placeMarker(id: number, lat: number, lng: number) {
+    await api.put(`/locations/${id}/marker`, { lat, lng });
+    setItems((prev) => prev.map((l) => (l.id === id ? { ...l, lat, lng } : l)));
   }
   async function clearMarker(id: number) {
-    await api.put(`/locations/${id}/marker`, { mapX: null, mapY: null });
-    setItems((prev) => prev.map((l) => (l.id === id ? { ...l, map_x: null, map_y: null } : l)));
+    await api.put(`/locations/${id}/marker`, { lat: null, lng: null });
+    setItems((prev) => prev.map((l) => (l.id === id ? { ...l, lat: null, lng: null } : l)));
   }
 
   async function save() {
@@ -224,12 +224,12 @@ function LocationsTab() {
             <div className="flex flex-wrap gap-1.5 mb-2">
               {items.map((l) => (
                 <button key={l.id} onClick={() => setPlaceId(placeId === l.id ? null : l.id)} className={`text-[11px] px-2 py-0.5 rounded border ${placeId === l.id ? 'border-accent bg-accent/15 text-accent font-semibold' : 'border-border text-text2'}`}>
-                  {l.icon} {l.name} {l.map_x != null ? '📌' : ''}
+                  {l.icon} {l.name} {l.lat != null ? '📌' : ''}
                 </button>
               ))}
             </div>
             <LocationMap mapUrl={mapUrl} locations={items} editable selectedId={placeId} onPlace={placeMarker} />
-            {placeId && items.find((l) => l.id === placeId)?.map_x != null && (
+            {placeId && items.find((l) => l.id === placeId)?.lat != null && (
               <button className={`${btnGhost} text-danger mt-2`} onClick={() => clearMarker(placeId)}>🗑️ Hapus titik {items.find((l) => l.id === placeId)?.name}</button>
             )}
           </>

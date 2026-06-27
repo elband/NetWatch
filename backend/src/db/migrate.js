@@ -37,8 +37,13 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'devices', 'lng', 'DECIMAL(10,7) DEFAULT NULL AFTER lat');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'category', 'VARCHAR(80) DEFAULT NULL AFTER type');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'icon', 'VARCHAR(10) DEFAULT NULL AFTER category');
+  // Tag lokasi terstruktur — tautan perangkat ke titik di peta gangguan.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'location_id', 'INT DEFAULT NULL AFTER loc');
   await addColumnIfMissing(conn, env.db.database, 'locations', 'map_x', 'FLOAT DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'locations', 'map_y', 'FLOAT DEFAULT NULL');
+  // Koordinat GPS untuk peta live (satelit). map_x/map_y dipertahankan utk kompatibilitas.
+  await addColumnIfMissing(conn, env.db.database, 'locations', 'lat', 'DECIMAL(10,7) DEFAULT NULL');
+  await addColumnIfMissing(conn, env.db.database, 'locations', 'lng', 'DECIMAL(10,7) DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'incident_reports', 'signed_by', 'INT DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'incident_reports', 'signer_name', 'VARCHAR(120) DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'incident_reports', 'signer_nip', 'VARCHAR(40) DEFAULT NULL');

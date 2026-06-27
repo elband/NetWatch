@@ -42,6 +42,10 @@ export interface Device {
   category: string | null;
   icon: string | null;
   loc: string | null;
+  location_id?: number | null;
+  location_name?: string | null;
+  location_lat?: number | null;
+  location_lng?: number | null;
   inspect_required?: number;
   status: DeviceStatus;
   off_reason?: string | null;
@@ -497,6 +501,8 @@ export interface LocationItem {
   icon: string;
   map_x: number | null;
   map_y: number | null;
+  lat: number | null;
+  lng: number | null;
   sort_order: number;
   active_count: number;
 }

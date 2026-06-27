@@ -43,7 +43,6 @@ export default function MyDashboard() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
-  const [mapUrl, setMapUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<MonthlyStats | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState<string | null>(null);
@@ -62,7 +61,7 @@ export default function MyDashboard() {
     api.get('/devices').then((res) => setDevices(res.data.devices));
     api.get('/assets/mine').then((res) => setAssets(res.data.assets));
     api.get('/services').then((res) => setServices(res.data.services));
-    api.get('/locations').then((res) => { setLocations(res.data.locations); setMapUrl(res.data.mapUrl || null); });
+    api.get('/locations').then((res) => { setLocations(res.data.locations); });
     api.get('/activities/mine').then((res) => setActivities(res.data.activities));
     api.get(`/dashboard/monthly?month=${month}`).then((res) => setStats(res.data));
     if (user) {
@@ -228,20 +227,10 @@ export default function MyDashboard() {
         </Panel>
 
         <Panel title="PETA LOKASI GANGGUAN" right={<Link to="/master" className="text-[11px] text-text2 hover:text-text">Kelola →</Link>}>
-          {mapUrl ? (
-            <LocationMap mapUrl={mapUrl} locations={locations} />
-          ) : locations.length === 0 ? (
+          {locations.length === 0 ? (
             <div className="text-[11px] text-text2 py-4 text-center">Belum ada lokasi. Tambahkan di Master Data (admin).</div>
           ) : (
-            <div className="grid grid-cols-3 gap-2.5">
-              {locations.map((loc) => (
-                <div key={loc.id} className={`rounded-lg border p-3 text-center ${loc.active_count > 0 ? 'border-danger/40 bg-danger/10' : 'border-border bg-surface2'}`}>
-                  <div className="text-lg">{loc.icon}</div>
-                  <div className="text-[11px] font-semibold mb-1">{loc.name}</div>
-                  <div className={`text-xl font-extrabold ${loc.active_count > 0 ? 'text-danger' : 'text-text2'}`}>{loc.active_count}</div>
-                </div>
-              ))}
-            </div>
+            <LocationMap locations={locations} />
           )}
         </Panel>
       </div>
@@ -530,7 +519,7 @@ function Panel({ title, right, badge, children }: { title: string; right?: React
   return (
     <div className="nw-card bg-surface border border-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[12px] font-bold tracking-wide flex items-center gap-2">
+        <span className="font-head text-[12px] font-bold tracking-wide flex items-center gap-2">
           {title}
           {badge && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-accent2/20 text-accent2 font-bold">{badge}</span>}
         </span>

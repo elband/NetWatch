@@ -16,14 +16,14 @@ function meterColor(v: number) {
 const DEVICE_TYPES = ['Switch', 'Router', 'Firewall', 'AP', 'Server', 'NAS', 'CCTV', 'PC Client', 'Printer'];
 // Pustaka ikon (emoji) untuk perangkat / kartu layanan.
 const ICONS = ['🖥️', '🔀', '📶', '🧱', '🖧', '💾', '📹', '🌐', '🔗', '📺', '🚪', '📢', '✈️', '🛰️', '📡', '🛜', '📱', '💻', '🔌', '⚙️', '🟢', '🗂️'];
-const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161' };
+const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', location_id: null as number | null, ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161' };
 const NO_IP = 'N/A (Tanpa IP)';
 
 export default function Devices() {
   const { user } = useAuth();
   const [devices, setDevices] = useState<Device[]>([]);
   const [serviceNames, setServiceNames] = useState<string[]>([]);
-  const [locs, setLocs] = useState<string[]>([]);
+  const [locs, setLocs] = useState<{ id: number; name: string }[]>([]);
   const [deviceTypes, setDeviceTypes] = useState<{ name: string; icon: string | null }[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -69,7 +69,7 @@ export default function Devices() {
     setEditId(d.id);
     const hasIp = !d.ip.startsWith('N/A');
     setForm({
-      name: d.name, ip: hasIp ? d.ip : '', hasIp, type: d.type, category: d.category || '', icon: d.icon || '', loc: d.loc || '',
+      name: d.name, ip: hasIp ? d.ip : '', hasIp, type: d.type, category: d.category || '', icon: d.icon || '', loc: d.loc || '', location_id: d.location_id ?? null,
       ssh_host: d.ssh_host || '', ssh_port: String(d.ssh_port ?? 22), ssh_username: d.ssh_username || '',
       lat: d.lat != null ? String(d.lat) : '', lng: d.lng != null ? String(d.lng) : '',
       inspect_required: d.inspect_required == null ? true : !!d.inspect_required,
@@ -100,6 +100,7 @@ export default function Devices() {
       category: form.category.trim() || null,
       icon: form.icon || null,
       loc: form.loc.trim() || null,
+      location_id: form.location_id,
       ssh_host: form.ssh_host.trim() || null,
       ssh_port: Number(form.ssh_port) || 22,
       ssh_username: form.ssh_username.trim() || null,
@@ -134,7 +135,7 @@ export default function Devices() {
   useEffect(() => {
     api.get('/devices').then((res) => setDevices(res.data.devices));
     api.get('/services').then((res) => setServiceNames(res.data.services.map((s: { name: string }) => s.name)));
-    api.get('/locations').then((res) => setLocs((res.data.locations || []).map((l: { name: string }) => l.name))).catch(() => {});
+    api.get('/locations').then((res) => setLocs((res.data.locations || []).map((l: { id: number; name: string }) => ({ id: l.id, name: l.name })))).catch(() => {});
     api.get('/device-types').then((res) => setDeviceTypes(res.data.deviceTypes || [])).catch(() => {});
     const socket = getSocket();
     const onUpdate = (d: Device) => setDevices((prev) => prev.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
@@ -204,7 +205,9 @@ export default function Devices() {
               <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-text2">
                 <span>{d.type}</span>
                 {d.category && <span className="px-1.5 py-0.5 rounded bg-accent2/15 text-accent2">{d.category}</span>}
-                {d.loc && <span>· {d.loc}</span>}
+                {d.location_name
+                  ? <span className="px-1.5 py-0.5 rounded bg-accent/15 text-accent" title="Tertaut ke titik di Peta">📍 {d.location_name}</span>
+                  : d.loc && <span title="Tag lokasi lama (belum tertaut ke peta)">· {d.loc}</span>}
                 {d.inspect_required === 0 && <span className="px-1.5 py-0.5 rounded bg-surface2 text-text2 border border-border" title="Tidak wajib diinspeksi">⊘ non-inspeksi</span>}
               </div>
 
@@ -304,12 +307,18 @@ export default function Devices() {
                   {form.type && !(deviceTypes.length ? deviceTypes.some((d) => d.name === form.type) : DEVICE_TYPES.includes(form.type)) && <option value={form.type}>{form.type} (lama)</option>}
                 </select>
               </Field>
-              <Field label="Lokasi (penanda di Peta)">
-                <select className="dev-inp" value={form.loc} onChange={(e) => setForm({ ...form, loc: e.target.value })}>
+              <Field label="Lokasi (tag di Peta)">
+                <select className="dev-inp" value={form.location_id ?? ''} onChange={(e) => {
+                  const id = e.target.value ? Number(e.target.value) : null;
+                  const name = locs.find((l) => l.id === id)?.name || '';
+                  setForm({ ...form, location_id: id, loc: id ? name : '' });
+                }}>
                   <option value="">— pilih lokasi —</option>
-                  {locs.map((l) => <option key={l} value={l}>{l}</option>)}
-                  {form.loc && !locs.includes(form.loc) && <option value={form.loc}>{form.loc} (lama)</option>}
+                  {locs.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
+                {form.location_id == null && form.loc && (
+                  <div className="text-[10px] text-text2 mt-1">Tag lama: <b>{form.loc}</b> — pilih lokasi di atas untuk menautkannya ke titik peta.</div>
+                )}
               </Field>
               <div className="col-span-2">
                 <Field label="Kategori (Layanan Kritis)">

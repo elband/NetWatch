@@ -146,7 +146,7 @@ export default function Dokumen() {
   );
 }
 
-const Panel = ({ title, children }: { title: string; children: React.ReactNode }) => (<div className="bg-surface border border-border rounded-xl p-3.5"><div className="text-[11px] font-semibold mb-2">{title}</div>{children}</div>);
+const Panel = ({ title, children }: { title: string; children: React.ReactNode }) => (<div className="bg-surface border border-border rounded-xl p-3.5"><div className="font-head text-[11px] font-semibold mb-2">{title}</div>{children}</div>);
 const Line = ({ left, right, onClick }: { left: string; right: string; onClick?: () => void }) => (<button onClick={onClick} disabled={!onClick} className="w-full flex items-center justify-between gap-2 text-[11px] py-0.5 text-left hover:text-accent disabled:hover:text-current"><span className="truncate">{left}</span><span className="text-text2 shrink-0">{right}</span></button>);
 const Empty = () => <div className="text-[11px] text-text2">-</div>;
 const inp = 'w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs';
