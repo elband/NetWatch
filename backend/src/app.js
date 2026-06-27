@@ -52,10 +52,12 @@ export function createApp() {
           directives: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:', 'blob:'],
+            // Google Fonts stylesheet + Inter/Poppins font files.
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+            // Tile peta live (Esri World Imagery) dimuat sebagai <img>.
+            imgSrc: ["'self'", 'data:', 'blob:', 'https://server.arcgisonline.com'],
             connectSrc: ["'self'", 'ws:', 'wss:'],
-            fontSrc: ["'self'", 'data:'],
+            fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
             frameSrc: ["'self'"],
             objectSrc: ["'none'"],
             baseUri: ["'self'"],
