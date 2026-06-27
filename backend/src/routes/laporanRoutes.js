@@ -42,8 +42,16 @@ export async function buildLaporanData(monthIn) {
   );
 
   // ===== II. Daftar / Inventaris Peralatan =====
-  const [inventaris] = await pool.query('SELECT name, type, merk, serial, tahun, loc, status, category FROM devices ORDER BY category, name');
+  const [inventaris] = await pool.query('SELECT id, name, type, merk, serial, tahun, loc, status, category, ip FROM devices ORDER BY category, name');
   const kondisi = (s) => (s === 'online' ? 'Baik' : s === 'warning' ? 'Perlu Perhatian' : 'Tidak Aktif/Rusak');
+  // Perangkat tanpa IP tidak bisa dipantau via ping, sehingga status 'offline' dari
+  // monitoring TIDAK bermakna (selalu offline). Untuk perangkat ini, kondisi rusak
+  // hanya ditentukan oleh insiden/laporan yang tercatat untuk perangkat tsb — bukan
+  // status ping. Perangkat ber-IP tetap memakai status pemantauan seperti biasa.
+  const [openIncRows] = await pool.query("SELECT DISTINCT device_id FROM incidents WHERE device_id IS NOT NULL AND status<>'selesai'");
+  const openIncSet = new Set(openIncRows.map((r) => r.device_id));
+  const hasIp = (dev) => !!(dev.ip && String(dev.ip).trim() && String(dev.ip).trim().toUpperCase() !== 'N/A');
+  const devKondisi = (dev) => (hasIp(dev) ? kondisi(dev.status) : (openIncSet.has(dev.id) ? 'Tidak Aktif/Rusak' : 'Baik'));
 
   // ===== III. Jadwal Dinas — bulan ini & bulan berikutnya =====
   const buildJadwal = async (rangeStart, rangeEnd, days, label) => {
@@ -149,13 +157,15 @@ export async function buildLaporanData(monthIn) {
     if (!downMap.has(r.device_id)) downMap.set(r.device_id, new Set());
     downMap.get(r.device_id).add(r.d);
   }
-  const [devList] = await pool.query('SELECT id, name, status FROM devices ORDER BY category, name');
+  const [devList] = await pool.query('SELECT id, name, status, ip FROM devices ORDER BY category, name');
   const unjukHasil = {
     days: daysInMonth,
     rows: devList.map((dev, i) => {
       const down = downMap.get(dev.id) || new Set();
-      const cells = Array.from({ length: daysInMonth }, (_, k) => (down.has(k + 1) ? 'x' : dev.status === 'offline' ? 'x' : ''));
-      return { no: i + 1, nama: dev.name, cells, ket: kondisi(dev.status) };
+      // Sel 'x' = ada insiden hari itu; untuk perangkat ber-IP juga 'x' bila status offline.
+      // Perangkat tanpa IP tidak diisi 'x' otomatis dari status ping (tidak terpantau).
+      const cells = Array.from({ length: daysInMonth }, (_, k) => (down.has(k + 1) ? 'x' : (hasIp(dev) && dev.status === 'offline') ? 'x' : ''));
+      return { no: i + 1, nama: dev.name, cells, ket: devKondisi(dev) };
     }),
   };
 
@@ -275,7 +285,7 @@ export async function buildLaporanData(monthIn) {
   return {
     month, monthName, year: y, nextMonthName,
     personil: personil.map((p, i) => ({ no: i + 1, ...p })),
-    inventaris: inventaris.map((d, i) => ({ no: i + 1, nama: d.name, merk: d.merk || d.type || '-', serial: d.serial || '-', tahun: d.tahun || '-', lokasi: d.loc || '-', kondisi: kondisi(d.status), ket: d.category || '-' })),
+    inventaris: inventaris.map((d, i) => ({ no: i + 1, nama: d.name, merk: d.merk || d.type || '-', serial: d.serial || '-', tahun: d.tahun || '-', lokasi: d.loc || '-', kondisi: devKondisi(d), ket: d.category || '-' })),
     jadwalBulanIni, jadwal, kegiatanHarian, dokumentasi, dokumentasiTruncated, unjukHasil, evaluasi, perbaikan: perbaikanRows, lkp,
     recap, performaTeknisi, performaKoordinator, coordBreachMinutes: COORD_BREACH_MINUTES, opsHoursPerDay: OPS_HOURS_PER_DAY,
   };
