@@ -10,6 +10,7 @@ import { startCoordWatcher } from './services/coordWatcher.js';
 import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
 import { purgeOldWaLogs } from './jobs/waQueue.js';
+import { scheduleMaintenanceReminder, startMaintenanceReminderWorker } from './jobs/maintenanceReminderQueue.js';
 import { initTimezoneFromSettings } from './services/timezone.js';
 import { loadShiftWindows } from './config/shifts.js';
 import { pool } from './db/pool.js';
@@ -53,8 +54,11 @@ const isPrimary = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANC
 if (isPrimary) {
   startPingWorker(io);
   startWaWorker(io);
+  startMaintenanceReminderWorker();
   startCoordWatcher(io);
   await schedulePingSweep();
+  // Pengingat WA harian (08:00) ke teknisi dinas ttg maintenance peralatan terjadwal.
+  await scheduleMaintenanceReminder();
   // Retensi log WA (PDP): bersihkan saat start + harian.
   purgeOldWaLogs().then((n) => n && logger.info(`[wa_log] retensi: ${n} log lama dihapus`)).catch(() => {});
   setInterval(() => { purgeOldWaLogs().catch(() => {}); }, 24 * 60 * 60 * 1000);
