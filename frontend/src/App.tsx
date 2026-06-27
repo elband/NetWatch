@@ -22,6 +22,7 @@ import Performa from './pages/Performa';
 import Users from './pages/Users';
 import WaLog from './pages/WaLog';
 import Settings from './pages/Settings';
+import NotificationSettings from './pages/NotificationSettings';
 import PublicReports from './pages/PublicReports';
 import MasterData from './pages/MasterData';
 import SshTerminal from './pages/SshTerminal';
@@ -96,6 +97,7 @@ export default function App() {
           <Route element={<ProtectedRoute roles={['admin']} />}>
             <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/notification-settings" element={<NotificationSettings />} />
             <Route path="/master" element={<MasterData />} />
           </Route>
         </Route>

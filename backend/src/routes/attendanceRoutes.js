@@ -3,6 +3,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
+import { isNotifyEnabled } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -38,9 +39,45 @@ function locationReasons({ lat, lng, tz, accuracy }, office) {
 }
 
 async function notifyCoords(message) {
+  if (!(await isNotifyEnabled('absensi_vpn_lokasi', 'koordinator'))) return 0;
   const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
   for (const c of coords) { try { await queueWaNotification({ type: 'alert', toUserId: c.id, message }); } catch { /* abaikan */ } }
   return coords.length;
+}
+
+async function notifyAdmins(message) {
+  if (!(await isNotifyEnabled('absensi_duplikat_perangkat', 'admin'))) return 0;
+  const [admins] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='admin' OR JSON_CONTAINS(roles,'\"admin\"'))");
+  for (const a of admins) { try { await queueWaNotification({ type: 'alert', toUserId: a.id, message }); } catch { /* abaikan */ } }
+  return admins.length;
+}
+
+// Deteksi perangkat absensi yang sama dipakai oleh dua teknisi berbeda pada hari
+// yang sama (indikasi titip absen). Penalti (flagged) dikenakan ke ABSEN PERTAMA
+// (pemilik/pemegang perangkat), karena dialah yang membiarkan perangkatnya dipakai
+// lagi setelah dia sendiri absen. Notifikasi WA tetap mengikuti pengaturan admin.
+async function checkDuplicateDevice(currentUserId, currentUserName, deviceId, date) {
+  if (!deviceId) return;
+  const [dup] = await pool.query(
+    `SELECT a.id, a.user_id, u.name FROM attendance a JOIN users u ON u.id=a.user_id
+      WHERE a.work_date=? AND a.device_id=? AND a.user_id<>? AND a.check_in_at IS NOT NULL
+      ORDER BY a.check_in_at ASC LIMIT 1`,
+    [date, deviceId, currentUserId]
+  );
+  const first = dup[0];
+  if (!first) return;
+  const note = `Perangkat absensi dipakai bersama dengan ${currentUserName}`;
+  await pool.query(
+    "UPDATE attendance SET flagged=1, reason=CONCAT(COALESCE(reason,''), CASE WHEN reason IS NULL OR reason='' THEN '' ELSE '; ' END, ?) WHERE id=?",
+    [note, first.id]
+  );
+  await audit({ id: currentUserId, name: currentUserName }, 'attendance_duplicate_device', 'attendance', first.id, `${first.name} & ${currentUserName} memakai perangkat sama (${date})`);
+  if (await isNotifyEnabled('absensi_duplikat_perangkat', 'teknisi')) {
+    const msg = `⚠️ *Perangkat Absensi Duplikat*\nPerangkat yang Anda pakai absen pada ${date} terdeteksi juga dipakai oleh ${currentUserName}.\nAbsensi Anda ditandai & performa bulan ini dikurangi 50%.`;
+    try { await queueWaNotification({ type: 'alert', toUserId: first.user_id, message: msg }); } catch { /* abaikan */ }
+  }
+  const adminMsg = `🚨 *Duplikasi Perangkat Absensi*\n${first.name} (absen pertama) dan ${currentUserName} memakai perangkat absensi yang sama pada ${date}.\n${first.name} ditandai & performa bulan ini dikurangi 50%.`;
+  await notifyAdmins(adminMsg);
 }
 
 router.get('/today', async (req, res) => {
@@ -89,6 +126,7 @@ router.post('/check-in', async (req, res) => {
   }
   await audit(req.user, 'attendance_checkin', 'attendance', null, vpn ? `flagged: ${reason}` : 'OK');
   if (vpn) await notifyCoords(`⚠️ *Absensi Mencurigakan*\n${req.user.name} absen masuk dengan anomali.\nAlasan: ${reason}\nPerforma bulan ini dikurangi 50%.`);
+  if (deviceId) await checkDuplicateDevice(req.user.id, req.user.name, deviceId, date);
   res.json({ ok: true, vpn, reason, distance: dist, deviceBound: dev.bound || false, warning: vpn ? `Absensi ditandai: ${reason}. Performa bulan ini dikurangi 50% & koordinator diberi tahu.` : null });
 });
 
