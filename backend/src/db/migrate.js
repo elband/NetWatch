@@ -29,6 +29,11 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'incident_notes', 'doc_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
   await addColumnIfMissing(conn, env.db.database, 'incidents', 'coord_alerted', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER awaiting_part');
   await addColumnIfMissing(conn, env.db.database, 'incidents', 'tech_reminded', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER coord_alerted');
+  // Auto-resolve insiden: jejak siapa/cara penutupan + validasi pemulihan (anti-flapping).
+  await addColumnIfMissing(conn, env.db.database, 'incidents', 'resolved_by', "VARCHAR(64) DEFAULT NULL AFTER duration_min");
+  await addColumnIfMissing(conn, env.db.database, 'incidents', 'resolution_type', "VARCHAR(16) DEFAULT NULL AFTER resolved_by");
+  await addColumnIfMissing(conn, env.db.database, 'incidents', 'recovered_at', 'DATETIME DEFAULT NULL AFTER resolution_type');
+  await addColumnIfMissing(conn, env.db.database, 'incidents', 'auto_recovery_since', 'DATETIME DEFAULT NULL AFTER recovered_at');
   await addColumnIfMissing(conn, env.db.database, 'equipment_inspections', 'photo_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
   await addColumnIfMissing(conn, env.db.database, 'equipment_inspections', 'photo_hash', 'CHAR(64) DEFAULT NULL AFTER photo_url');
   await addColumnIfMissing(conn, env.db.database, 'equipment_inspections', 'verified', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER photo_hash');

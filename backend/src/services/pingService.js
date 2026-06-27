@@ -1,8 +1,11 @@
 import { pool } from '../db/pool.js';
-import { snapshotAndNotifyOnDuty } from '../controllers/incidentController.js';
+import { snapshotAndNotifyOnDuty, notifyAutoResolved } from '../controllers/incidentController.js';
 import { computeServices } from './servicesStatus.js';
 import { probeDevice } from './monitorProbe.js';
 import { loadActiveMaintenance } from './maintenanceService.js';
+
+// Step final insiden (selaras dengan incidentController.FINAL_STEP).
+const FINAL_STEP = 2;
 
 function meterFromStatus(prevStatus, alive, avgMs, thresholds) {
   if (!alive) return { status: 'offline', pingMs: 0 };
@@ -13,7 +16,7 @@ function meterFromStatus(prevStatus, alive, avgMs, thresholds) {
 
 async function getThresholds() {
   const [rows] = await pool.query(
-    "SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('threshold_ping_timeout_ms','threshold_cpu','threshold_mem')"
+    "SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('threshold_ping_timeout_ms','threshold_cpu','threshold_mem','auto_resolve_stable_sec')"
   );
   const map = {};
   for (const r of rows) {
@@ -24,7 +27,43 @@ async function getThresholds() {
     pingTimeoutMs: map.threshold_ping_timeout_ms ?? 3000,
     cpu: map.threshold_cpu ?? 80,
     mem: map.threshold_mem ?? 85,
+    // Lama perangkat harus stabil ONLINE (detik) sebelum insiden auto-otomatis
+    // ditutup. Default 300 dtk (5 menit). 0 = tutup begitu online (lama).
+    autoResolveStableSec: map.auto_resolve_stable_sec ?? 300,
   };
+}
+
+// Tutup insiden otomatis (source='auto') setelah perangkat terbukti pulih & stabil.
+// Mencatat timeline, resolved_by=SYSTEM, resolution_type=AUTO, waktu pulih
+// (recovered_at), durasi downtime, lalu notifikasi koordinator & teknisi.
+async function autoResolveIncident(io, device, inc, stableSec) {
+  const conn = await pool.getConnection();
+  try {
+    // Downtime dihitung sampai WAKTU PULIH (auto_recovery_since), bukan saat ini,
+    // agar durasi mencerminkan lama perangkat benar-benar terputus.
+    const [r] = await conn.query(
+      `UPDATE incidents SET status='selesai', step=?, resolved_at=NOW(),
+         recovered_at=COALESCE(auto_recovery_since, NOW()),
+         resolved_by='SYSTEM', resolution_type='AUTO',
+         duration_min=GREATEST(1, TIMESTAMPDIFF(MINUTE, created_at, COALESCE(auto_recovery_since, NOW())))
+       WHERE id=? AND status<>'selesai'`,
+      [FINAL_STEP, inc.id]
+    );
+    if (!r.affectedRows) return; // sudah ditutup proses lain → hindari notif ganda
+    const [[fresh]] = await conn.query('SELECT * FROM incidents WHERE id=?', [inc.id]);
+    const dur = fresh?.duration_min || 0;
+    const stableMin = Math.round(stableSec / 60);
+    const recovTxt = fresh?.recovered_at ? new Date(fresh.recovered_at).toLocaleString('id-ID') : '-';
+    await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [
+      inc.id, FINAL_STEP,
+      `🤖 Auto-Resolved oleh SISTEM. Perangkat "${device.name}" kembali ONLINE & stabil ≥ ${stableMin} mnt tanpa flapping. Waktu pulih: ${recovTxt}. Total downtime: ${Math.floor(dur / 60)}j ${dur % 60}m.`,
+    ]);
+    await notifyAutoResolved(conn, fresh, { durationMin: dur, stableMin, recoveredAt: fresh?.recovered_at });
+    io?.emit('incident:update', { id: inc.id, device: device.name, status: 'selesai', resolution_type: 'AUTO' });
+    io?.emit('incident:resolved', { id: inc.id, device: device.name, auto: true });
+  } finally {
+    conn.release();
+  }
 }
 
 async function nextIncidentId(conn) {
@@ -118,30 +157,51 @@ export async function checkAllDevices(io) {
       }
     }
 
-    // Pemulihan otomatis: perangkat kembali ONLINE → tutup insiden yang dibuat
-    // OTOMATIS oleh sistem (source='auto') yang masih MENGGANTUNG DI POOL
-    // (tech_id IS NULL). Insiden yang sudah diambil teknisi, insiden manual, atau
-    // aduan publik TIDAK ikut ditutup — itu harus diselesaikan teknisi dengan
-    // dokumentasi. Mencegah insiden palsu (mis. false-offline) menumpuk.
-    if (finalStatus === 'online') {
-      try {
-        const [openAuto] = await pool.query(
-          "SELECT id FROM incidents WHERE device_id=? AND source='auto' AND status<>'selesai' AND tech_id IS NULL",
-          [device.id]
-        );
-        for (const inc of openAuto) {
-          await pool.query(
-            `UPDATE incidents SET status='selesai', step=2, resolved_at=NOW(),
-               duration_min=GREATEST(1, TIMESTAMPDIFF(MINUTE, created_at, NOW())) WHERE id=?`,
-            [inc.id]
-          );
-          await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 2, ?)', [
-            inc.id, 'Perangkat kembali online — insiden deteksi otomatis ditutup oleh sistem.',
-          ]);
-          io?.emit('incident:update', { id: inc.id, device: device.name, status: 'selesai' });
+    // === Auto-Resolve berbasis stabilitas (anti-flapping) ====================
+    // Insiden offline yang dibuat OTOMATIS (source='auto') hanya ditutup setelah
+    // perangkat terbukti ONLINE & STABIL selama `autoResolveStableSec`. Jendela
+    // validasi dilacak di kolom auto_recovery_since:
+    //   • Online pertama kali sejak insiden → set auto_recovery_since = sekarang.
+    //   • Tetap online sampai ambang batas terlampaui → AUTO-RESOLVE.
+    //   • Tidak online (offline/warning) saat validasi → reset (batalkan), tiket
+    //     tetap aktif. Ini mencegah perangkat yang flapping ditutup prematur.
+    // Insiden manual / aduan publik tidak tersentuh (bukan source='auto').
+    try {
+      const [autoIncs] = await pool.query(
+        "SELECT id, auto_recovery_since FROM incidents WHERE device_id=? AND source='auto' AND status<>'selesai'",
+        [device.id]
+      );
+      if (autoIncs.length) {
+        if (finalStatus !== 'online') {
+          // Batalkan validasi yang sedang berjalan (perangkat tidak stabil/flapping).
+          const active = autoIncs.filter((i) => i.auto_recovery_since);
+          if (active.length) {
+            await pool.query(
+              "UPDATE incidents SET auto_recovery_since=NULL WHERE device_id=? AND source='auto' AND status<>'selesai'",
+              [device.id]
+            );
+            for (const i of active) {
+              await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
+                i.id, `Auto-resolve dibatalkan: perangkat kembali tidak stabil (${finalStatus}) saat masa validasi. Tiket tetap aktif.`,
+              ]);
+              io?.emit('incident:update', { id: i.id, device: device.name });
+            }
+          }
+        } else {
+          const stableSec = thresholds.autoResolveStableSec;
+          for (const inc of autoIncs) {
+            if (!inc.auto_recovery_since) {
+              // Mulai jendela validasi pemulihan.
+              await pool.query('UPDATE incidents SET auto_recovery_since=NOW() WHERE id=? AND auto_recovery_since IS NULL', [inc.id]);
+              io?.emit('incident:update', { id: inc.id, device: device.name });
+              continue;
+            }
+            const elapsedSec = (Date.now() - new Date(inc.auto_recovery_since).getTime()) / 1000;
+            if (elapsedSec >= stableSec) await autoResolveIncident(io, device, inc, stableSec);
+          }
         }
-      } catch { /* jangan ganggu sweep bila gagal menutup insiden */ }
-    }
+      }
+    } catch { /* jangan ganggu sweep bila proses auto-resolve gagal */ }
   }
 
   // Bulk insert riwayat metrik (satu query untuk seluruh perangkat).

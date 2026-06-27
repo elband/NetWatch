@@ -52,6 +52,34 @@ async function notifyCoordinatorsDone(conn, incident, duration) {
   await notifyRoles(['koordinator', 'admin'], { type: 'ticket_done', title: `Insiden selesai: ${incident.device_name}`, message: `${incident.id} ditangani dalam ${duration} menit`, refId: incident.id, refType: 'incident', link: `/incidents?focus=${incident.id}` });
 }
 
+// Notifikasi saat insiden ditutup OTOMATIS oleh sistem (perangkat pulih & stabil).
+// Mengingatkan koordinator/admin & memberi tahu teknisi yang menangani tiket
+// (beserta kolaborator), agar semua tahu tiket ditutup tanpa intervensi manual.
+export async function notifyAutoResolved(conn, incident, info = {}) {
+  const { durationMin = 0, stableMin, recoveredAt } = info;
+  const durTxt = `${Math.floor(durationMin / 60)}j ${durationMin % 60}m`;
+  const recovTxt = recoveredAt ? new Date(recoveredAt).toLocaleString('id-ID') : '-';
+  const msg = `🤖✅ AUTO-RESOLVED (oleh SISTEM)\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nPerangkat kembali ONLINE & stabil${stableMin ? ` ≥ ${stableMin} mnt` : ''} tanpa flapping.\nWaktu pulih: ${recovTxt}\nTotal downtime: ${durTxt}`;
+
+  // Koordinator (pengingat) + lonceng in-app koordinator & admin.
+  await notifyCoordinators(conn, incident, msg, 'done');
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_auto_resolved', title: `Auto-resolved: ${incident.device_name}`, message: `${incident.id} ditutup otomatis oleh sistem (downtime ${durTxt})`, refId: incident.id, refType: 'incident', link: `/incidents?focus=${incident.id}` });
+
+  // Teknisi penanggung jawab + kolaborator (bila tiket sudah diambil/dibagikan).
+  const techIds = new Set();
+  if (incident.tech_id) techIds.add(incident.tech_id);
+  try {
+    const [collab] = await conn.query('SELECT user_id FROM incident_collaborators WHERE incident_id = ?', [incident.id]);
+    for (const c of collab) techIds.add(c.user_id);
+  } catch { /* tabel kolaborator opsional */ }
+  for (const uid of techIds) {
+    if (await isNotifyEnabledForUser('insiden_teknisi', uid)) {
+      await queueWaNotification({ type: 'done', toUserId: uid, message: `${msg}\n\nTiket ditutup otomatis oleh sistem. Mohon verifikasi bila masih ada pekerjaan tersisa.`, relatedIncidentId: incident.id });
+    }
+    await createNotification({ userId: uid, type: 'ticket_auto_resolved', title: `Tiket auto-resolved: ${incident.device_name}`, message: `${incident.id} ditutup otomatis — perangkat pulih & stabil.`, refId: incident.id, refType: 'incident', link: '/my-incidents' });
+  }
+}
+
 // Snapshot teknisi on-duty saat insiden masuk + kirim notifikasi ke mereka.
 // Mengembalikan jumlah teknisi yang diberi notifikasi.
 export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue }) {
@@ -390,8 +418,9 @@ export async function advanceStep(req, res) {
       // Selesai diperbaiki / teratasi: tutup insiden + WA koordinator.
       await conn.query(
         `UPDATE incidents SET step = ?, status = 'selesai', awaiting_part = 0, resolved_at = NOW(),
+           resolution_type = 'MANUAL', resolved_by = ?,
            duration_min = GREATEST(1, TIMESTAMPDIFF(MINUTE, created_at, NOW())) WHERE id = ?`,
-        [FINAL_STEP, id]
+        [FINAL_STEP, req.user.name, id]
       );
       const [durRows] = await conn.query('SELECT duration_min FROM incidents WHERE id = ?', [id]);
       const duration = durRows[0]?.duration_min || 0;
@@ -648,16 +677,17 @@ export async function resolveIncident(req, res) {
 
   // Durasi = lama perangkat terputus (created_at → sekarang), dihitung otomatis.
   // Bisa dioverride lewat durationMin bila perlu koreksi manual.
+  const resolverName = req.user?.name || 'MANUAL';
   if (durationMin) {
     await pool.query(
-      `UPDATE incidents SET status='selesai', step=?, resolved_at=NOW(), duration_min=? WHERE id=?`,
-      [finalStep, durationMin, id]
+      `UPDATE incidents SET status='selesai', step=?, resolved_at=NOW(), resolution_type='MANUAL', resolved_by=?, duration_min=? WHERE id=?`,
+      [finalStep, resolverName, durationMin, id]
     );
   } else {
     await pool.query(
-      `UPDATE incidents SET status='selesai', step=?, resolved_at=NOW(),
+      `UPDATE incidents SET status='selesai', step=?, resolved_at=NOW(), resolution_type='MANUAL', resolved_by=?,
          duration_min=GREATEST(1, TIMESTAMPDIFF(MINUTE, created_at, NOW())) WHERE id=?`,
-      [finalStep, id]
+      [finalStep, resolverName, id]
     );
   }
   const [durRows] = await pool.query('SELECT duration_min FROM incidents WHERE id = ?', [id]);

@@ -17,7 +17,7 @@ const LKP_DEFAULT: LkpForm = {
 };
 
 export default function Settings() {
-  const [form, setForm] = useState({ wa_provider: 'wabarier', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000 });
+  const [form, setForm] = useState({ wa_provider: 'wabarier', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000, auto_resolve_stable_sec: 300 });
   const [lkp, setLkp] = useState<LkpForm>(LKP_DEFAULT);
   const [saved, setSaved] = useState(false);
   const [tz, setTz] = useState('Asia/Makassar');
@@ -127,6 +127,11 @@ export default function Settings() {
             <div>
               <label className="text-[11px] text-text2 block mb-1">Ping Timeout (ms)</label>
               <input type="number" className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.threshold_ping_timeout_ms} onChange={(e) => setForm({ ...form, threshold_ping_timeout_ms: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label className="text-[11px] text-text2 block mb-1">Auto-Resolve Insiden — stabil ONLINE (detik)</label>
+              <input type="number" min={0} className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.auto_resolve_stable_sec} onChange={(e) => setForm({ ...form, auto_resolve_stable_sec: Number(e.target.value) })} />
+              <div className="text-[10px] text-text2 mt-1">Lama perangkat harus stabil ONLINE (tanpa flapping) sebelum insiden otomatis ditutup. Mis. 300 = 5 menit. 0 = tutup begitu online.</div>
             </div>
             <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold" onClick={save}>💾 Simpan</button>
           </div>
