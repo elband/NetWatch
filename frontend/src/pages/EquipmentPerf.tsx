@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import MaintenancePhotosModal from '../components/MaintenancePhotosModal';
+import MaintenanceWindows from './MaintenanceWindows';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device } from '../types';
 
@@ -27,10 +28,17 @@ export default function EquipmentPerf() {
         <div className="text-[17px] font-bold">🛠️ Performa Peralatan</div>
         <div className="flex gap-1 bg-surface2 border border-border rounded-lg p-1">
           <button className={`px-3 py-1.5 text-xs rounded-md ${tab === 'inspeksi' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`} onClick={() => setTab('inspeksi')}>Inspeksi Harian</button>
-          <button className={`px-3 py-1.5 text-xs rounded-md ${tab === 'maintenance' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`} onClick={() => setTab('maintenance')}>Maintenance Bulanan</button>
+          <button className={`px-3 py-1.5 text-xs rounded-md ${tab === 'maintenance' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`} onClick={() => setTab('maintenance')}>Maintenance</button>
         </div>
       </div>
-      {tab === 'inspeksi' ? <InspeksiTab /> : <MaintenanceTab isManager={isManager} />}
+      {tab === 'inspeksi' && <InspeksiTab />}
+      {tab === 'maintenance' && (
+        <div className="space-y-6">
+          {/* Maintenance Bulanan + Jendela Maintenance digabung jadi satu halaman utuh (tanpa sekat). */}
+          <MaintenanceTab isManager={isManager} />
+          <MaintenanceWindows embedded />
+        </div>
+      )}
     </div>
   );
 }

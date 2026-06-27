@@ -16,7 +16,6 @@ import Devices from './pages/Devices';
 import Monitor from './pages/Monitor';
 import DeviceMap from './pages/DeviceMap';
 import SlaReport from './pages/SlaReport';
-import MaintenanceWindows from './pages/MaintenanceWindows';
 import Incidents from './pages/Incidents';
 import MyIncidents from './pages/MyIncidents';
 import Reports from './pages/Reports';
@@ -88,7 +87,8 @@ export default function App() {
           {/* Manajer: admin & koordinator */}
           <Route element={<ProtectedRoute roles={['admin', 'koordinator']} />}>
             <Route path="/incidents" element={<Incidents />} />
-            <Route path="/maintenance" element={<MaintenanceWindows />} />
+            {/* Jendela Maintenance kini menjadi tab di halaman Performa Peralatan. */}
+            <Route path="/maintenance" element={<Navigate to="/equipment" replace />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/performa" element={<Performa />} />
             <Route path="/wa" element={<WaLog />} />

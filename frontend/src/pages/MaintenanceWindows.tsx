@@ -15,7 +15,7 @@ function fmt(dt: string) {
 
 const emptyForm = { scope: 'device' as 'device' | 'location' | 'site', device_id: '', location_id: '', title: '', reason: '', starts_at: '', ends_at: '' };
 
-export default function MaintenanceWindows() {
+export default function MaintenanceWindows({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const canEdit = hasRole(user, 'admin', 'koordinator');
   const [windows, setWindows] = useState<MaintenanceWindow[]>([]);
@@ -93,8 +93,12 @@ export default function MaintenanceWindows() {
     <div>
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <div className="text-[17px] font-bold">🔧 Jendela Maintenance</div>
-          <div className="text-[11px] text-text2 mt-0.5">Downtime terencana — tidak memicu insiden/alarm & tidak menurunkan SLA</div>
+          {embedded
+            ? <div className="text-[11px] text-text2">🔧 Jendela Maintenance — downtime terencana yang tidak memicu insiden/alarm & tidak menurunkan SLA</div>
+            : <>
+                <div className="text-[17px] font-bold">🔧 Jendela Maintenance</div>
+                <div className="text-[11px] text-text2 mt-0.5">Downtime terencana — tidak memicu insiden/alarm & tidak menurunkan SLA</div>
+              </>}
         </div>
         <div className="flex items-center gap-2">
           <select className="dev-inp" value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
