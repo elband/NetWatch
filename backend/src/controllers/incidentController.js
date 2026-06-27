@@ -5,6 +5,7 @@ import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
 import { getOnDutyTechIds, getDutyStatus } from '../config/shifts.js';
 import { remindOnDutyTechs } from '../services/coordWatcher.js';
+import { isNotifyEnabled } from '../services/notifyPrefs.js';
 
 // Alur tindakan insiden berbasis pilihan/cabang (solusi perbaikan peralatan):
 // - Mulai: "Coba SSH" (bila ber-IP) atau "Langsung Kunjungan".
@@ -33,6 +34,7 @@ const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
 // Kirim WA ke koordinator (pakai coord_id bila ada, jika tidak broadcast ke
 // semua koordinator aktif).
 async function notifyCoordinators(conn, incident, message, type = 'alert') {
+  if (!(await isNotifyEnabled('insiden_koordinator', 'koordinator'))) return;
   let targetIds = [];
   if (incident.coord_id) {
     targetIds = [incident.coord_id];
@@ -58,13 +60,16 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
     await conn.query('INSERT IGNORE INTO incident_duty (incident_id, user_id) VALUES (?, ?)', [id, uid]);
   }
   const prio = priority === 'kritis' ? 'kritis' : 'warning';
+  const waOn = await isNotifyEnabled('insiden_teknisi', 'teknisi');
   for (const uid of onDutyIds) {
-    await queueWaNotification({
-      type: 'alert',
-      toUserId: uid,
-      message: `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nSegera AMBIL: ${takeLink(id)}`,
-      relatedIncidentId: id,
-    });
+    if (waOn) {
+      await queueWaNotification({
+        type: 'alert',
+        toUserId: uid,
+        message: `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nSegera AMBIL: ${takeLink(id)}`,
+        relatedIncidentId: id,
+      });
+    }
     await createNotification({ userId: uid, type: 'ticket_assigned', priority: prio, title: `Tiket baru: ${deviceName}`, message: issue, refId: id, refType: 'incident', link: '/my-incidents' });
   }
   // Koordinator & admin: tiket helpdesk baru masuk.
@@ -176,12 +181,13 @@ export async function inviteCollaborators(req, res) {
   if (!techIds.length) return res.status(400).json({ error: 'Pilih minimal satu teknisi.' });
 
   const invited = [];
+  const waOn = await isNotifyEnabled('insiden_teknisi', 'teknisi');
   for (const uid of techIds) {
     if (uid === incident.tech_id) continue;
     const [r] = await pool.query('INSERT IGNORE INTO incident_collaborators (incident_id, user_id, invited_by) VALUES (?, ?, ?)', [id, uid, req.user.id]);
     if (!r.affectedRows) continue;
     invited.push(uid);
-    await queueWaNotification({ type: 'other', toUserId: uid, relatedIncidentId: id, message: `👥 DIAJAK KERJAKAN BERSAMA\n${id} | ${incident.device_name}\nMasalah: ${incident.issue}\nAnda diajak oleh ${req.user.name} untuk membantu menangani insiden ini. Lihat di aplikasi NetWatch.` });
+    if (waOn) await queueWaNotification({ type: 'other', toUserId: uid, relatedIncidentId: id, message: `👥 DIAJAK KERJAKAN BERSAMA\n${id} | ${incident.device_name}\nMasalah: ${incident.issue}\nAnda diajak oleh ${req.user.name} untuk membantu menangani insiden ini. Lihat di aplikasi NetWatch.` });
     await createNotification({ userId: uid, type: 'ticket_collab', priority: incident.priority === 'kritis' ? 'kritis' : 'info', title: `Diajak kerjakan bersama: ${incident.device_name}`, message: `${id} — diajak oleh ${req.user.name}. ${incident.issue}`, refId: id, refType: 'incident', link: '/my-dashboard' });
   }
   if (invited.length) {
@@ -277,7 +283,7 @@ export async function remindIncident(req, res) {
     if (!tech) return res.status(400).json({ error: 'Teknisi tidak ditemukan / bukan teknisi aktif.' });
     const mins = Math.max(1, Math.floor((Date.now() - new Date(incident.created_at).getTime()) / 60000));
     const prio = incident.priority === 'kritis' ? 'kritis' : 'warning';
-    await queueWaNotification({
+    if (await isNotifyEnabled('insiden_teknisi', 'teknisi')) await queueWaNotification({
       type: 'alert',
       toUserId: techId,
       message: `📋 PERINTAH PENANGANAN (${(incident.priority || 'sedang').toUpperCase()})\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nSudah ${mins} menit belum diambil.${note ? `\nCatatan: ${note}` : ''}\nDitugaskan oleh ${req.user.name} — mohon segera AMBIL: ${takeLink(incident.id)}`,

@@ -3,6 +3,7 @@ import { env } from '../config/env.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification } from './notify.js';
 import { COORD_SLA_MINUTES, REMIND_MINUTES, getOnDutyTechIds } from '../config/shifts.js';
+import { isNotifyEnabled } from './notifyPrefs.js';
 
 const takeLink = (id) => `${env.appUrl}/my-incidents?focus=${id}&action=take`;
 const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
@@ -21,13 +22,16 @@ export async function remindOnDutyTechs(inc, { manual = false, by = null } = {})
     fallback = true;
   }
   const mins = Math.max(1, Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000));
+  const waOn = await isNotifyEnabled('insiden_teknisi', 'teknisi');
   for (const uid of targetIds) {
-    await queueWaNotification({
-      type: 'alert',
-      toUserId: uid,
-      message: `🔔 PENGINGAT — SEGERA AMBIL INSIDEN (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit belum diambil. Mohon segera AMBIL: ${takeLink(inc.id)}`,
-      relatedIncidentId: inc.id,
-    });
+    if (waOn) {
+      await queueWaNotification({
+        type: 'alert',
+        toUserId: uid,
+        message: `🔔 PENGINGAT — SEGERA AMBIL INSIDEN (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit belum diambil. Mohon segera AMBIL: ${takeLink(inc.id)}`,
+        relatedIncidentId: inc.id,
+      });
+    }
     await createNotification({ userId: uid, type: 'ticket_sla', priority: 'warning', title: `Reminder SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit — segera tangani.`, refId: inc.id, refType: 'incident', link: '/my-incidents' });
   }
   await pool.query('UPDATE incidents SET tech_reminded = 1 WHERE id = ?', [inc.id]);
@@ -66,6 +70,7 @@ export async function checkUnclaimedIncidents(io) {
   if (toEscalate.length === 0) return;
 
   const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+  const coordWaOn = await isNotifyEnabled('insiden_koordinator', 'koordinator');
   for (const inc of toEscalate) {
     await pool.query('UPDATE incidents SET coord_alerted = 1 WHERE id = ?', [inc.id]);
     const mins = Math.max(COORD_SLA_MINUTES, Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000));
@@ -74,12 +79,14 @@ export async function checkUnclaimedIncidents(io) {
       `⚠️ Insiden belum diambil teknisi >${COORD_SLA_MINUTES} menit — eskalasi ke koordinator.`,
     ]);
     for (const c of coords) {
-      await queueWaNotification({
-        type: 'alert',
-        toUserId: c.id,
-        message: `⏰ INSIDEN BELUM DIAMBIL (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit tanpa teknisi. Ingatkan teknisi: ${remindLink(inc.id)}`,
-        relatedIncidentId: inc.id,
-      });
+      if (coordWaOn) {
+        await queueWaNotification({
+          type: 'alert',
+          toUserId: c.id,
+          message: `⏰ INSIDEN BELUM DIAMBIL (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit tanpa teknisi. Ingatkan teknisi: ${remindLink(inc.id)}`,
+          relatedIncidentId: inc.id,
+        });
+      }
       await createNotification({ userId: c.id, type: 'ticket_sla', priority: 'kritis', title: `Tiket melewati SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit (>${COORD_SLA_MINUTES} mnt). Perlu koordinasi.`, refId: inc.id, refType: 'incident', link: `/incidents?focus=${inc.id}` });
     }
     io?.emit('incident:escalated', { id: inc.id, device: inc.device_name });

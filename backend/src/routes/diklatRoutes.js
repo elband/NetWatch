@@ -10,6 +10,7 @@ import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
 import { escapeLike } from '../utils/sql.js';
 import { audit } from '../services/audit.js';
+import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -55,6 +56,7 @@ async function logHistory(diklatId, user, status, note) {
   await pool.query('INSERT INTO diklat_history (diklat_id, user_id, user_name, status, note) VALUES (?,?,?,?,?)', [diklatId, user?.id || null, user?.name || null, status, note || null]);
 }
 async function notifyCoords(message) {
+  if (!(await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator'))) return;
   const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
   for (const x of c) { try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ } }
 }
@@ -177,7 +179,7 @@ router.patch('/:id/status', async (req, res) => {
     await notifyRoles(['koordinator', 'admin'], { type: 'diklat_new', title: `Pengajuan diklat baru: ${d.nama_diklat}`, message: `${d.pegawai_nama} · ${d.nomor_pengajuan} — mohon ditinjau.`, refId: id, refType: 'diklat', link: `/diklat?focus=${id}` });
   }
   if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) {
-    try { await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Pengajuan diklat "${d.nama_diklat}" (${d.nomor_pengajuan}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ }
+    try { if (await isNotifyEnabledForUser('pengajuan_keputusan', d.created_by)) await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Pengajuan diklat "${d.nama_diklat}" (${d.nomor_pengajuan}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ }
     await createNotification({ userId: d.created_by, type: next === 'ditolak' ? 'diklat_rejected' : 'diklat_approved', title: `Diklat ${next}: ${d.nama_diklat}`, message: `${d.nomor_pengajuan}${note ? ` — ${note}` : ''}`, refId: id, refType: 'diklat', link: `/diklat?focus=${id}` });
   }
   const [u] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);

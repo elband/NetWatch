@@ -8,6 +8,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { notifyRoles } from '../services/notify.js';
 import { audit } from '../services/audit.js';
+import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -48,6 +49,7 @@ async function logApproval(id, user, status, note, poin) {
   await pool.query('INSERT INTO kegiatan_non_rutin_approval (kegiatan_id, user_id, user_name, status, note, poin) VALUES (?,?,?,?,?,?)', [id, user?.id || null, user?.name || null, status, note || null, poin ?? null]);
 }
 async function notifyCoords(message) {
+  if (!(await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator'))) return;
   const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
   for (const x of c) { try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ } }
 }
@@ -209,7 +211,7 @@ router.patch('/:id/status', async (req, res) => {
     await notifyCoords(`📝 *Kegiatan Non-Rutin Baru*\n${d.petugas_nama}: ${d.judul}\nNo. ${d.nomor}\nMohon ditinjau.`);
     await notifyRoles(['koordinator', 'admin'], { type: 'knr_new', title: `Kegiatan non-rutin baru: ${d.judul}`, message: `${d.petugas_nama} · ${d.nomor} — mohon ditinjau.`, refId: id, refType: 'kegiatan', link: `/kegiatan-nr?focus=${id}` });
   }
-  if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) { try { await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Kegiatan "${d.judul}" (${d.nomor}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ } }
+  if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) { try { if (await isNotifyEnabledForUser('pengajuan_keputusan', d.created_by)) await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Kegiatan "${d.judul}" (${d.nomor}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ } }
   const [u] = await pool.query('SELECT * FROM kegiatan_non_rutin WHERE id=?', [id]);
   res.json({ kegiatan: (await withDetail(u))[0] });
 });

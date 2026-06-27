@@ -7,6 +7,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
+import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -34,8 +35,10 @@ router.post('/', upload.single('doc'), async (req, res) => {
   );
   await audit(req.user, 'leave_request', 'leave', r.insertId, `${type} ${startDate}..${endDate}`);
   // Beri tahu koordinator.
-  const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
-  for (const c of coords) { try { await queueWaNotification({ type: 'other', toUserId: c.id, message: `📝 *Pengajuan ${type}*\n${req.user.name}: ${startDate} s/d ${endDate}\nAlasan: ${reason || '-'}\nMohon ditinjau di sistem.` }); } catch { /* abaikan */ } }
+  if (await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator')) {
+    const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+    for (const c of coords) { try { await queueWaNotification({ type: 'other', toUserId: c.id, message: `📝 *Pengajuan ${type}*\n${req.user.name}: ${startDate} s/d ${endDate}\nAlasan: ${reason || '-'}\nMohon ditinjau di sistem.` }); } catch { /* abaikan */ } }
+  }
   res.status(201).json({ id: r.insertId, doc_url: docUrl });
 });
 
@@ -77,7 +80,7 @@ router.patch('/:id', requireRole('admin', 'koordinator'), async (req, res) => {
     }
   }
   await audit(req.user, status === 'disetujui' ? 'leave_approve' : 'leave_reject', 'leave', req.params.id, `${lv.name} ${lv.type} ${String(lv.start_date).slice(0, 10)}..${String(lv.end_date).slice(0, 10)}`);
-  try { await queueWaNotification({ type: 'other', toUserId: lv.user_id, message: `Pengajuan ${lv.type} Anda (${String(lv.start_date).slice(0, 10)} s/d ${String(lv.end_date).slice(0, 10)}) *${status}*${req.body.note ? `\nCatatan: ${req.body.note}` : ''}.` }); } catch { /* abaikan */ }
+  try { if (await isNotifyEnabledForUser('pengajuan_keputusan', lv.user_id)) await queueWaNotification({ type: 'other', toUserId: lv.user_id, message: `Pengajuan ${lv.type} Anda (${String(lv.start_date).slice(0, 10)} s/d ${String(lv.end_date).slice(0, 10)}) *${status}*${req.body.note ? `\nCatatan: ${req.body.note}` : ''}.` }); } catch { /* abaikan */ }
   res.json({ ok: true });
 });
 

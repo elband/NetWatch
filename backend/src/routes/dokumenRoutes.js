@@ -7,6 +7,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
+import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -27,6 +28,7 @@ async function syncTags(id, tags) {
   for (const t of tags) await pool.query('INSERT INTO document_tags (document_id, tag) VALUES (?,?)', [id, t.slice(0, 60)]);
 }
 async function notifyCoords(message) {
+  if (!(await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator'))) return;
   const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
   for (const x of c) { try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ } }
 }
@@ -185,7 +187,7 @@ router.patch('/:id/status', requireRole('admin', 'koordinator'), async (req, res
   await pool.query(`UPDATE documents SET status=?${ap} WHERE id=?`, params);
   await audit(req.user, `doc_${next}`, 'document', id, rows[0].judul);
   if (rows[0].created_by && ['disetujui', 'aktif'].includes(next)) {
-    try { await queueWaNotification({ type: 'other', toUserId: rows[0].created_by, message: `Dokumen "${rows[0].judul}" berstatus *${next}*.` }); } catch { /* abaikan */ }
+    try { if (await isNotifyEnabledForUser('pengajuan_keputusan', rows[0].created_by)) await queueWaNotification({ type: 'other', toUserId: rows[0].created_by, message: `Dokumen "${rows[0].judul}" berstatus *${next}*.` }); } catch { /* abaikan */ }
   }
   const [u] = await pool.query('SELECT * FROM documents WHERE id=?', [id]);
   res.json({ document: u[0] });
