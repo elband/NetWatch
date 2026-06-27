@@ -14,6 +14,9 @@ import MyDashboard from './pages/MyDashboard';
 import CoordDashboard from './pages/CoordDashboard';
 import Devices from './pages/Devices';
 import Monitor from './pages/Monitor';
+import DeviceMap from './pages/DeviceMap';
+import SlaReport from './pages/SlaReport';
+import MaintenanceWindows from './pages/MaintenanceWindows';
 import Incidents from './pages/Incidents';
 import MyIncidents from './pages/MyIncidents';
 import Reports from './pages/Reports';
@@ -67,6 +70,8 @@ export default function App() {
           <Route path="/coord-dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route path="/devices" element={<Devices />} />
           <Route path="/monitor" element={<Monitor />} />
+          <Route path="/peta" element={<DeviceMap />} />
+          <Route path="/sla" element={<SlaReport />} />
           <Route path="/my-incidents" element={<MyIncidents />} />
           <Route path="/jadwal" element={<Jadwal />} />
           <Route path="/equipment" element={<EquipmentPerf />} />
@@ -83,6 +88,7 @@ export default function App() {
           {/* Manajer: admin & koordinator */}
           <Route element={<ProtectedRoute roles={['admin', 'koordinator']} />}>
             <Route path="/incidents" element={<Incidents />} />
+            <Route path="/maintenance" element={<MaintenanceWindows />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/performa" element={<Performa />} />
             <Route path="/wa" element={<WaLog />} />

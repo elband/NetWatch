@@ -54,6 +54,55 @@ export interface Device {
   ssh_username: string | null;
   lat: number | null;
   lng: number | null;
+  check_type?: 'ping' | 'tcp' | 'http';
+  check_port?: number | null;
+  check_url?: string | null;
+  snmp_enabled?: number;
+  snmp_community?: string | null;
+  snmp_port?: number;
+  under_maintenance?: number;
+}
+
+export interface DeviceMetricPoint {
+  t: string;
+  avg_ping: number | null;
+  max_ping: number | null;
+  avg_cpu: number | null;
+  avg_mem: number | null;
+  up_pct: number | null;
+  maint: number;
+}
+
+export interface SlaDevice {
+  id: number;
+  name: string;
+  ip: string;
+  loc: string | null;
+  type: string;
+  status: DeviceStatus;
+  uptime_pct: number | null;
+  avg_ping: number | null;
+  max_ping: number | null;
+  down_seconds: number;
+  samples: number;
+  incidents: number;
+  mttr_sec: number | null;
+}
+
+export interface MaintenanceWindow {
+  id: number;
+  device_id: number | null;
+  location_id: number | null;
+  title: string;
+  reason: string | null;
+  starts_at: string;
+  ends_at: string;
+  created_by: number | null;
+  created_at: string;
+  device_name?: string | null;
+  location_name?: string | null;
+  created_by_name?: string | null;
+  is_active?: number;
 }
 
 export type IncidentPriority = 'kritis' | 'tinggi' | 'sedang';

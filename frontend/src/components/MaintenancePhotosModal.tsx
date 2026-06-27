@@ -162,7 +162,7 @@ export default function MaintenancePhotosModal({ item, onClose, onCompleted }: {
       {lightbox && (
         <div className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-6" onClick={(e) => { e.stopPropagation(); setLightbox(null); }}>
           <img src={lightbox} alt="Dokumentasi" className="max-w-full max-h-full rounded-lg object-contain" />
-          <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-5 text-text text-3xl leading-none">×</button>
+          <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-5 text-white text-3xl leading-none">×</button>
         </div>
       )}
     </div>

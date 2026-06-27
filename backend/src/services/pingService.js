@@ -1,7 +1,8 @@
-import ping from 'ping';
 import { pool } from '../db/pool.js';
 import { snapshotAndNotifyOnDuty } from '../controllers/incidentController.js';
 import { computeServices } from './servicesStatus.js';
+import { probeDevice } from './monitorProbe.js';
+import { loadActiveMaintenance } from './maintenanceService.js';
 
 function meterFromStatus(prevStatus, alive, avgMs, thresholds) {
   if (!alive) return { status: 'offline', pingMs: 0 };
@@ -33,7 +34,11 @@ async function nextIncidentId(conn) {
 
 export async function checkAllDevices(io) {
   const thresholds = await getThresholds();
+  const maint = await loadActiveMaintenance();
   const [devices] = await pool.query('SELECT * FROM devices');
+
+  // Kumpulan baris metrik time-series untuk satu sweep → satu bulk insert di akhir.
+  const metricRows = [];
 
   for (const device of devices) {
     // Perangkat tanpa IP (ip diawali "N/A") tidak bisa di-ping dan tidak boleh
@@ -43,20 +48,18 @@ export async function checkAllDevices(io) {
     // Mode standby (monitor_enabled=0): perangkat sengaja dijeda dari monitoring otomatis.
     if (!device.monitor_enabled) continue;
 
-    let alive = false;
-    let avgMs = 0;
-    try {
-      const result = await ping.promise.probe(device.ip, { timeout: 2 });
-      alive = result.alive;
-      avgMs = parseFloat(result.time) || 0;
-    } catch {
-      alive = false;
-    }
+    // Probe sesuai check_type (ping/tcp/http) + pengayaan SNMP bila aktif.
+    const probe = await probeDevice(device);
+    const alive = probe.alive;
+    const avgMs = probe.avgMs;
 
     const { status, pingMs } = meterFromStatus(device.status, alive, avgMs, thresholds);
-    const cpu = alive ? Math.max(10, Math.min(99, (device.cpu || 30) + Math.round(Math.random() * 10 - 5))) : 0;
-    const mem = alive ? Math.max(10, Math.min(99, (device.mem || 40) + Math.round(Math.random() * 6 - 3))) : 0;
+    // CPU/mem riil dari SNMP bila tersedia; jika tidak, pertahankan nilai terakhir
+    // (bukan acak) agar tidak menimbulkan warning palsu. 0 saat perangkat mati.
+    const cpu = alive ? (probe.cpu ?? device.cpu ?? 0) : 0;
+    const mem = alive ? (probe.mem ?? device.mem ?? 0) : 0;
     const finalStatus = alive && (cpu > thresholds.cpu || mem > thresholds.mem) ? 'warning' : status;
+    const underMaint = maint.isUnder(device);
 
     // Aturan jam malam: perangkat NON-SERVER yang offline pada 20:00–06:00 dianggap
     // "dimatikan" (bukan alarm). Jika masih offline ≥06:00 → alarm/insiden seperti biasa.
@@ -66,12 +69,18 @@ export async function checkAllDevices(io) {
     // Override manual ("Alarmkan") membatalkan kategori dimatikan. Reset saat perangkat online lagi.
     const override = alive ? 0 : device.alarm_override;
     const dimatikanWindow = !isServer && (hour >= 20 || hour < 6) && !override;
-    const offReason = finalStatus === 'offline' && dimatikanWindow ? 'dimatikan' : null;
+    let offReason = finalStatus === 'offline' && dimatikanWindow ? 'dimatikan' : null;
+    // Jendela maintenance terjadwal menang atas alarm: tandai "maintenance" agar
+    // tidak memicu insiden (guard `!offReason` di bawah) & tampil jelas di UI.
+    if (underMaint && finalStatus !== 'online') offReason = 'maintenance';
 
     await pool.query(
       'UPDATE devices SET status=?, off_reason=?, alarm_override=?, ping_ms=?, cpu=?, mem=?, last_checked_at=NOW() WHERE id=?',
       [finalStatus, offReason, override, pingMs, cpu, mem, device.id]
     );
+
+    // Rekam metrik time-series (bulk insert setelah loop).
+    metricRows.push([device.id, finalStatus, pingMs, probe.cpu, probe.mem, underMaint ? 1 : 0]);
 
     const updated = { ...device, status: finalStatus, off_reason: offReason, alarm_override: override, ping_ms: pingMs, cpu, mem };
     io?.emit('device:update', updated);
@@ -108,6 +117,16 @@ export async function checkAllDevices(io) {
         conn.release();
       }
     }
+  }
+
+  // Bulk insert riwayat metrik (satu query untuk seluruh perangkat).
+  if (metricRows.length) {
+    try {
+      await pool.query(
+        'INSERT INTO device_metrics (device_id, status, ping_ms, cpu, mem, in_maint) VALUES ?',
+        [metricRows]
+      );
+    } catch { /* jangan ganggu sweep bila tabel metrik bermasalah */ }
   }
 
   // Setelah semua perangkat diperbarui, kirim status layanan kritis terbaru

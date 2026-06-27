@@ -11,6 +11,7 @@ import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
 import { purgeOldWaLogs } from './jobs/waQueue.js';
 import { scheduleMaintenanceReminder, startMaintenanceReminderWorker } from './jobs/maintenanceReminderQueue.js';
+import { scheduleMetricsMaintenance, startMetricsWorker, runMetricsMaintenance } from './jobs/metricsQueue.js';
 import { initTimezoneFromSettings } from './services/timezone.js';
 import { loadShiftWindows } from './config/shifts.js';
 import { pool } from './db/pool.js';
@@ -55,10 +56,14 @@ if (isPrimary) {
   startPingWorker(io);
   startWaWorker(io);
   startMaintenanceReminderWorker();
+  startMetricsWorker();
   startCoordWatcher(io);
   await schedulePingSweep();
   // Pengingat WA harian (08:00) ke teknisi dinas ttg maintenance peralatan terjadwal.
   await scheduleMaintenanceReminder();
+  // Rollup uptime harian + retensi metrik mentah (00:10) + sekali saat start.
+  await scheduleMetricsMaintenance();
+  runMetricsMaintenance().then((r) => logger.info(r, '[metrics] maintenance awal')).catch(() => {});
   // Retensi log WA (PDP): bersihkan saat start + harian.
   purgeOldWaLogs().then((n) => n && logger.info(`[wa_log] retensi: ${n} log lama dihapus`)).catch(() => {});
   setInterval(() => { purgeOldWaLogs().catch(() => {}); }, 24 * 60 * 60 * 1000);

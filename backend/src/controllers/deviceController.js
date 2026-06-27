@@ -2,19 +2,38 @@ import { pool } from '../db/pool.js';
 import { snapshotAndNotifyOnDuty } from './incidentController.js';
 
 export async function listDevices(req, res) {
-  const [rows] = await pool.query('SELECT * FROM devices ORDER BY id');
+  // under_maintenance = perangkat sedang dalam jendela maintenance aktif
+  // (cocok per-device, per-lokasi via nama, atau site-wide bila kedua kolom NULL).
+  const [rows] = await pool.query(
+    `SELECT d.*, EXISTS(
+        SELECT 1 FROM maintenance_windows mw
+        LEFT JOIN locations l ON l.id = mw.location_id
+        WHERE NOW() BETWEEN mw.starts_at AND mw.ends_at
+          AND (mw.device_id = d.id
+               OR (mw.device_id IS NULL AND mw.location_id IS NULL)
+               OR (mw.location_id IS NOT NULL AND l.name = d.loc))
+      ) AS under_maintenance
+     FROM devices d ORDER BY d.id`
+  );
   res.json({ devices: rows });
 }
 
+const CHECK_TYPES = ['ping', 'tcp', 'http'];
+function normCheckType(v) { return CHECK_TYPES.includes(v) ? v : 'ping'; }
+
 export async function createDevice(req, res) {
-  const { name, ip, type, category, icon, loc, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required } = req.body;
+  const { name, ip, type, category, icon, loc, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
+    check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   if (!name || !ip || !type) return res.status(400).json({ error: 'Nama, IP, tipe wajib diisi' });
   const inspReq = inspect_required == null ? 1 : (inspect_required ? 1 : 0);
   const [result] = await pool.query(
-    `INSERT INTO devices (name, ip, type, category, icon, loc, inspect_required, status, ssh_host, ssh_port, ssh_username, lat, lng)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?)`,
+    `INSERT INTO devices (name, ip, type, category, icon, loc, inspect_required, status, ssh_host, ssh_port, ssh_username, lat, lng,
+       check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, inspReq, ssh_host || ip, ssh_port || 22, ssh_username || null,
-     lat === '' || lat == null ? null : Number(lat), lng === '' || lng == null ? null : Number(lng)]
+     lat === '' || lat == null ? null : Number(lat), lng === '' || lng == null ? null : Number(lng),
+     normCheckType(check_type), check_port ? Number(check_port) : null, check_url?.trim() || null,
+     snmp_enabled ? 1 : 0, snmp_community?.trim() || 'public', snmp_port ? Number(snmp_port) : 161]
   );
   const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [result.insertId]);
   res.status(201).json({ device: rows[0] });
@@ -22,11 +41,13 @@ export async function createDevice(req, res) {
 
 export async function updateDevice(req, res) {
   const id = Number(req.params.id);
-  const { name, ip, type, category, icon, loc, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required } = req.body;
+  const { name, ip, type, category, icon, loc, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
+    check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   const [existing] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   if (!existing[0]) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   await pool.query(
-    `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, inspect_required=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=? WHERE id=?`,
+    `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, inspect_required=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=?,
+       check_type=?, check_port=?, check_url=?, snmp_enabled=?, snmp_community=?, snmp_port=? WHERE id=?`,
     [
       name ?? existing[0].name,
       ip ?? existing[0].ip,
@@ -40,6 +61,12 @@ export async function updateDevice(req, res) {
       ssh_username ?? existing[0].ssh_username,
       lat === '' ? null : (lat ?? existing[0].lat),
       lng === '' ? null : (lng ?? existing[0].lng),
+      check_type === undefined ? existing[0].check_type : normCheckType(check_type),
+      check_port === undefined ? existing[0].check_port : (check_port ? Number(check_port) : null),
+      check_url === undefined ? existing[0].check_url : (check_url?.trim() || null),
+      snmp_enabled === undefined ? existing[0].snmp_enabled : (snmp_enabled ? 1 : 0),
+      snmp_community === undefined ? existing[0].snmp_community : (snmp_community?.trim() || 'public'),
+      snmp_port === undefined ? existing[0].snmp_port : (snmp_port ? Number(snmp_port) : 161),
       id,
     ]
   );
@@ -98,4 +125,42 @@ export async function toggleMonitor(req, res) {
   await pool.query('UPDATE devices SET monitor_enabled=? WHERE id=?', [next, id]);
   const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   res.json({ device: updated[0] });
+}
+
+// Riwayat metrik (time-series) untuk grafik tren. Rentang 24h/7d/30d di-downsample
+// ke bucket waktu agar payload tetap ringan.
+const RANGE = {
+  '24h': { hours: 24, bucketSec: 300 },     // 5 menit
+  '7d': { hours: 24 * 7, bucketSec: 3600 },  // 1 jam
+  '30d': { hours: 24 * 30, bucketSec: 21600 }, // 6 jam
+};
+
+export async function getDeviceMetrics(req, res) {
+  const id = Number(req.params.id);
+  const range = RANGE[req.query.range] ? req.query.range : '24h';
+  const { hours, bucketSec } = RANGE[range];
+  const [rows] = await pool.query(
+    `SELECT FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(recorded_at)/?)*?) AS t,
+            ROUND(AVG(ping_ms)) AS avg_ping,
+            MAX(ping_ms) AS max_ping,
+            ROUND(AVG(NULLIF(cpu, 0))) AS avg_cpu,
+            ROUND(AVG(NULLIF(mem, 0))) AS avg_mem,
+            ROUND(AVG(status <> 'offline') * 100, 2) AS up_pct,
+            SUM(in_maint) AS maint
+       FROM device_metrics
+      WHERE device_id = ? AND recorded_at >= (NOW() - INTERVAL ? HOUR)
+      GROUP BY t ORDER BY t ASC`,
+    [bucketSec, bucketSec, id, hours]
+  );
+  // Ringkasan periode: uptime%, latency rata-rata/maks.
+  const [[summary]] = await pool.query(
+    `SELECT COUNT(*) AS samples,
+            ROUND(AVG(status <> 'offline') * 100, 2) AS up_pct,
+            ROUND(AVG(ping_ms)) AS avg_ping,
+            MAX(ping_ms) AS max_ping
+       FROM device_metrics
+      WHERE device_id = ? AND recorded_at >= (NOW() - INTERVAL ? HOUR) AND in_maint = 0`,
+    [id, hours]
+  );
+  res.json({ range, series: rows, summary });
 }

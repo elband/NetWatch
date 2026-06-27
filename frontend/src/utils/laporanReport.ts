@@ -11,10 +11,10 @@ export interface LaporanData {
   dokumentasi?: { url: string; tanggal: string; jenis: string; peralatan: string; ket: string; oleh: string }[];
   dokumentasiTruncated?: number;
   unjukHasil: { days: number; rows: { no: number; nama: string; cells: string[]; ket: string }[] };
-  evaluasi: { no: number; fasilitas: string; terjadwalJam: number; operasiJam: number; kegagalanJam: number; jumlahKegagalan: number; performancePct: number; ket: string }[];
+  evaluasi: { no: number; fasilitas: string; terjadwalJam: number; operasiJam: number; kegagalanJam: number; jumlahKegagalan: number; performancePct: number; ket: string; measuredUptimePct: number | null; avgPingMs: number | null }[];
   perbaikan: { no: number; tanggal: string; peralatan: string; lokasi: string; kategori: string; bagian: string; kerusakan: string; tindakan: string; tglKerusakan: string; tglSelesai: string; jam: string; ket: string }[];
   lkp: { incidentId: string; tanggal: string; lokasi: string; peralatan: string; bagian: string; kategori: string; uraian: string; tindakan: string; penyebab: string; oleh: string; tglKerusakan: string; tglSelesai: string; sparepart: string; hasil: string }[];
-  recap: { tiketIn: number; tiketDone: number; mttr: number; slaPct: number; escalations: number };
+  recap: { tiketIn: number; tiketDone: number; mttr: number; slaPct: number; escalations: number; measuredUptimePct?: number | null };
   performaTeknisi: PerfTek[];
   performaKoordinator: PerfKoord[];
   opsHoursPerDay: number;
@@ -179,10 +179,11 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
       <div style="font-size:9px;margin-top:4px">Keterangan: kosong = Operasi Normal · x = Operasi Terputus · i = Operasi Menurun</div>${sign()}</div>`);
   }
   if (has('evaluasi')) {
-    const r = data.evaluasi.map((e) => `<tr><td style="text-align:center">${e.no}</td><td>${esc(e.fasilitas)}</td><td style="text-align:center">${e.terjadwalJam}</td><td style="text-align:center">${e.operasiJam}</td><td style="text-align:center">${e.kegagalanJam}</td><td style="text-align:center">${e.jumlahKegagalan}</td><td style="text-align:center;font-weight:bold;color:${e.performancePct >= 95 ? '#16803c' : '#b45309'}">${e.performancePct}%</td><td>${esc(e.ket)}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#666">Tidak ada fasilitas kritis</td></tr>';
+    const upCell = (v: number | null) => (v == null ? '<td style="text-align:center;color:#888">–</td>' : `<td style="text-align:center;font-weight:bold;color:${v >= 99 ? '#16803c' : v >= 95 ? '#b45309' : '#b91c1c'}">${v}%</td>`);
+    const r = data.evaluasi.map((e) => `<tr><td style="text-align:center">${e.no}</td><td>${esc(e.fasilitas)}</td><td style="text-align:center">${e.terjadwalJam}</td><td style="text-align:center">${e.operasiJam}</td><td style="text-align:center">${e.kegagalanJam}</td><td style="text-align:center">${e.jumlahKegagalan}</td><td style="text-align:center;font-weight:bold;color:${e.performancePct >= 95 ? '#16803c' : '#b45309'}">${e.performancePct}%</td>${upCell(e.measuredUptimePct)}<td style="text-align:center">${e.avgPingMs == null ? '–' : `${e.avgPingMs} ms`}</td><td>${esc(e.ket)}</td></tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:#666">Tidak ada fasilitas kritis</td></tr>';
     pages.push(`<div class="page">${sec('Evaluasi Kinerja Fasilitas Elektronika Bandara')}${head2(`BULAN/TAHUN : ${bln}`)}
-      <table class="data"><thead><tr><th style="width:24px">No</th><th>Jenis Fasilitas</th><th>Terjadwal (jam)</th><th>Operasi (jam)</th><th>Kegagalan (jam)</th><th>Jml Gagal</th><th>Performance</th><th>Keterangan</th></tr></thead><tbody>${r}</tbody></table>
-      <div style="font-size:9px;margin-top:4px">Jam operasional ${data.opsHoursPerDay} jam/hari (05:00–20:00). Performance = Operasi ÷ Terjadwal.</div>${sign()}</div>`);
+      <table class="data"><thead><tr><th style="width:24px">No</th><th>Jenis Fasilitas</th><th>Terjadwal (jam)</th><th>Operasi (jam)</th><th>Kegagalan (jam)</th><th>Jml Gagal</th><th>Performance</th><th>Uptime Terukur</th><th>Avg Ping</th><th>Keterangan</th></tr></thead><tbody>${r}</tbody></table>
+      <div style="font-size:9px;margin-top:4px">Jam operasional ${data.opsHoursPerDay} jam/hari (05:00–20:00). <b>Performance</b> = Operasi ÷ Terjadwal (berbasis insiden). <b>Uptime Terukur</b> = ketersediaan nyata dari pemantauan (sampel ping, mengecualikan maintenance terjadwal); "–" = belum ada data pemantauan pada periode ini.</div>${sign()}</div>`);
   }
   if (has('perbaikan')) {
     const r = data.perbaikan.map((r) => `<tr><td style="text-align:center">${r.no}</td><td>${esc(r.tanggal)}</td><td>${esc(r.peralatan)}</td><td>${esc(r.lokasi)}</td><td style="text-align:center">${esc(r.kategori)}</td><td>${esc(r.kerusakan)}</td><td>${esc(r.tindakan)}</td><td style="font-size:9px">${esc(r.tglKerusakan)}</td><td style="font-size:9px">${esc(r.tglSelesai)}</td><td style="text-align:center">${esc(r.jam)}</td><td style="font-size:9px">${esc(r.ket)}</td></tr>`).join('') || '<tr><td colspan="11" style="text-align:center;color:#666">Tidak ada kerusakan tercatat</td></tr>';
@@ -225,11 +226,13 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
         <div class="stat"><b>${data.recap.tiketIn}</b>Insiden Masuk</div>
         <div class="stat"><b>${data.recap.tiketDone}</b>Insiden Selesai</div>
         <div class="stat"><b>${data.recap.slaPct}%</b>Ketepatan SLA</div>
+        ${data.recap.measuredUptimePct != null ? `<div class="stat"><b>${data.recap.measuredUptimePct}%</b>Uptime Terukur</div>` : ''}
         <div class="stat"><b>${data.recap.mttr}m</b>Rata² Penyelesaian</div>
         <div class="stat"><b>${data.recap.escalations}</b>Eskalasi Koord.</div>
       </div>
       <div style="display:flex;gap:14px;align-items:center;margin:12px 0;flex-wrap:wrap">
         <div style="text-align:center">${gauge(data.recap.slaPct, 'Ketepatan SLA', '#2563eb')}</div>
+        ${data.recap.measuredUptimePct != null ? `<div style="text-align:center">${gauge(data.recap.measuredUptimePct, 'Uptime Terukur')}</div>` : ''}
         <div style="flex:1;min-width:280px"><div class="cap">Volume Insiden</div>${chartInsiden}</div>
       </div>
       <div class="cap">Skor Performa Teknisi (0–100)</div>${chartTek}

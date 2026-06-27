@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { DeviceStatusBadge } from '../components/StatusBadge';
 import { confirmDialog, alertDialog } from '../components/dialog';
+import DeviceMetricsModal from '../components/DeviceMetricsModal';
 import type { Device } from '../types';
 
 function meterColor(v: number) {
@@ -15,7 +16,7 @@ function meterColor(v: number) {
 const DEVICE_TYPES = ['Switch', 'Router', 'Firewall', 'AP', 'Server', 'NAS', 'CCTV', 'PC Client', 'Printer'];
 // Pustaka ikon (emoji) untuk perangkat / kartu layanan.
 const ICONS = ['🖥️', '🔀', '📶', '🧱', '🖧', '💾', '📹', '🌐', '🔗', '📺', '🚪', '📢', '✈️', '🛰️', '📡', '🛜', '📱', '💻', '🔌', '⚙️', '🟢', '🗂️'];
-const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true };
+const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161' };
 const NO_IP = 'N/A (Tanpa IP)';
 
 export default function Devices() {
@@ -30,6 +31,7 @@ export default function Devices() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState('');
+  const [metricsDevice, setMetricsDevice] = useState<Device | null>(null);
   const canEdit = hasRole(user, 'admin', 'koordinator');
   const canEditDevice = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh edit (bukan hapus)
   const canAdd = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh tambah perangkat
@@ -71,6 +73,8 @@ export default function Devices() {
       ssh_host: d.ssh_host || '', ssh_port: String(d.ssh_port ?? 22), ssh_username: d.ssh_username || '',
       lat: d.lat != null ? String(d.lat) : '', lng: d.lng != null ? String(d.lng) : '',
       inspect_required: d.inspect_required == null ? true : !!d.inspect_required,
+      check_type: d.check_type || 'ping', check_port: d.check_port != null ? String(d.check_port) : '', check_url: d.check_url || '',
+      snmp_enabled: !!d.snmp_enabled, snmp_community: d.snmp_community || 'public', snmp_port: String(d.snmp_port ?? 161),
     });
     setFormErr(''); setShowAdd(true);
   }
@@ -102,6 +106,12 @@ export default function Devices() {
       lat: form.lat.trim() || null,
       lng: form.lng.trim() || null,
       inspect_required: form.inspect_required,
+      check_type: form.check_type,
+      check_port: form.check_type === 'tcp' ? (Number(form.check_port) || null) : null,
+      check_url: form.check_type === 'http' ? (form.check_url.trim() || null) : null,
+      snmp_enabled: form.snmp_enabled,
+      snmp_community: form.snmp_community.trim() || 'public',
+      snmp_port: Number(form.snmp_port) || 161,
     };
     try {
       if (editId) {
@@ -187,7 +197,7 @@ export default function Devices() {
                   <div className="font-semibold text-sm truncate" title={d.name}>{d.icon && <span className="mr-1.5">{d.icon}</span>}{d.name}</div>
                   <div className="text-[10px] text-text2 font-mono truncate mt-0.5">{d.ip}</div>
                 </div>
-                <div className="shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} monitorEnabled={d.monitor_enabled} /></div>
+                <div className="shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} monitorEnabled={d.monitor_enabled} underMaintenance={d.under_maintenance} /></div>
               </div>
 
               {/* Tipe + lokasi */}
@@ -243,6 +253,9 @@ export default function Devices() {
                     🖥️ SSH
                   </Link>
                 )}
+                <button onClick={() => setMetricsDevice(d)} title="Lihat tren metrik (latency, uptime, CPU/RAM)" className="bg-sky-500/10 text-sky-400 border border-sky-500/40 rounded px-2 py-0.5 text-[10px]">
+                  📈 Tren
+                </button>
                 {canEditDevice && (
                   <button onClick={() => openEdit(d)} title="Edit perangkat" className="bg-accent2/10 text-accent2 border border-accent2/40 rounded px-2 py-0.5 text-[10px]">
                     ✏️ Edit
@@ -324,6 +337,42 @@ export default function Devices() {
               </div>
               <Field label="Latitude (GPS inspeksi)"><input className="dev-inp" value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} placeholder="-6.1751" /></Field>
               <Field label="Longitude (GPS inspeksi)"><input className="dev-inp" value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} placeholder="106.8650" /></Field>
+
+              {/* Metode pemantauan */}
+              <div className="col-span-2 pt-2 mt-1 border-t border-border/50">
+                <div className="text-[11px] font-semibold text-text2 mb-2">📡 Metode Pemantauan</div>
+              </div>
+              <Field label="Cek ketersediaan via">
+                <select className="dev-inp" value={form.check_type} onChange={(e) => setForm({ ...form, check_type: e.target.value as 'ping' | 'tcp' | 'http' })}>
+                  <option value="ping">ICMP Ping (host hidup)</option>
+                  <option value="tcp">TCP Port (service hidup)</option>
+                  <option value="http">HTTP/HTTPS (web sehat)</option>
+                </select>
+              </Field>
+              {form.check_type === 'tcp' && (
+                <Field label="Port TCP"><input className="dev-inp" value={form.check_port} onChange={(e) => setForm({ ...form, check_port: e.target.value })} placeholder="443" /></Field>
+              )}
+              {form.check_type === 'http' && (
+                <div className="col-span-2">
+                  <Field label="URL HTTP(S)"><input className="dev-inp" value={form.check_url} onChange={(e) => setForm({ ...form, check_url: e.target.value })} placeholder="https://192.168.1.3/health" /></Field>
+                </div>
+              )}
+              <div className="col-span-2">
+                <label className="flex items-start gap-2 cursor-pointer bg-surface2 border border-border rounded-md px-3 py-2.5">
+                  <input type="checkbox" className="mt-0.5" checked={form.snmp_enabled} onChange={(e) => setForm({ ...form, snmp_enabled: e.target.checked })} />
+                  <span>
+                    <span className="block text-[12px] font-semibold">📊 Aktifkan SNMP</span>
+                    <span className="block text-[10px] text-text2">Rekam CPU & memori riil (SNMP v2c). Tanpa ini, CPU/RAM tidak terisi.</span>
+                  </span>
+                </label>
+              </div>
+              {form.snmp_enabled && (
+                <>
+                  <Field label="SNMP Community"><input className="dev-inp" value={form.snmp_community} onChange={(e) => setForm({ ...form, snmp_community: e.target.value })} placeholder="public" /></Field>
+                  <Field label="SNMP Port"><input className="dev-inp" value={form.snmp_port} onChange={(e) => setForm({ ...form, snmp_port: e.target.value })} placeholder="161" /></Field>
+                </>
+              )}
+
               <div className="col-span-2">
                 <label className="flex items-start gap-2 cursor-pointer bg-surface2 border border-border rounded-md px-3 py-2.5">
                   <input type="checkbox" className="mt-0.5" checked={form.inspect_required} onChange={(e) => setForm({ ...form, inspect_required: e.target.checked })} />
@@ -346,6 +395,8 @@ export default function Devices() {
           </div>
         </div>
       )}
+
+      {metricsDevice && <DeviceMetricsModal device={metricsDevice} onClose={() => setMetricsDevice(null)} />}
     </div>
   );
 }

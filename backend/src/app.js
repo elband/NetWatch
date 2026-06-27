@@ -33,6 +33,8 @@ import kegiatanNrRoutes from './routes/kegiatanNrRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import notificationPrefsRoutes from './routes/notificationPrefsRoutes.js';
+import slaRoutes from './routes/slaRoutes.js';
+import maintenanceRoutes from './routes/maintenanceRoutes.js';
 
 // Membangun & mengembalikan instance Express (tanpa listen/socket/worker) agar
 // bisa dipakai ulang oleh server.js (produksi) maupun test (supertest).
@@ -113,6 +115,8 @@ export function createApp() {
   app.use('/api/kegiatan-nr', kegiatanNrRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/notification-prefs', notificationPrefsRoutes);
+  app.use('/api/sla', slaRoutes);
+  app.use('/api/maintenance-windows', maintenanceRoutes);
 
   // Production: serve built frontend & SPA routing.
   if (env.isProd) {

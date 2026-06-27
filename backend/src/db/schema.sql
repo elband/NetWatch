@@ -44,6 +44,55 @@ CREATE TABLE IF NOT EXISTS devices (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- Riwayat metrik perangkat (time-series) — dasar grafik tren latency/CPU/mem
+-- dan perhitungan SLA/uptime. Satu baris per perangkat per sweep ping.
+CREATE TABLE IF NOT EXISTS device_metrics (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  status ENUM('online','warning','offline') NOT NULL,
+  ping_ms INT NOT NULL DEFAULT 0,
+  cpu INT DEFAULT NULL,
+  mem INT DEFAULT NULL,
+  in_maint TINYINT(1) NOT NULL DEFAULT 0,
+  recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_dm_device_time (device_id, recorded_at),
+  CONSTRAINT fk_dm_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Rollup harian uptime per perangkat — sumber laporan SLA jangka panjang
+-- (tetap akurat walau metrik mentah sudah dipangkas retensi).
+CREATE TABLE IF NOT EXISTS device_uptime_daily (
+  device_id INT NOT NULL,
+  day DATE NOT NULL,
+  samples INT NOT NULL DEFAULT 0,
+  up_samples INT NOT NULL DEFAULT 0,
+  warn_samples INT NOT NULL DEFAULT 0,
+  down_samples INT NOT NULL DEFAULT 0,
+  maint_samples INT NOT NULL DEFAULT 0,
+  avg_ping INT DEFAULT NULL,
+  max_ping INT DEFAULT NULL,
+  incidents INT NOT NULL DEFAULT 0,
+  down_seconds INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (device_id, day),
+  CONSTRAINT fk_dud_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Jendela maintenance terjadwal — saat aktif, perangkat tidak memicu insiden
+-- otomatis/alarm WA dan sampel dihitung "maintenance" (tidak menurunkan SLA).
+CREATE TABLE IF NOT EXISTS maintenance_windows (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT DEFAULT NULL,
+  location_id INT DEFAULT NULL,
+  title VARCHAR(160) NOT NULL,
+  reason TEXT DEFAULT NULL,
+  starts_at DATETIME NOT NULL,
+  ends_at DATETIME NOT NULL,
+  created_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_mw_window (starts_at, ends_at),
+  INDEX idx_mw_device (device_id)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS incidents (
   id VARCHAR(20) PRIMARY KEY,
   device_id INT DEFAULT NULL,

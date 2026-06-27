@@ -85,6 +85,15 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'devices', 'inspect_required', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER loc');
   // Mode standby: saat 0, perangkat tidak di-ping/dimonitor otomatis dan tidak memicu insiden otomatis.
   await addColumnIfMissing(conn, env.db.database, 'devices', 'monitor_enabled', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER alarm_override');
+  // Pemantauan lanjutan: SNMP (CPU/mem/uptime riil) & health-check service (HTTP/TCP) selain ICMP.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'check_type', "ENUM('ping','tcp','http') NOT NULL DEFAULT 'ping' AFTER monitor_enabled");
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'check_port', 'INT DEFAULT NULL AFTER check_type');
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'check_url', 'VARCHAR(255) DEFAULT NULL AFTER check_port');
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'snmp_enabled', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER check_url');
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'snmp_community', "VARCHAR(80) DEFAULT 'public' AFTER snmp_enabled");
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'snmp_port', 'INT NOT NULL DEFAULT 161 AFTER snmp_community');
+  // Idempotent untuk DB yang sudah memiliki device_metrics versi awal (tanpa in_maint).
+  await addColumnIfMissing(conn, env.db.database, 'device_metrics', 'in_maint', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER mem');
   // Dokumentasi (foto/PDF) untuk rencana/pelaksanaan maintenance.
   await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'doc_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
   // Device binding & akurasi GPS untuk absensi ketat.

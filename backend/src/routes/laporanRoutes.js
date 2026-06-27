@@ -167,12 +167,41 @@ export async function buildLaporanData(monthIn) {
       WHERE d.category IS NOT NULL GROUP BY d.id, d.name ORDER BY d.name`,
     [start, end]
   );
+  // Uptime TERUKUR dari monitoring (device_uptime_daily) — akurat berbasis sampel
+  // ping, mengecualikan waktu maintenance terjadwal. Null bila belum ada data
+  // metrik (mis. bulan sebelum fitur monitoring aktif) → laporan tampilkan "–".
+  const [slaRows] = await pool.query(
+    `SELECT device_id,
+            SUM(samples) samples, SUM(up_samples + warn_samples) up_ish, SUM(maint_samples) maint,
+            ROUND(AVG(avg_ping)) avg_ping, SUM(down_seconds) down_seconds
+       FROM device_uptime_daily WHERE day >= ? AND day < ? GROUP BY device_id`,
+    [start, end]
+  );
+  const slaMap = new Map();
+  for (const r of slaRows) {
+    const base = Number(r.samples) - Number(r.maint);
+    slaMap.set(r.device_id, {
+      uptimePct: base > 0 ? Math.round((Number(r.up_ish) / base) * 1000) / 10 : null,
+      avgPing: r.avg_ping != null ? Number(r.avg_ping) : null,
+      downHours: Math.round((Number(r.down_seconds) / 3600) * 10) / 10,
+    });
+  }
   const evaluasi = evalRows.map((r, i) => {
     const kegagalanJam = Math.round((Number(r.downMin) / 60) * 10) / 10;
     const operasiJam = Math.max(0, Math.round((terjadwalJam - kegagalanJam) * 10) / 10);
     const perf = terjadwalJam ? Math.round((operasiJam / terjadwalJam) * 1000) / 10 : 100;
-    return { no: i + 1, fasilitas: r.name, terjadwalJam, operasiJam, kegagalanJam, jumlahKegagalan: r.gagal, performancePct: perf, ket: r.gagal ? 'Ada gangguan' : 'Normal' };
+    const m = slaMap.get(r.id) || {};
+    return {
+      no: i + 1, fasilitas: r.name, terjadwalJam, operasiJam, kegagalanJam, jumlahKegagalan: r.gagal,
+      performancePct: perf, ket: r.gagal ? 'Ada gangguan' : 'Normal',
+      measuredUptimePct: m.uptimePct ?? null, avgPingMs: m.avgPing ?? null,
+    };
   });
+  // Rata-rata uptime terukur lintas fasilitas kritis (untuk ringkasan lampiran).
+  const measuredVals = evaluasi.map((e) => e.measuredUptimePct).filter((v) => v != null);
+  const measuredUptimePct = measuredVals.length
+    ? Math.round((measuredVals.reduce((a, b) => a + b, 0) / measuredVals.length) * 10) / 10
+    : null;
 
   // ===== VII. Daftar Kegiatan Perbaikan & Kerusakan =====
   const [perbaikan] = await pool.query(
@@ -213,7 +242,7 @@ export async function buildLaporanData(monthIn) {
   const [[doneRow]] = await pool.query("SELECT COUNT(*) c, AVG(duration_min) mttr FROM incidents WHERE status='selesai' AND resolved_at>=? AND resolved_at<?", [start, end]);
   const [[slaRow]] = await pool.query('SELECT SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, COUNT(*) tot FROM incidents WHERE taken_at IS NOT NULL AND taken_at>=? AND taken_at<?', [SLA_MINUTES, start, end]);
   const [[esc]] = await pool.query('SELECT COUNT(*) c FROM incidents WHERE coord_alerted=1 AND created_at>=? AND created_at<?', [start, end]);
-  const recap = { tiketIn: inRow.c, tiketDone: doneRow.c, mttr: Math.round(doneRow.mttr || 0), slaPct: slaRow.tot ? Math.round((Number(slaRow.ot) / slaRow.tot) * 100) : 100, escalations: esc.c };
+  const recap = { tiketIn: inRow.c, tiketDone: doneRow.c, mttr: Math.round(doneRow.mttr || 0), slaPct: slaRow.tot ? Math.round((Number(slaRow.ot) / slaRow.tot) * 100) : 100, escalations: esc.c, measuredUptimePct };
 
   const [techs] = await pool.query("SELECT id, name, jabatan FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'\"teknisi\"')) ORDER BY name");
   const performaTeknisi = [];

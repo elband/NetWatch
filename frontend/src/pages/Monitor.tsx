@@ -45,7 +45,7 @@ export default function Monitor() {
                   <div className="text-xs font-semibold truncate">{d.name}</div>
                   <div className="text-[10px] text-text2 font-mono truncate">{d.ip} · {d.type}</div>
                 </div>
-                <div className="flex-shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} /></div>
+                <div className="flex-shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} monitorEnabled={d.monitor_enabled} underMaintenance={d.under_maintenance} /></div>
               </div>
               {d.status !== 'offline' ? (
                 <>
