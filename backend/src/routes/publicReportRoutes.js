@@ -9,6 +9,7 @@ import { queueWaNotification, queueWaRaw } from '../jobs/waQueue.js';
 import { escapeLike } from '../utils/sql.js';
 import { notifyRoles } from '../services/notify.js';
 import { snapshotAndNotifyOnDuty } from '../controllers/incidentController.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const normPhone = (p) => { const d = String(p || '').replace(/[^\d]/g, ''); return d.length >= 8 ? d : null; };
 
@@ -130,7 +131,7 @@ router.post('/:id/assign-incident', requireRole('admin', 'koordinator'), async (
     ]);
 
     if (assigned) {
-      await queueWaNotification({
+      if (await isNotifyEnabledForUser('insiden_teknisi', assigned)) await queueWaNotification({
         type: 'alert', toUserId: assigned, relatedIncidentId: incId,
         message: `🚨 ALERT ${priority.toUpperCase()}\n${deviceName}\nMasalah: ${report.judul}`,
       });

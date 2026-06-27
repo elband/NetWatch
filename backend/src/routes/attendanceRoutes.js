@@ -251,7 +251,7 @@ router.post('/absences/decide', requireRole('admin', 'koordinator'), async (req,
   const msg = status === 'penalti'
     ? `⚠️ *Absen Dikonfirmasi*\nKetidakhadiran Anda pada ${workDate} dikonfirmasi koordinator sebagai ALPA.\nSkor performa bulan ini dipotong −15.${note ? `\nCatatan: ${note}` : ''}`
     : `ℹ️ *Absen Dimaafkan*\nKetidakhadiran Anda pada ${workDate} ditandai dimaafkan (tanpa penalti).${note ? `\nCatatan: ${note}` : ''}`;
-  try { await queueWaNotification({ type: 'other', toUserId: userId, message: msg }); } catch { /* abaikan */ }
+  try { if (await isNotifyEnabledForUser('absensi_keputusan_alpa', userId)) await queueWaNotification({ type: 'other', toUserId: userId, message: msg }); } catch { /* abaikan */ }
   res.json({ ok: true, status });
 });
 

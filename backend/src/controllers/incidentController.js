@@ -336,7 +336,7 @@ export async function createIncident(req, res) {
     await notifyCoordinators(conn, { id, coord_id: coordId || null }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
 
     if (assigned) {
-      await queueWaNotification({
+      if (await isNotifyEnabledForUser('insiden_teknisi', assigned)) await queueWaNotification({
         type: 'alert',
         toUserId: assigned,
         message: `🚨 ALERT ${(priority || 'sedang').toUpperCase()}\nPerangkat: ${deviceName}\nMasalah: ${issue}`,

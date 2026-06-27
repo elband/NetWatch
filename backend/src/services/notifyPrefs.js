@@ -11,6 +11,7 @@ export const NOTIF_EVENTS = [
   { key: 'insiden_teknisi', label: 'Insiden: notifikasi ke teknisi (tiket baru/pengingat/perintah/diajak bersama)', roles: ['teknisi'] },
   { key: 'pengajuan_review_koordinator', label: 'Pengajuan/laporan baru menunggu review koordinator (izin, diklat, dokumen, kegiatan non-rutin, inspeksi & maintenance peralatan)', roles: ['koordinator'] },
   { key: 'pengajuan_keputusan', label: 'Hasil keputusan pengajuan dikirim ke pengaju (izin, diklat, dokumen, kegiatan non-rutin)', roles: ['teknisi', 'koordinator'] },
+  { key: 'absensi_keputusan_alpa', label: 'Hasil keputusan absen (ALPA/dimaafkan) dikirim ke teknisi', roles: ['teknisi'] },
 ];
 
 // Preferensi disimpan per-USER (bukan per-peran): settings.notification_prefs =
