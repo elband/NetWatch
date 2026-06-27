@@ -20,6 +20,18 @@ function statusLabel(d: Device): string {
   return d.status.charAt(0).toUpperCase() + d.status.slice(1);
 }
 
+// Koordinat efektif perangkat: GPS sendiri bila ada, jika tidak mewarisi titik
+// lokasi yang di-tag (pin lokasi di peta gangguan jadi koordinat perangkat).
+function effLatLng(d: Device): [number, number] | null {
+  const lat = d.lat != null ? Number(d.lat) : (d.location_lat != null ? Number(d.location_lat) : null);
+  const lng = d.lng != null ? Number(d.lng) : (d.location_lng != null ? Number(d.location_lng) : null);
+  return lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng) ? [lat, lng] : null;
+}
+// Posisi berasal dari tag lokasi (bukan GPS perangkat sendiri).
+function fromLocation(d: Device): boolean {
+  return (d.lat == null || d.lng == null) && d.location_lat != null && d.location_lng != null;
+}
+
 export default function DeviceMap() {
   const [devices, setDevices] = useState<Device[]>([]);
   const mapEl = useRef<HTMLDivElement>(null);
@@ -27,8 +39,8 @@ export default function DeviceMap() {
   const layerRef = useRef<L.LayerGroup | null>(null);
   const fittedRef = useRef(false);
 
-  const withGps = useMemo(() => devices.filter((d) => d.lat != null && d.lng != null), [devices]);
-  const noGps = useMemo(() => devices.filter((d) => d.lat == null || d.lng == null), [devices]);
+  const withGps = useMemo(() => devices.filter((d) => effLatLng(d) != null), [devices]);
+  const noGps = useMemo(() => devices.filter((d) => effLatLng(d) == null), [devices]);
 
   // Init peta sekali — citra satelit (Esri World Imagery) agar selaras dengan
   // tampilan "Peta Lokasi Gangguan", + lapisan label nama tempat/jalan.
@@ -65,7 +77,8 @@ export default function DeviceMap() {
     // satu titik GPS) dalam lingkaran kecil agar semuanya tampak & bisa diklik.
     const seen = new Map<string, number>();
     for (const d of withGps) {
-      let lat = Number(d.lat), lng = Number(d.lng);
+      const c0 = effLatLng(d)!;
+      let lat = c0[0], lng = c0[1];
       const key = `${lat.toFixed(6)},${lng.toFixed(6)}`;
       const idx = seen.get(key) ?? 0;
       seen.set(key, idx + 1);
@@ -95,7 +108,7 @@ export default function DeviceMap() {
           `<div style="font-family:system-ui;font-size:12px;line-height:1.5">
             <b>${d.name}</b><br>
             <span style="font-family:monospace">${d.ip}</span> · ${d.type}<br>
-            ${d.loc ? `📍 ${d.loc}<br>` : ''}
+            ${d.loc ? `📍 ${d.loc}${fromLocation(d) ? ' <span style="color:#8b949e">(posisi dari titik lokasi)</span>' : ''}<br>` : ''}
             Status: <b style="color:${color}">${statusLabel(d)}</b><br>
             Ping: ${d.ping_ms ? `${d.ping_ms} ms` : '–'}
           </div>`
@@ -150,13 +163,13 @@ export default function DeviceMap() {
 
       {withGps.length === 0 && (
         <div className="mt-3 bg-surface border border-border rounded-[10px] px-4 py-3 text-[12px] text-text2">
-          Belum ada perangkat dengan koordinat GPS. Isi <b>Latitude/Longitude</b> pada pengaturan perangkat agar muncul di peta.
+          Belum ada perangkat dengan koordinat. <b>Tag perangkat ke Lokasi</b> (yang sudah punya titik di peta) — atau isi <b>Latitude/Longitude</b> pada pengaturan perangkat — agar muncul di peta.
         </div>
       )}
 
       {noGps.length > 0 && (
         <div className="mt-3 bg-surface border border-border rounded-[10px] p-3">
-          <div className="text-[11px] font-semibold text-text2 mb-2">⚠️ {noGps.length} perangkat tanpa koordinat (tidak tampil di peta)</div>
+          <div className="text-[11px] font-semibold text-text2 mb-2">⚠️ {noGps.length} perangkat tanpa koordinat & tanpa tag lokasi (tidak tampil di peta)</div>
           <div className="flex flex-wrap gap-1.5">
             {noGps.map((d) => (
               <span key={d.id} className="px-2 py-0.5 rounded bg-surface2 border border-border text-[10px]">
