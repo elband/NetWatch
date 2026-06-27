@@ -36,6 +36,11 @@ export async function checkAllDevices(io) {
   const [devices] = await pool.query('SELECT * FROM devices');
 
   for (const device of devices) {
+    // Perangkat tanpa IP (ip diawali "N/A") tidak bisa di-ping dan tidak boleh
+    // dideteksi otomatis offline/insiden. Tiket untuk perangkat ini hanya aktif
+    // lewat aduan publik (lapor), bukan deteksi sistem.
+    if (!device.ip || device.ip.startsWith('N/A')) continue;
+
     let alive = false;
     let avgMs = 0;
     try {
