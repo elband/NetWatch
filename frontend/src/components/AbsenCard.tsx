@@ -29,17 +29,24 @@ export default function AbsenCard() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ type: 'ok' | 'warn'; text: string } | null>(null);
   const [showLeave, setShowLeave] = useState(false);
+  const [geo, setGeo] = useState<{ status: 'checking' | 'ok' | 'denied'; pos: { lat: number | null; lng: number | null; accuracy: number | null } | null }>({ status: 'checking', pos: null });
 
   function load() {
     api.get('/attendance/today').then((r) => setAtt(r.data.attendance)).catch(() => {});
     api.get('/leave/me').then((r) => setLeaves(r.data.leave.slice(0, 3))).catch(() => {});
   }
+  async function checkGeo() {
+    setGeo({ status: 'checking', pos: null });
+    const pos = await getPos();
+    setGeo(pos.lat != null && pos.lng != null ? { status: 'ok', pos } : { status: 'denied', pos: null });
+  }
   useEffect(load, []);
+  useEffect(() => { checkGeo(); }, []);
 
   async function act(kind: 'check-in' | 'check-out') {
     setBusy(true); setMsg(null);
     try {
-      const pos = await getPos();
+      const pos = geo.pos || (await getPos());
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const r = await api.post(`/attendance/${kind}`, { ...pos, tz, deviceId: deviceId() });
       load();
@@ -51,6 +58,7 @@ export default function AbsenCard() {
 
   const masuk = !!att?.check_in_at;
   const pulang = !!att?.check_out_at;
+  const geoReady = geo.status === 'ok';
 
   return (
     <div className="bg-surface border border-border rounded-xl p-4">
@@ -66,9 +74,19 @@ export default function AbsenCard() {
         <div className="bg-surface2 rounded-lg p-2.5 text-center"><div className="text-[10px] text-text2">Pulang</div><div className="text-lg font-bold text-accent2">{jam(att?.check_out_at ?? null)}</div></div>
       </div>
 
+      {geo.status === 'denied' && (
+        <div className="mb-3 rounded-md px-3 py-2 text-[11px] border bg-danger/10 border-danger/30 text-danger flex items-center justify-between gap-2">
+          <span>📍 Aktifkan GPS/lokasi perangkat untuk bisa absen masuk/pulang.</span>
+          <button onClick={checkGeo} className="shrink-0 border border-danger/40 rounded px-2 py-1 text-[10px] font-semibold hover:bg-danger/10">🔄 Coba Lagi</button>
+        </div>
+      )}
+      {geo.status === 'checking' && (
+        <div className="mb-3 rounded-md px-3 py-2 text-[11px] border bg-border/30 border-border text-text2">📍 Memeriksa GPS…</div>
+      )}
+
       <div className="flex gap-2">
-        <button onClick={() => act('check-in')} disabled={busy || masuk} className="flex-1 bg-success text-bg rounded-lg py-2 text-xs font-semibold disabled:opacity-40">{busy && !masuk ? 'Memproses…' : '✅ Absen Masuk'}</button>
-        <button onClick={() => act('check-out')} disabled={busy || !masuk || pulang} className="flex-1 bg-accent2 text-bg rounded-lg py-2 text-xs font-semibold disabled:opacity-40">🏁 Absen Pulang</button>
+        <button onClick={() => act('check-in')} disabled={busy || masuk || !geoReady} title={!geoReady ? 'Aktifkan GPS dulu' : undefined} className="flex-1 bg-success text-bg rounded-lg py-2 text-xs font-semibold disabled:opacity-40">{busy && !masuk ? 'Memproses…' : '✅ Absen Masuk'}</button>
+        <button onClick={() => act('check-out')} disabled={busy || !masuk || pulang || !geoReady} title={!geoReady ? 'Aktifkan GPS dulu' : undefined} className="flex-1 bg-accent2 text-bg rounded-lg py-2 text-xs font-semibold disabled:opacity-40">🏁 Absen Pulang</button>
         <button onClick={() => setShowLeave(true)} className="border border-border text-text2 hover:text-text rounded-lg py-2 px-3 text-xs">📝 Izin/Cuti</button>
       </div>
 
