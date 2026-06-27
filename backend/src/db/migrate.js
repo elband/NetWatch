@@ -95,6 +95,9 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'devices', 'inspect_required', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER loc');
   // Mode standby: saat 0, perangkat tidak di-ping/dimonitor otomatis dan tidak memicu insiden otomatis.
   await addColumnIfMissing(conn, env.db.database, 'devices', 'monitor_enabled', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER alarm_override');
+  // Debounce auto-deteksi offline: kapan perangkat MULAI offline (untuk syarat
+  // "offline stabil X waktu" sebelum tiket otomatis dibuat). NULL = sedang tidak offline.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'offline_since', 'DATETIME DEFAULT NULL AFTER last_checked_at');
   // Pemantauan lanjutan: SNMP (CPU/mem/uptime riil) & health-check service (HTTP/TCP) selain ICMP.
   await addColumnIfMissing(conn, env.db.database, 'devices', 'check_type', "ENUM('ping','tcp','http') NOT NULL DEFAULT 'ping' AFTER monitor_enabled");
   await addColumnIfMissing(conn, env.db.database, 'devices', 'check_port', 'INT DEFAULT NULL AFTER check_type');

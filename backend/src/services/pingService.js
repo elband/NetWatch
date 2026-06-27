@@ -18,7 +18,7 @@ function meterFromStatus(prevStatus, alive, avgMs, thresholds) {
 
 async function getThresholds() {
   const [rows] = await pool.query(
-    "SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('threshold_ping_timeout_ms','threshold_cpu','threshold_mem','auto_resolve_stable_sec')"
+    "SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('threshold_ping_timeout_ms','threshold_cpu','threshold_mem','auto_resolve_stable_sec','auto_detect_offline_sec')"
   );
   const map = {};
   for (const r of rows) {
@@ -32,6 +32,9 @@ async function getThresholds() {
     // Lama perangkat harus stabil ONLINE (detik) sebelum insiden auto-otomatis
     // ditutup. Default 300 dtk (5 menit). 0 = tutup begitu online (lama).
     autoResolveStableSec: map.auto_resolve_stable_sec ?? 300,
+    // Lama perangkat harus terus OFFLINE (detik) sebelum tiket otomatis dibuat
+    // (debounce anti-flapping). Default 120 dtk (2 menit). 0 = buat tiket seketika.
+    autoDetectOfflineSec: map.auto_detect_offline_sec ?? 120,
   };
 }
 
@@ -110,9 +113,14 @@ export async function checkAllDevices(io) {
     // tidak memicu insiden (guard `!offReason` di bawah) & tampil jelas di UI.
     if (underMaint && finalStatus !== 'online') offReason = 'maintenance';
 
+    // Lacak kapan perangkat MULAI offline (offline_since): set saat offline pertama,
+    // pertahankan selama masih offline, kosongkan saat tidak offline lagi. Dipakai
+    // sebagai debounce "offline stabil X waktu" sebelum tiket otomatis dibuat.
     await pool.query(
-      'UPDATE devices SET status=?, off_reason=?, alarm_override=?, ping_ms=?, cpu=?, mem=?, last_checked_at=NOW() WHERE id=?',
-      [finalStatus, offReason, override, pingMs, cpu, mem, device.id]
+      `UPDATE devices SET status=?, off_reason=?, alarm_override=?, ping_ms=?, cpu=?, mem=?,
+         offline_since = CASE WHEN ?='offline' THEN COALESCE(offline_since, NOW()) ELSE NULL END,
+         last_checked_at=NOW() WHERE id=?`,
+      [finalStatus, offReason, override, pingMs, cpu, mem, finalStatus, device.id]
     );
 
     // Rekam metrik time-series (bulk insert setelah loop).
@@ -121,11 +129,16 @@ export async function checkAllDevices(io) {
     const updated = { ...device, status: finalStatus, off_reason: offReason, alarm_override: override, ping_ms: pingMs, cpu, mem };
     io?.emit('device:update', updated);
 
-    // Setiap perangkat yang OFFLINE & belum punya insiden aktif → otomatis
-    // dibuatkan insiden ke POOL, lalu notifikasi ke teknisi on-duty. Dengan
-    // begitu insiden muncul di dashboard teknisi on-duty (pool) & koordinator.
-    // Hanya buat insiden bila bukan kategori "dimatikan" (jam malam, non-server).
-    if (finalStatus === 'offline' && !offReason) {
+    // Debounce auto-deteksi: berapa lama perangkat ini SUDAH terus-menerus offline
+    // (berdasarkan offline_since SEBELUM sweep ini). Pada sweep offline pertama nilainya
+    // null → 0 dtk → belum dibuat tiket (memberi waktu perangkat yang cuma flap pulih).
+    const offlineSec = device.offline_since ? (Date.now() - new Date(device.offline_since).getTime()) / 1000 : 0;
+
+    // Perangkat yang OFFLINE STABIL (≥ ambang) & belum punya insiden aktif → otomatis
+    // dibuatkan insiden ke POOL, lalu notifikasi ke teknisi on-duty. Dengan begitu
+    // insiden muncul di dashboard teknisi on-duty (pool) & koordinator. Tidak dibuat
+    // bila kategori "dimatikan"/maintenance, atau belum cukup lama offline (anti-flap).
+    if (finalStatus === 'offline' && !offReason && offlineSec >= thresholds.autoDetectOfflineSec) {
       const conn = await pool.getConnection();
       try {
         const [existing] = await conn.query(
@@ -140,8 +153,10 @@ export async function checkAllDevices(io) {
              VALUES (?, ?, ?, ?, ?, 'kritis', NULL, 'aktif', 0, 'auto')`,
             [id, device.id, device.name, device.ip, issue]
           );
+          const sinceTxt = device.offline_since ? ` sejak ${new Date(device.offline_since).toLocaleString('id-ID')}` : '';
+          const stabilMnt = Math.round(thresholds.autoDetectOfflineSec / 60);
           await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
-            id, 'Deteksi otomatis: perangkat offline.',
+            id, `Deteksi otomatis: perangkat OFFLINE stabil${thresholds.autoDetectOfflineSec ? ` ≥ ${stabilMnt} mnt` : ''}${sinceTxt} (lolos debounce anti-flapping).`,
           ]);
           const n = await snapshotAndNotifyOnDuty(conn, { id, priority: 'kritis', deviceName: device.name, issue });
           await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [

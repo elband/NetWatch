@@ -17,7 +17,7 @@ const LKP_DEFAULT: LkpForm = {
 };
 
 export default function Settings() {
-  const [form, setForm] = useState({ wa_provider: 'wabarier', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000, auto_resolve_stable_sec: 300 });
+  const [form, setForm] = useState({ wa_provider: 'wabarier', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000, auto_resolve_stable_sec: 300, auto_detect_offline_sec: 120 });
   const [lkp, setLkp] = useState<LkpForm>(LKP_DEFAULT);
   const [saved, setSaved] = useState(false);
   const [tz, setTz] = useState('Asia/Makassar');
@@ -132,6 +132,11 @@ export default function Settings() {
               <label className="text-[11px] text-text2 block mb-1">Auto-Resolve Insiden — stabil ONLINE (detik)</label>
               <input type="number" min={0} className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.auto_resolve_stable_sec} onChange={(e) => setForm({ ...form, auto_resolve_stable_sec: Number(e.target.value) })} />
               <div className="text-[10px] text-text2 mt-1">Lama perangkat harus stabil ONLINE (tanpa flapping) sebelum insiden otomatis ditutup. Mis. 300 = 5 menit. 0 = tutup begitu online.</div>
+            </div>
+            <div>
+              <label className="text-[11px] text-text2 block mb-1">Auto-Deteksi Offline — stabil OFFLINE (detik)</label>
+              <input type="number" min={0} className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.auto_detect_offline_sec} onChange={(e) => setForm({ ...form, auto_detect_offline_sec: Number(e.target.value) })} />
+              <div className="text-[10px] text-text2 mt-1">Lama perangkat harus terus OFFLINE sebelum tiket otomatis dibuat (debounce anti naik-turun). Mis. 120 = 2 menit. 0 = buat tiket seketika.</div>
             </div>
             <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold" onClick={save}>💾 Simpan</button>
           </div>
