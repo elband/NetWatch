@@ -117,6 +117,31 @@ export async function checkAllDevices(io) {
         conn.release();
       }
     }
+
+    // Pemulihan otomatis: perangkat kembali ONLINE → tutup insiden yang dibuat
+    // OTOMATIS oleh sistem (source='auto') yang masih MENGGANTUNG DI POOL
+    // (tech_id IS NULL). Insiden yang sudah diambil teknisi, insiden manual, atau
+    // aduan publik TIDAK ikut ditutup — itu harus diselesaikan teknisi dengan
+    // dokumentasi. Mencegah insiden palsu (mis. false-offline) menumpuk.
+    if (finalStatus === 'online') {
+      try {
+        const [openAuto] = await pool.query(
+          "SELECT id FROM incidents WHERE device_id=? AND source='auto' AND status<>'selesai' AND tech_id IS NULL",
+          [device.id]
+        );
+        for (const inc of openAuto) {
+          await pool.query(
+            `UPDATE incidents SET status='selesai', step=2, resolved_at=NOW(),
+               duration_min=GREATEST(1, TIMESTAMPDIFF(MINUTE, created_at, NOW())) WHERE id=?`,
+            [inc.id]
+          );
+          await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 2, ?)', [
+            inc.id, 'Perangkat kembali online — insiden deteksi otomatis ditutup oleh sistem.',
+          ]);
+          io?.emit('incident:update', { id: inc.id, device: device.name, status: 'selesai' });
+        }
+      } catch { /* jangan ganggu sweep bila gagal menutup insiden */ }
+    }
   }
 
   // Bulk insert riwayat metrik (satu query untuk seluruh perangkat).
