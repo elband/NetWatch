@@ -45,6 +45,7 @@ interface ActiveDialog extends DialogOptions {
 }
 
 let pushDialog: ((d: ActiveDialog) => void) | null = null;
+const pending: ActiveDialog[] = [];
 let seq = 0;
 
 function plain(o: DialogOptions): string {
@@ -52,14 +53,26 @@ function plain(o: DialogOptions): string {
   return parts.filter(Boolean).join('\n');
 }
 
+function nativeFallback(d: ActiveDialog) {
+  if (d.kind === 'confirm') d.resolve(window.confirm(plain(d)));
+  else if (d.kind === 'prompt') d.resolve(window.prompt(plain(d), d.defaultValue || ''));
+  else { window.alert(plain(d)); d.resolve(undefined); }
+}
+
 function open(kind: DialogKind, o: DialogOptions): Promise<unknown> {
   return new Promise((resolve) => {
     const d: ActiveDialog = { ...o, id: ++seq, kind, variant: o.variant ?? 'info', resolve };
     if (pushDialog) { pushDialog(d); return; }
-    // Fallback bila host belum ter-mount — jangan sampai promise menggantung.
-    if (kind === 'confirm') resolve(window.confirm(plain(o)));
-    else if (kind === 'prompt') resolve(window.prompt(plain(o), o.defaultValue || ''));
-    else { window.alert(plain(o)); resolve(undefined); }
+    // Host belum ter-mount: ANTRE & tunggu (jangan langsung ke native browser yang jelek).
+    // DialogHost akan men-flush antrean saat mount. Native hanya jaring pengaman terakhir
+    // bila host benar-benar tak pernah hadir (mis. salah konfigurasi) — agar promise tak menggantung.
+    pending.push(d);
+    setTimeout(() => {
+      const i = pending.indexOf(d);
+      if (i === -1) return; // sudah diproses host
+      pending.splice(i, 1);
+      nativeFallback(d);
+    }, 2500);
   });
 }
 
@@ -88,6 +101,8 @@ export function DialogHost() {
   const [stack, setStack] = useState<ActiveDialog[]>([]);
   useEffect(() => {
     pushDialog = (d) => setStack((s) => [...s, d]);
+    // Flush dialog yang sempat dipanggil sebelum host ter-mount (defer ke microtask).
+    if (pending.length) { const queued = pending.splice(0); queueMicrotask(() => setStack((s) => [...s, ...queued])); }
     return () => { pushDialog = null; };
   }, []);
 
@@ -124,19 +139,29 @@ function DialogView({ dialog, onClose }: { dialog: ActiveDialog; onClose: (d: Ac
     else onClose(dialog, false);
   }
 
+  // Fokus + select awal hanya sekali saat dialog terbuka — jangan ulangi tiap
+  // perubahan `value`, sebab `select()` akan menyeleksi ulang seluruh teks dan
+  // menimpa karakter berikutnya yang diketik (bug: hanya 1 karakter tersisa).
   useEffect(() => {
     const t = setTimeout(() => {
       if (isPrompt) { inputRef.current?.focus(); inputRef.current?.select(); }
       else confirmRef.current?.focus();
     }, 50);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const latest = useRef({ value, blocked, cancel, confirm });
+  latest.current = { value, blocked, cancel, confirm };
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-      else if (e.key === 'Enter' && !(isPrompt && dialog.multiline && !e.ctrlKey)) { e.preventDefault(); confirm(); }
+      if (e.key === 'Escape') { e.preventDefault(); latest.current.cancel(); }
+      else if (e.key === 'Enter' && !(isPrompt && dialog.multiline && !e.ctrlKey)) { e.preventDefault(); latest.current.confirm(); }
     }
     window.addEventListener('keydown', onKey);
-    return () => { clearTimeout(t); window.removeEventListener('keydown', onKey); };
+    return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, blocked]);
+  }, []);
 
   return (
     <div
@@ -200,7 +225,7 @@ function DialogView({ dialog, onClose }: { dialog: ActiveDialog; onClose: (d: Ac
               ref={confirmRef}
               onClick={confirm}
               disabled={blocked}
-              className="flex-1 py-2.5 rounded-lg text-[13px] font-bold text-text transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 py-2.5 rounded-lg text-[13px] font-bold text-white transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ background: meta.color }}
             >
               {dialog.confirmText || 'Oke'}
