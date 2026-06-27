@@ -11,9 +11,16 @@ const SHIFT_LABEL: Record<string, string> = { pagi: 'Dinas Pagi', siang: 'Dinas 
 // DL (dinas_luar) tidak masuk siklus klik — hanya lewat pengajuan teknisi + persetujuan koordinator.
 const SHIFTS = ['malam', 'pagi', 'siang', 'libur'];
 
+// Pakai komponen tanggal lokal (bukan toISOString) agar tidak bergeser akibat
+// konversi ke UTC (WIB = UTC+7 menyebabkan tanggal lokal mundur 1 hari).
 function dateKey(d: Date) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
+
+const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', "Jum'at", 'Sabtu'];
 
 export default function Jadwal() {
   const { user } = useAuth();
@@ -105,7 +112,10 @@ export default function Jadwal() {
   return (
     <div>
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div><div className="text-[17px] font-bold">📅 Jadwal Dinas Teknisi</div></div>
+        <div>
+          <div className="text-[17px] font-bold">📅 Jadwal Dinas Teknisi</div>
+          <div className="text-[11px] text-text2 mt-0.5">Hari ini {DAY_NAMES[today.getDay()]}, {today.getDate()} {monthNames[today.getMonth()]} {today.getFullYear()}</div>
+        </div>
         <div className="flex items-center gap-2">
           <button className="border border-border text-text2 rounded-md px-2.5 py-1 text-xs" onClick={() => setMonthOffset((m) => m - 1)}>← Bulan Lalu</button>
           <span className="text-[13px] font-semibold min-w-[130px] text-center">{monthNames[month]} {year}</span>
