@@ -3,7 +3,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
-import { isNotifyEnabled } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -39,17 +39,23 @@ function locationReasons({ lat, lng, tz, accuracy }, office) {
 }
 
 async function notifyCoords(message) {
-  if (!(await isNotifyEnabled('absensi_vpn_lokasi', 'koordinator'))) return 0;
   const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
-  for (const c of coords) { try { await queueWaNotification({ type: 'alert', toUserId: c.id, message }); } catch { /* abaikan */ } }
-  return coords.length;
+  let n = 0;
+  for (const c of coords) {
+    if (!(await isNotifyEnabledForUser('absensi_vpn_lokasi', c.id))) continue;
+    try { await queueWaNotification({ type: 'alert', toUserId: c.id, message }); n++; } catch { /* abaikan */ }
+  }
+  return n;
 }
 
 async function notifyAdmins(message) {
-  if (!(await isNotifyEnabled('absensi_duplikat_perangkat', 'admin'))) return 0;
   const [admins] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='admin' OR JSON_CONTAINS(roles,'\"admin\"'))");
-  for (const a of admins) { try { await queueWaNotification({ type: 'alert', toUserId: a.id, message }); } catch { /* abaikan */ } }
-  return admins.length;
+  let n = 0;
+  for (const a of admins) {
+    if (!(await isNotifyEnabledForUser('absensi_duplikat_perangkat', a.id))) continue;
+    try { await queueWaNotification({ type: 'alert', toUserId: a.id, message }); n++; } catch { /* abaikan */ }
+  }
+  return n;
 }
 
 // Deteksi perangkat absensi yang sama dipakai oleh dua teknisi berbeda pada hari
@@ -72,7 +78,7 @@ async function checkDuplicateDevice(currentUserId, currentUserName, deviceId, da
     [note, first.id]
   );
   await audit({ id: currentUserId, name: currentUserName }, 'attendance_duplicate_device', 'attendance', first.id, `${first.name} & ${currentUserName} memakai perangkat sama (${date})`);
-  if (await isNotifyEnabled('absensi_duplikat_perangkat', 'teknisi')) {
+  if (await isNotifyEnabledForUser('absensi_duplikat_perangkat', first.user_id)) {
     const msg = `⚠️ *Perangkat Absensi Duplikat*\nPerangkat yang Anda pakai absen pada ${date} terdeteksi juga dipakai oleh ${currentUserName}.\nAbsensi Anda ditandai & performa bulan ini dikurangi 50%.`;
     try { await queueWaNotification({ type: 'alert', toUserId: first.user_id, message: msg }); } catch { /* abaikan */ }
   }

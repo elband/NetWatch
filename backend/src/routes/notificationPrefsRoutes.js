@@ -7,10 +7,11 @@ import { audit } from '../services/audit.js';
 const router = Router();
 router.use(requireAuth);
 
-// Daftar jenis notifikasi WA + pengaturan penerima saat ini (admin saja).
+// Daftar jenis notifikasi WA + pengaturan penerima per-user saat ini (admin saja).
 router.get('/', requireRole('admin'), async (req, res) => {
   const prefs = await getNotifyPrefs();
-  res.json({ events: NOTIF_EVENTS, prefs });
+  const [users] = await pool.query("SELECT id, name, role, roles FROM users WHERE active=1 ORDER BY role, name");
+  res.json({ events: NOTIF_EVENTS, prefs, users });
 });
 
 router.put('/', requireRole('admin'), async (req, res) => {

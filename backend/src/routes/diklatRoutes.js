@@ -10,7 +10,7 @@ import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
 import { escapeLike } from '../utils/sql.js';
 import { audit } from '../services/audit.js';
-import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -56,9 +56,11 @@ async function logHistory(diklatId, user, status, note) {
   await pool.query('INSERT INTO diklat_history (diklat_id, user_id, user_name, status, note) VALUES (?,?,?,?,?)', [diklatId, user?.id || null, user?.name || null, status, note || null]);
 }
 async function notifyCoords(message) {
-  if (!(await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator'))) return;
   const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
-  for (const x of c) { try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ } }
+  for (const x of c) {
+    if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', x.id))) continue;
+    try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ }
+  }
 }
 
 // ===== Dashboard statistik =====

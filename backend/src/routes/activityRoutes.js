@@ -7,7 +7,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
-import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -62,15 +62,14 @@ router.post('/', upload.single('bukti'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM activities WHERE id = ?', [r.insertId]);
   const act = rows[0];
 
-  if (await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator')) {
-    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
-    for (const c of coords) {
-      await queueWaNotification({
-        type: 'other',
-        toUserId: c.id,
-        message: `📋 PENGAJUAN KEGIATAN — ${TYPE_LABEL[t]}\n${title.trim()}\nOleh: ${req.user.name}\nWaktu: ${fmtWhen(act)}${detail?.trim() ? `\n${detail.trim()}` : ''}${buktiUrl ? '\n📎 Ada bukti dukung terlampir.' : ''}\nMohon persetujuan di aplikasi NetWatch.`,
-      });
-    }
+  const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+  for (const c of coords) {
+    if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
+    await queueWaNotification({
+      type: 'other',
+      toUserId: c.id,
+      message: `📋 PENGAJUAN KEGIATAN — ${TYPE_LABEL[t]}\n${title.trim()}\nOleh: ${req.user.name}\nWaktu: ${fmtWhen(act)}${detail?.trim() ? `\n${detail.trim()}` : ''}${buktiUrl ? '\n📎 Ada bukti dukung terlampir.' : ''}\nMohon persetujuan di aplikasi NetWatch.`,
+    });
   }
   await notifyRoles(['koordinator', 'admin'], { type: 'approval_pending', title: `Persetujuan menunggu: ${TYPE_LABEL[t]}`, message: `${title.trim()} — oleh ${req.user.name}`, refId: act.id, refType: 'activity', link: '/coord-dashboard' });
   res.status(201).json({ activity: act });

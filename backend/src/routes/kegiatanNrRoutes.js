@@ -8,7 +8,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { notifyRoles } from '../services/notify.js';
 import { audit } from '../services/audit.js';
-import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -49,9 +49,11 @@ async function logApproval(id, user, status, note, poin) {
   await pool.query('INSERT INTO kegiatan_non_rutin_approval (kegiatan_id, user_id, user_name, status, note, poin) VALUES (?,?,?,?,?,?)', [id, user?.id || null, user?.name || null, status, note || null, poin ?? null]);
 }
 async function notifyCoords(message) {
-  if (!(await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator'))) return;
   const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
-  for (const x of c) { try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ } }
+  for (const x of c) {
+    if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', x.id))) continue;
+    try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ }
+  }
 }
 function monthRange(month) {
   const [y, m] = month.split('-').map(Number);

@@ -3,7 +3,7 @@ import { redisConnection } from './queueConnection.js';
 import { pool } from '../db/pool.js';
 import { queueWaNotification } from './waQueue.js';
 import { logger } from '../config/logger.js';
-import { isNotifyEnabled } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 // Pengingat WA harian utk teknisi yang dinas hari ini ttg maintenance peralatan terjadwal.
 export const maintenanceReminderQueue = new Queue('maintenance-reminder', { connection: redisConnection });
@@ -35,7 +35,6 @@ export async function sendDailyMaintenanceReminders() {
   );
 
   if (maint.length === 0) return { sent: 0, technicians: 0 };
-  if (!(await isNotifyEnabled('maintenance_reminder', 'teknisi'))) return { sent: 0, technicians: 0, disabled: true };
 
   const lines = maint.map((m) => `- ${m.device_name}${m.device_loc ? ` (${m.device_loc})` : ''}: ${m.task}`);
   const message =
@@ -57,6 +56,7 @@ export async function sendDailyMaintenanceReminders() {
 
   let sent = 0;
   for (const t of techs) {
+    if (!(await isNotifyEnabledForUser('maintenance_reminder', t.id))) continue;
     try {
       await queueWaNotification({ type: 'other', toUserId: t.id, message });
       sent += 1;

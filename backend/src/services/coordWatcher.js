@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification } from './notify.js';
 import { COORD_SLA_MINUTES, REMIND_MINUTES, getOnDutyTechIds } from '../config/shifts.js';
-import { isNotifyEnabled } from './notifyPrefs.js';
+import { isNotifyEnabledForUser } from './notifyPrefs.js';
 
 const takeLink = (id) => `${env.appUrl}/my-incidents?focus=${id}&action=take`;
 const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
@@ -22,9 +22,8 @@ export async function remindOnDutyTechs(inc, { manual = false, by = null } = {})
     fallback = true;
   }
   const mins = Math.max(1, Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000));
-  const waOn = await isNotifyEnabled('insiden_teknisi', 'teknisi');
   for (const uid of targetIds) {
-    if (waOn) {
+    if (await isNotifyEnabledForUser('insiden_teknisi', uid)) {
       await queueWaNotification({
         type: 'alert',
         toUserId: uid,
@@ -70,7 +69,6 @@ export async function checkUnclaimedIncidents(io) {
   if (toEscalate.length === 0) return;
 
   const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
-  const coordWaOn = await isNotifyEnabled('insiden_koordinator', 'koordinator');
   for (const inc of toEscalate) {
     await pool.query('UPDATE incidents SET coord_alerted = 1 WHERE id = ?', [inc.id]);
     const mins = Math.max(COORD_SLA_MINUTES, Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000));
@@ -79,7 +77,7 @@ export async function checkUnclaimedIncidents(io) {
       `⚠️ Insiden belum diambil teknisi >${COORD_SLA_MINUTES} menit — eskalasi ke koordinator.`,
     ]);
     for (const c of coords) {
-      if (coordWaOn) {
+      if (await isNotifyEnabledForUser('insiden_koordinator', c.id)) {
         await queueWaNotification({
           type: 'alert',
           toUserId: c.id,

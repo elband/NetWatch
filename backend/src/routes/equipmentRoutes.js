@@ -10,7 +10,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { getDutyStatus, dateKey } from '../config/shifts.js';
 import { withInspectionPhoto, INSPECTION_DIR } from '../middleware/upload.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
-import { isNotifyEnabled } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -179,11 +179,12 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   );
 
   // Notifikasi otomatis ke koordinator bahwa perangkat sudah diinspeksi.
-  if (await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator')) {
+  {
     const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
     const stEmoji = st === 'rusak' ? '🔴' : st === 'perhatian' ? '🟡' : '🟢';
     const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
     for (const c of coords) {
+      if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
       await queueWaNotification({
         type: 'other',
         toUserId: c.id,
@@ -259,8 +260,9 @@ router.put('/maintenance/:id', maintUpload.single('doc'), async (req, res) => {
     const when = new Date().toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     const docInfo = pc.c > 0 ? `${pc.c} foto dokumentasi dilampirkan` : 'Dokumentasi telah dilampirkan';
     const msg = `🛠️ *Maintenance Selesai*\nPerangkat: ${m.device_name}\nTugas: ${m.task}\nOleh: ${req.user.name}\nWaktu: ${when}\n${docInfo} di sistem.`;
-    if (await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator')) {
-      for (const c of coords) { try { await queueWaNotification({ type: 'report', toUserId: c.id, message: msg }); } catch { /* abaikan */ } }
+    for (const c of coords) {
+      if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
+      try { await queueWaNotification({ type: 'report', toUserId: c.id, message: msg }); } catch { /* abaikan */ }
     }
     req.app.get('io')?.emit('maintenance:done', { id: m.id, device: m.device_name, by: req.user.name });
     return res.json({ ok: true, doc_url: docUrl, notified: coords.length });

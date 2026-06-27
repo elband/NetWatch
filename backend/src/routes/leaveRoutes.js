@@ -7,7 +7,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
-import { isNotifyEnabled, isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -35,9 +35,10 @@ router.post('/', upload.single('doc'), async (req, res) => {
   );
   await audit(req.user, 'leave_request', 'leave', r.insertId, `${type} ${startDate}..${endDate}`);
   // Beri tahu koordinator.
-  if (await isNotifyEnabled('pengajuan_review_koordinator', 'koordinator')) {
-    const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
-    for (const c of coords) { try { await queueWaNotification({ type: 'other', toUserId: c.id, message: `📝 *Pengajuan ${type}*\n${req.user.name}: ${startDate} s/d ${endDate}\nAlasan: ${reason || '-'}\nMohon ditinjau di sistem.` }); } catch { /* abaikan */ } }
+  const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+  for (const c of coords) {
+    if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
+    try { await queueWaNotification({ type: 'other', toUserId: c.id, message: `📝 *Pengajuan ${type}*\n${req.user.name}: ${startDate} s/d ${endDate}\nAlasan: ${reason || '-'}\nMohon ditinjau di sistem.` }); } catch { /* abaikan */ }
   }
   res.status(201).json({ id: r.insertId, doc_url: docUrl });
 });
