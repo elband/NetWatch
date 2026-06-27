@@ -13,21 +13,25 @@ import { logger } from '../config/logger.js';
 // --- ICMP ping ---------------------------------------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Probe ICMP yang tahan paket-hilang. Perangkat wireless (AP/klien) kerap men-drop
-// paket ICMP pertama (ARP resolve / power-save), sehingga probe 1-paket bisa salah
-// menyatakan offline walau perangkat hidup & balas ping manual. Strategi:
-//  • Jalur cepat: 1 paket. Perangkat sehat biasanya langsung membalas → cepat.
-//  • Bila tampak mati, coba ulang beberapa kali (jeda singkat untuk ARP) sebelum
-//    benar-benar menyimpulkan offline. Hanya perangkat yang tampak mati yang kena
-//    biaya retry, jadi sweep untuk perangkat sehat tetap ringan.
-const PING_ATTEMPTS = 3;
+// Probe ICMP yang tahan paket-hilang. Perangkat wireless (AP/klien) & beberapa
+// router kerap men-drop paket ICMP PERTAMA ke suatu host (ARP resolve / power-save
+// wake / rate-limit), sehingga probe 1-paket SELALU salah menyatakan offline walau
+// perangkat hidup (ping manual berhasil karena mengirim banyak paket).
+//
+// Strategi: kirim BEBERAPA paket dalam SATU sesi (min_reply=4 → `ping -c 4`),
+// meniru ping manual — paket pertama boleh drop, asalkan ada ≥1 balasan dianggap
+// HIDUP. Interval dipersempit (-i 0.2 di Linux) agar tetap cepat (~0.6 dtk). Satu
+// retry tambahan untuk berjaga-jaga sebelum benar-benar menyimpulkan offline.
+const PING_PACKETS = 4;
+// -i (interval) hanya untuk Linux/mac; di Windows -i berarti TTL (jangan dipakai).
+const PING_EXTRA = process.platform === 'win32' ? [] : ['-i', '0.2'];
 async function probePing(ip) {
-  for (let attempt = 0; attempt < PING_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await ping.promise.probe(ip, { timeout: 2 });
+      const r = await ping.promise.probe(ip, { timeout: 2, min_reply: PING_PACKETS, extra: PING_EXTRA });
       if (r.alive) return { alive: true, avgMs: parseFloat(r.time) || 0 };
     } catch { /* anggap percobaan ini gagal, lanjut retry */ }
-    if (attempt < PING_ATTEMPTS - 1) await sleep(250);
+    if (attempt === 0) await sleep(300);
   }
   return { alive: false, avgMs: 0 };
 }
