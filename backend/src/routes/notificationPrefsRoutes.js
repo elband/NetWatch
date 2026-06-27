@@ -1,17 +1,16 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { NOTIF_EVENTS, getNotifyPrefs } from '../services/notifyPrefs.js';
+import { NOTIF_EVENTS, NOTIF_ROLES, getNotifyPrefs } from '../services/notifyPrefs.js';
 import { audit } from '../services/audit.js';
 
 const router = Router();
 router.use(requireAuth);
 
-// Daftar jenis notifikasi WA + pengaturan penerima per-user saat ini (admin saja).
+// Daftar jenis notifikasi WA + pengaturan penerima per-PERAN saat ini (admin saja).
 router.get('/', requireRole('admin'), async (req, res) => {
   const prefs = await getNotifyPrefs();
-  const [users] = await pool.query("SELECT id, name, role, roles FROM users WHERE active=1 ORDER BY role, name");
-  res.json({ events: NOTIF_EVENTS, prefs, users });
+  res.json({ events: NOTIF_EVENTS, prefs, roles: NOTIF_ROLES });
 });
 
 router.put('/', requireRole('admin'), async (req, res) => {

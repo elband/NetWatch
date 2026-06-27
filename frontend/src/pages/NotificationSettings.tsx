@@ -2,18 +2,13 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 
 interface NotifEvent { key: string; label: string; roles: string[] }
-interface NotifUser { id: number; name: string; role: string; roles: string[] | null }
-type Prefs = Record<string, Record<number, boolean>>;
+type Prefs = Record<string, Record<string, boolean>>;
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Admin', koordinator: 'Koordinator', teknisi: 'Teknisi', viewer: 'Viewer' };
 
-function userHasRole(u: NotifUser, role: string) {
-  return u.role === role || (u.roles || []).includes(role);
-}
-
 export default function NotificationSettings() {
   const [events, setEvents] = useState<NotifEvent[]>([]);
-  const [users, setUsers] = useState<NotifUser[]>([]);
+  const [roles, setRoles] = useState<string[]>([]);
   const [prefs, setPrefs] = useState<Prefs>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -21,14 +16,14 @@ export default function NotificationSettings() {
   useEffect(() => {
     api.get('/notification-prefs').then((res) => {
       setEvents(res.data.events || []);
-      setUsers(res.data.users || []);
+      setRoles(res.data.roles || []);
       setPrefs(res.data.prefs || {});
     });
   }, []);
 
-  function toggle(eventKey: string, userId: number) {
-    const currentlyEnabled = prefs[eventKey]?.[userId] !== false;
-    setPrefs((p) => ({ ...p, [eventKey]: { ...p[eventKey], [userId]: !currentlyEnabled } }));
+  function toggle(eventKey: string, role: string) {
+    const currentlyEnabled = prefs[eventKey]?.[role] !== false;
+    setPrefs((p) => ({ ...p, [eventKey]: { ...p[eventKey], [role]: !currentlyEnabled } }));
   }
 
   async function save() {
@@ -47,17 +42,14 @@ export default function NotificationSettings() {
       <div className="mb-4"><div className="text-[17px] font-bold">🔔 Pengaturan Notifikasi</div></div>
       <div className="bg-surface border border-border rounded-[10px] overflow-hidden">
         <div className="px-4 py-3 border-b border-border text-[13px] font-semibold">Daftar Notifikasi WhatsApp</div>
-        <p className="px-4 pt-3 text-[11px] text-text2">Centang setiap orang yang harus mendapat notifikasi WA untuk tiap kejadian. Bila tidak dicentang, orang tersebut tidak akan menerima notifikasi itu (tindakan/penalti pada sistem tetap berjalan seperti biasa). "—" berarti orang itu tidak relevan untuk kejadian tersebut.</p>
+        <p className="px-4 pt-3 text-[11px] text-text2">Centang setiap <b>peran</b> yang harus mendapat notifikasi WA untuk tiap kejadian. Bila tidak dicentang, peran tersebut tidak akan menerima notifikasi itu (tindakan/penalti pada sistem tetap berjalan seperti biasa). "—" berarti peran itu tidak relevan untuk kejadian tersebut.</p>
         <div className="overflow-x-auto mt-2">
           <table className="w-full text-[12px]">
             <thead>
               <tr className="text-text2 border-b border-border">
                 <th className="text-left px-4 py-2 sticky left-0 bg-surface">Kejadian</th>
-                {users.map((u) => (
-                  <th key={u.id} className="text-center px-2 py-2 whitespace-nowrap">
-                    <div>{u.name}</div>
-                    <div className="text-[9px] text-text2/70 font-normal">{ROLE_LABEL[u.role] || u.role}</div>
-                  </th>
+                {roles.map((r) => (
+                  <th key={r} className="text-center px-2 py-2 whitespace-nowrap">{ROLE_LABEL[r] || r}</th>
                 ))}
               </tr>
             </thead>
@@ -65,16 +57,16 @@ export default function NotificationSettings() {
               {events.map((ev) => (
                 <tr key={ev.key} className="border-b border-border/40">
                   <td className="px-4 py-2.5 sticky left-0 bg-surface">{ev.label}</td>
-                  {users.map((u) => {
-                    const relevant = ev.roles.some((r) => userHasRole(u, r));
+                  {roles.map((r) => {
+                    const relevant = ev.roles.includes(r);
                     return (
-                      <td key={u.id} className="text-center px-2 py-2.5">
+                      <td key={r} className="text-center px-2 py-2.5">
                         {relevant ? (
                           <input
                             type="checkbox"
                             className="w-4 h-4"
-                            checked={prefs[ev.key]?.[u.id] !== false}
-                            onChange={() => toggle(ev.key, u.id)}
+                            checked={prefs[ev.key]?.[r] !== false}
+                            onChange={() => toggle(ev.key, r)}
                           />
                         ) : (
                           <span className="text-text2/40">—</span>
@@ -85,7 +77,7 @@ export default function NotificationSettings() {
                 </tr>
               ))}
               {events.length === 0 && (
-                <tr><td colSpan={users.length + 1} className="text-center text-text2 px-4 py-6">Memuat...</td></tr>
+                <tr><td colSpan={roles.length + 1} className="text-center text-text2 px-4 py-6">Memuat...</td></tr>
               )}
             </tbody>
           </table>
