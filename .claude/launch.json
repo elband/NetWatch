@@ -7,6 +7,20 @@
       "runtimeArgs": ["frontend/node_modules/vite/bin/vite.js", "frontend", "--config", "frontend/vite.config.ts"],
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "netwatch-verify",
+      "runtimeExecutable": "C:\\laragon\\bin\\nodejs\\node-v22\\node.exe",
+      "runtimeArgs": ["frontend/node_modules/vite/bin/vite.js", "frontend", "--config", "frontend/vite.config.ts", "--host", "127.0.0.1", "--port", "5188", "--strictPort"],
+      "port": 5188,
+      "autoPort": false
+    },
+    {
+      "name": "netwatch-verify2",
+      "runtimeExecutable": "C:\\laragon\\bin\\nodejs\\node-v22\\node.exe",
+      "runtimeArgs": ["frontend/node_modules/vite/bin/vite.js", "frontend", "--config", "frontend/vite.config.ts", "--host", "127.0.0.1", "--port", "5192"],
+      "port": 5192,
+      "autoPort": true
     }
   ]
 }

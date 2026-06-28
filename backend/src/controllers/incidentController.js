@@ -83,7 +83,7 @@ export async function notifyAutoResolved(conn, incident, info = {}) {
 
 // Snapshot teknisi on-duty saat insiden masuk + kirim notifikasi ke mereka.
 // Mengembalikan jumlah teknisi yang diberi notifikasi.
-export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue }) {
+export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue, coordId = null }) {
   const onDutyIds = await getOnDutyTechIds(conn);
   for (const uid of onDutyIds) {
     await conn.query('INSERT IGNORE INTO incident_duty (incident_id, user_id) VALUES (?, ?)', [id, uid]);
@@ -100,6 +100,12 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
     }
     await createNotification({ userId: uid, type: 'ticket_assigned', priority: prio, title: `Tiket baru: ${deviceName}`, message: issue, refId: id, refType: 'incident', link: '/my-incidents' });
   }
+  // Koordinator: WA "insiden baru" + lonceng in-app. Sebelumnya hanya path
+  // pembuatan MANUAL yang mengirim WA ke koordinator; insiden auto-deteksi
+  // (perangkat offline) hanya memberi lonceng, sehingga koordinator tak dapat WA
+  // saat tiket muncul. Kini semua path (auto/manual-pool/lapor publik) yang
+  // melewati fungsi ini mengirim WA ke koordinator juga.
+  await notifyCoordinators(conn, { id, coord_id: coordId }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
   // Koordinator & admin: tiket helpdesk baru masuk.
   await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: `/incidents?focus=${id}` });
   return onDutyIds.length;
@@ -357,9 +363,10 @@ export async function createIncident(req, res) {
     );
     await conn.query(`INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)`, [id, 'Insiden dibuat.']);
 
-    await notifyCoordinators(conn, { id, coord_id: coordId || null }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
-
     if (assigned) {
+      // WA ke koordinator hanya di cabang ini; cabang pool (else) sudah mengirim
+      // WA koordinator di dalam snapshotAndNotifyOnDuty — hindari kiriman ganda.
+      await notifyCoordinators(conn, { id, coord_id: coordId || null }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
       if (await isNotifyEnabledForUser('insiden_teknisi', assigned)) await queueWaNotification({
         type: 'alert',
         toUserId: assigned,
@@ -367,7 +374,7 @@ export async function createIncident(req, res) {
         relatedIncidentId: id,
       });
     } else {
-      const n = await snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue });
+      const n = await snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue, coordId: coordId || null });
       await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
         id, n ? `Notifikasi dikirim ke ${n} teknisi on-duty.` : 'Tidak ada teknisi on-duty saat ini — insiden menunggu di pool.',
       ]);
