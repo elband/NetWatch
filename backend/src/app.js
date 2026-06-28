@@ -9,7 +9,7 @@ import pinoHttp from 'pino-http';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { apiLimiter } from './middleware/rateLimit.js';
-import { verifyTte } from './controllers/incidentController.js';
+import { verifyTte, verifyTteDocData, verifyTteDocPdf } from './controllers/incidentController.js';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
@@ -90,6 +90,8 @@ export function createApp() {
   app.use('/api', apiLimiter);
   // Endpoint publik (tanpa auth) — dipindai dari QR / tautan WA.
   app.get('/api/verify-tte/:token', verifyTte);
+  app.get('/api/verify-tte/:token/doc-data', verifyTteDocData);
+  app.get('/api/verify-tte/:token/document.pdf', verifyTteDocPdf);
   app.get('/api/ttd/:token', getTtdDoc);
   app.post('/api/ttd/:token', submitTtd);
   app.get('/api/surat/pelaksana-sign/:token', getPelaksanaSignDoc);

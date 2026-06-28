@@ -7,11 +7,15 @@ const STATUS_COLOR: Record<string, string> = { sent: 'text-success', failed: 'te
 
 export default function WaLog() {
   const [log, setLog] = useState<WaLogEntry[]>([]);
+  const [phone, setPhone] = useState('');
+  const [testBusy, setTestBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const refresh = () => api.get('/wa').then((res) => setLog(res.data.waLog));
 
   useEffect(() => {
-    api.get('/wa').then((res) => setLog(res.data.waLog));
+    refresh();
     const socket = getSocket();
-    const refresh = () => api.get('/wa').then((res) => setLog(res.data.waLog));
     socket.on('wa:sent', refresh);
     socket.on('wa:failed', refresh);
     return () => {
@@ -20,9 +24,43 @@ export default function WaLog() {
     };
   }, []);
 
+  async function sendTest() {
+    setTestBusy(true); setTestMsg(null);
+    try {
+      await api.post('/wa/test', { phone: phone.trim() || undefined });
+      setTestMsg({ ok: true, text: 'Pesan test diantrikan. Lihat statusnya di log di bawah.' });
+      setPhone('');
+      refresh();
+    } catch (e: any) {
+      setTestMsg({ ok: false, text: e?.response?.data?.error || 'Gagal mengirim pesan test.' });
+    } finally {
+      setTestBusy(false);
+      setTimeout(() => setTestMsg(null), 6000);
+    }
+  }
+
   return (
     <div>
-      <div className="mb-4"><div className="text-[17px] font-bold">📲 Log WhatsApp</div></div>
+      <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[17px] font-bold">📲 Log WhatsApp</div>
+        <div className="flex items-center gap-2">
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !testBusy) sendTest(); }}
+            placeholder="08xx (kosong = nomor Anda)"
+            className="bg-surface2 border border-border rounded-md px-3 py-1.5 text-xs w-52 focus:outline-none focus:border-accent"
+          />
+          <button onClick={sendTest} disabled={testBusy} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
+            {testBusy ? 'Mengirim…' : '🧪 Kirim Test'}
+          </button>
+        </div>
+      </div>
+      {testMsg && (
+        <div className={`mb-3 text-xs rounded-md px-3 py-2 border ${testMsg.ok ? 'text-success border-success/40 bg-success/10' : 'text-danger border-danger/40 bg-danger/10'}`}>
+          {testMsg.text}
+        </div>
+      )}
       <div className="bg-surface border border-border rounded-[10px] p-4">
         {log.map((w) => (
           <div key={w.id} className="flex gap-3 py-3 border-b border-border/40 last:border-0">

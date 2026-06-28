@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification } from './notify.js';
 import { COORD_SLA_MINUTES, REMIND_MINUTES, getOnDutyTechIds } from '../config/shifts.js';
-import { isNotifyEnabledForUser } from './notifyPrefs.js';
+import { isNotifyEnabledForUser, notifyKasiIfEnabled } from './notifyPrefs.js';
 
 const takeLink = (id) => `${env.appUrl}/my-incidents?focus=${id}&action=take`;
 const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
@@ -87,6 +87,12 @@ export async function checkUnclaimedIncidents(io) {
       }
       await createNotification({ userId: c.id, type: 'ticket_sla', priority: 'kritis', title: `Tiket melewati SLA: ${inc.device_name}`, message: `${inc.id} belum diambil ${mins} menit (>${COORD_SLA_MINUTES} mnt). Perlu koordinasi.`, refId: inc.id, refType: 'incident', link: `/incidents?focus=${inc.id}` });
     }
+    // CC eskalasi SLA ke Kepala Seksi bila diaktifkan (opt-in).
+    await notifyKasiIfEnabled('insiden_koordinator', {
+      type: 'alert',
+      message: `⏰ INSIDEN BELUM DIAMBIL (${(inc.priority || 'sedang').toUpperCase()})\n${inc.id} | ${inc.device_name}\nMasalah: ${inc.issue}\nSudah ${mins} menit tanpa teknisi.`,
+      relatedIncidentId: inc.id,
+    });
     io?.emit('incident:escalated', { id: inc.id, device: inc.device_name });
   }
 }

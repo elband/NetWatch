@@ -50,5 +50,8 @@ export const env = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   // URL publik aplikasi — dipakai untuk menyusun link di notifikasi WA (klik utk ambil/ingatkan).
   appUrl: (process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173').replace(/\/$/, ''),
+  // URL yang dipakai Puppeteer untuk membuka halaman cetak /doc-print saat render PDF.
+  // Production: Express menyajikan SPA di port yang sama. Dev: arahkan ke Vite (mis. http://127.0.0.1:5173).
+  selfBaseUrl: (process.env.SELF_BASE_URL || `http://127.0.0.1:${Number(process.env.PORT || 4000)}`).replace(/\/$/, ''),
   pingIntervalMs: Number(process.env.PING_INTERVAL_MS || 15000),
 };

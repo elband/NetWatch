@@ -7,6 +7,7 @@ import AppLayout from './components/AppLayout';
 import Login from './pages/Login';
 import LaporPublik from './pages/LaporPublik';
 import VerifyTte from './pages/VerifyTte';
+import DocPrint from './pages/DocPrint';
 import Ttd from './pages/Ttd';
 import TtdPelaksana from './pages/TtdPelaksana';
 import Dashboard from './pages/Dashboard';
@@ -58,6 +59,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/lapor" element={<LaporPublik />} />
       <Route path="/verify-tte" element={<VerifyTte />} />
+      <Route path="/doc-print" element={<DocPrint />} />
       <Route path="/ttd" element={<Ttd />} />
       <Route path="/ttd-pelaksana" element={<TtdPelaksana />} />
       <Route element={<RequireAuth />}>

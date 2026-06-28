@@ -4,7 +4,11 @@ import { api } from '../api/client';
 interface NotifEvent { key: string; label: string; roles: string[] }
 type Prefs = Record<string, Record<string, boolean>>;
 
-const ROLE_LABEL: Record<string, string> = { admin: 'Admin', koordinator: 'Koordinator', teknisi: 'Teknisi', viewer: 'Viewer' };
+const ROLE_LABEL: Record<string, string> = { admin: 'Admin', koordinator: 'Koordinator', teknisi: 'Teknisi', viewer: 'Viewer', kasi: 'Kasi' };
+
+// Default tiap kolom bila belum diatur. Peran user default AKTIF; "Kasi" (Kepala Seksi,
+// penerima eksternal) bersifat opt-in → default MATI.
+const defaultOn = (role: string) => role !== 'kasi';
 
 export default function NotificationSettings() {
   const [events, setEvents] = useState<NotifEvent[]>([]);
@@ -22,7 +26,7 @@ export default function NotificationSettings() {
   }, []);
 
   function toggle(eventKey: string, role: string) {
-    const currentlyEnabled = prefs[eventKey]?.[role] !== false;
+    const currentlyEnabled = prefs[eventKey]?.[role] ?? defaultOn(role);
     setPrefs((p) => ({ ...p, [eventKey]: { ...p[eventKey], [role]: !currentlyEnabled } }));
   }
 
@@ -42,7 +46,7 @@ export default function NotificationSettings() {
       <div className="mb-4"><div className="text-[17px] font-bold">🔔 Pengaturan Notifikasi</div></div>
       <div className="bg-surface border border-border rounded-[10px] overflow-hidden">
         <div className="px-4 py-3 border-b border-border text-[13px] font-semibold">Daftar Notifikasi WhatsApp</div>
-        <p className="px-4 pt-3 text-[11px] text-text2">Centang setiap <b>peran</b> yang harus mendapat notifikasi WA untuk tiap kejadian. Bila tidak dicentang, peran tersebut tidak akan menerima notifikasi itu (tindakan/penalti pada sistem tetap berjalan seperti biasa). "—" berarti peran itu tidak relevan untuk kejadian tersebut.</p>
+        <p className="px-4 pt-3 text-[11px] text-text2">Centang setiap <b>peran</b> yang harus mendapat notifikasi WA untuk tiap kejadian. Bila tidak dicentang, peran tersebut tidak akan menerima notifikasi itu (tindakan/penalti pada sistem tetap berjalan seperti biasa). "—" berarti peran itu tidak relevan untuk kejadian tersebut. Kolom <b>Kasi</b> (Kepala Seksi) mengirim ke <b>"No. WA Kepala Seksi"</b> yang diatur di halaman <b>Pengaturan</b>, dan <b>default mati</b> — centang untuk ikut menerima salinan.</p>
         <div className="overflow-x-auto mt-2">
           <table className="w-full text-[12px]">
             <thead>
@@ -65,7 +69,7 @@ export default function NotificationSettings() {
                           <input
                             type="checkbox"
                             className="w-4 h-4"
-                            checked={prefs[ev.key]?.[r] !== false}
+                            checked={prefs[ev.key]?.[r] ?? defaultOn(r)}
                             onChange={() => toggle(ev.key, r)}
                           />
                         ) : (

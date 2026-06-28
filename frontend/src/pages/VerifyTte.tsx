@@ -38,6 +38,7 @@ export default function VerifyTte() {
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [autoDone, setAutoDone] = useState(false);
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
@@ -48,6 +49,25 @@ export default function VerifyTte() {
   }, [token]);
 
   const ok = res?.valid;
+  const pdfUrl = token ? `/api/verify-tte/${encodeURIComponent(token)}/document.pdf` : '';
+
+  // Unduh PDF dokumen. Nama file diambil dari header Content-Disposition server.
+  function downloadPdf() {
+    if (!pdfUrl) return;
+    const a = document.createElement('a');
+    a.href = pdfUrl;
+    a.rel = 'noopener';
+    a.setAttribute('download', '');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // Saat dokumen valid → langsung unduh otomatis sekali (fallback: tombol di bawah).
+  useEffect(() => {
+    if (ok && !autoDone) { setAutoDone(true); downloadPdf(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ok]);
   const isLkp = res?.jenis === 'LKP';
   const signer = `${res?.signer_name || '-'}${res?.signer_nip ? ` · NIP ${res.signer_nip}` : ''}`;
 
@@ -144,6 +164,12 @@ export default function VerifyTte() {
                     <span className="font-mono text-[11px] text-emerald-300 break-all text-right flex-1">{token}</span>
                     <span className="text-[11px] text-slate-400 group-hover:text-sky-300 shrink-0">{copied ? '✓ disalin' : '📋'}</span>
                   </button>
+
+                  {/* Unduh dokumen — otomatis saat halaman dibuka, tombol ini sebagai cadangan. */}
+                  <button onClick={downloadPdf} className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-sky-500/15 border border-sky-500/40 px-4 py-3 text-sky-200 text-[13px] font-semibold hover:bg-sky-500/25 transition">
+                    ⬇️ Unduh Dokumen (PDF)
+                  </button>
+                  <div className="mt-1.5 text-center text-[10px] text-slate-500">Dokumen otomatis terunduh. Jika tidak, tekan tombol di atas.</div>
                 </>
               ) : (
                 <div className="text-center py-8">

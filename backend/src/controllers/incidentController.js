@@ -5,8 +5,9 @@ import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
 import { getOnDutyTechIds, getDutyStatus } from '../config/shifts.js';
 import { remindOnDutyTechs } from '../services/coordWatcher.js';
-import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { isNotifyEnabledForUser, notifyKasiIfEnabled } from '../services/notifyPrefs.js';
 import { nextIncidentId } from '../utils/incidentId.js';
+import { buildLaporanData } from '../routes/laporanRoutes.js';
 
 // Alur tindakan insiden berbasis pilihan/cabang (solusi perbaikan peralatan):
 // - Mulai: "Coba SSH" (bila ber-IP) atau "Langsung Kunjungan".
@@ -46,6 +47,8 @@ async function notifyCoordinators(conn, incident, message, type = 'alert') {
     if (!(await isNotifyEnabledForUser('insiden_koordinator', uid))) continue;
     await queueWaNotification({ type, toUserId: uid, message, relatedIncidentId: incident.id });
   }
+  // CC ke Kepala Seksi (Kasi) bila diaktifkan di Pengaturan Notifikasi (opt-in).
+  await notifyKasiIfEnabled('insiden_koordinator', { type, message, relatedIncidentId: incident.id });
 }
 
 async function notifyCoordinatorsDone(conn, incident, duration) {
@@ -664,6 +667,125 @@ export async function verifyTte(req, res) {
   }
 
   res.json({ valid: false });
+}
+
+// Tentukan periode laporan bulanan dari surat (report_month atau parse teks Hal).
+function suratReportMonth(s) {
+  if (s.report_month) return s.report_month;
+  const BULAN = ['januari', 'februari', 'maret', 'april', 'mei', 'juni', 'juli', 'agustus', 'september', 'oktober', 'november', 'desember'];
+  const m = new RegExp(`laporan bulanan.*?\\b(${BULAN.join('|')})\\s+(\\d{4})`, 'i').exec(s.hal || '');
+  if (!m) return null;
+  const idx = BULAN.indexOf(m[1].toLowerCase()) + 1;
+  return `${m[2]}-${String(idx).padStart(2, '0')}`;
+}
+
+// Resolusi token TTE → baris nota_dinas (surat) yang merepresentasikan dokumen.
+// Token bisa berupa: sign_token / kasi_sign_token nota_dinas, token PK… pelaksana lembur
+// (di body), atau sign_token LKP (incident_reports). Mengembalikan { surat, incidentId } atau null.
+async function resolveTteSurat(token) {
+  let surat = null;
+  let incidentId = null;
+
+  const [bySign] = await pool.query('SELECT * FROM nota_dinas WHERE sign_token = ? LIMIT 1', [token]);
+  if (bySign[0]) surat = bySign[0];
+  if (!surat) {
+    const [byKasi] = await pool.query('SELECT * FROM nota_dinas WHERE kasi_sign_token = ? LIMIT 1', [token]);
+    if (byKasi[0]) surat = byKasi[0];
+  }
+  if (!surat && token.startsWith('PK')) {
+    const [byPk] = await pool.query("SELECT * FROM nota_dinas WHERE jenis='Surat Pernyataan' AND body LIKE ? LIMIT 1", [`%${token}%`]);
+    if (byPk[0]) surat = byPk[0];
+  }
+  if (!surat) {
+    // Token LKP (incident_reports). Cari nota dinas terkait insiden; bila tak ada,
+    // sintesis surat minimal agar dokumen gabungan (Nota Dinas + LKP) tetap terbentuk.
+    const [byLkp] = await pool.query('SELECT incident_id, signer_name, signer_nip, signed_at FROM incident_reports WHERE sign_token = ? LIMIT 1', [token]);
+    if (byLkp[0]) {
+      incidentId = byLkp[0].incident_id;
+      const [nd] = await pool.query('SELECT * FROM nota_dinas WHERE incident_id = ? ORDER BY (sign_token IS NULL), created_at DESC LIMIT 1', [incidentId]);
+      if (nd[0]) surat = nd[0];
+      else surat = {
+        id: null, jenis: 'Nota Dinas', nomor: '-', incident_id: incidentId,
+        hal: 'Laporan Kerusakan dan Perbaikan', tujuan: null, body: null,
+        tanggal: byLkp[0].signed_at || new Date().toISOString().slice(0, 10),
+        signer_name: byLkp[0].signer_name, signer_nip: byLkp[0].signer_nip, sign_token: null,
+      };
+    }
+  }
+
+  if (!surat) return null;
+  return { surat, incidentId: incidentId || surat.incident_id || null };
+}
+
+// Nama file PDF dari jenis+nomor surat (atau LKP+incident).
+function docFileName(surat, incidentId) {
+  const safe = (v) => String(v || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (surat.nomor && surat.nomor !== '-') return `${safe(surat.jenis || 'Dokumen')}-${safe(surat.nomor)}.pdf`;
+  if (incidentId) return `LKP-${safe(incidentId)}.pdf`;
+  return 'dokumen.pdf';
+}
+
+// Data lengkap dokumen untuk halaman cetak publik (/doc-print) — dipakai untuk render PDF.
+// Publik & token-gated: hanya pemegang token TTE (tercetak pada QR dokumen) yang bisa
+// memperoleh isi dokumen.
+export async function verifyTteDocData(req, res) {
+  const token = String(req.params.token || '').trim();
+  if (!token) return res.json({ valid: false });
+
+  const resolved = await resolveTteSurat(token);
+  if (!resolved) return res.json({ valid: false });
+  const { surat, incidentId } = resolved;
+
+  // Lampiran bukti dukung.
+  surat.lampiran = [];
+  if (surat.id) {
+    const [lamp] = await pool.query('SELECT id, surat_id, file_url, filename, mimetype FROM surat_lampiran WHERE surat_id = ? ORDER BY id', [surat.id]);
+    surat.lampiran = lamp;
+  }
+
+  // Insiden (notes + report) untuk dokumen gabungan/LKP.
+  let incident = null;
+  if (incidentId) {
+    const [incRows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [incidentId]);
+    if (incRows[0]) incident = (await attachNotes(incRows))[0];
+  }
+
+  // Laporan bulanan bila surat adalah cover laporan.
+  let laporan = null;
+  const month = suratReportMonth(surat);
+  if (month) {
+    try { laporan = await buildLaporanData(month); } catch { laporan = null; }
+  }
+
+  // Org config (kop, nama/jabatan penanda tangan, dll).
+  const [sRows] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='lkp'");
+  let lkp = {};
+  try { const v = sRows[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { lkp = {}; }
+
+  res.json({ valid: true, surat, incident, laporan, lkp });
+}
+
+// Render & unduh dokumen sebagai PDF (Puppeteer membuka /doc-print). Publik & token-gated.
+export async function verifyTteDocPdf(req, res) {
+  const token = String(req.params.token || '').trim();
+  if (!token) return res.status(404).json({ error: 'Token tidak valid.' });
+  const resolved = await resolveTteSurat(token);
+  if (!resolved) return res.status(404).json({ error: 'Dokumen tidak ditemukan untuk token ini.' });
+
+  try {
+    const { renderDocPdf } = await import('../services/pdfRenderer.js');
+    const { buffer } = await renderDocPdf(token);
+    const filename = docFileName(resolved.surat, resolved.incidentId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (err) {
+    const msg = /Cannot find module 'puppeteer'|ERR_MODULE_NOT_FOUND/.test(String(err?.message))
+      ? 'Modul PDF (puppeteer) belum terpasang di server. Jalankan `npm install` pada backend.'
+      : 'Gagal membuat PDF dokumen.';
+    res.status(500).json({ error: msg });
+  }
 }
 
 export async function resolveIncident(req, res) {

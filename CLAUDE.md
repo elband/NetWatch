@@ -122,6 +122,7 @@ Create `backend/.env` from `backend/.env.example`:
 | `WABARIER_BASE_URL` | `https://wa.aptpairport.id` | WA Barier gateway base URL |
 | `WABARIER_SESSION_ID` | _(empty)_ | WA Barier session id to send from |
 | `CORS_ORIGIN` | `http://localhost:5173` | Set to production domain in prod |
+| `SELF_BASE_URL` | `http://127.0.0.1:${PORT}` | URL Puppeteer opens to render `/doc-print` → PDF (TTE verify download). Prod: leave default (Express serves the SPA on the same port). Dev: set to the Vite origin, e.g. `http://127.0.0.1:5173`. |
 | `PING_INTERVAL_MS` | `15000` | Device ping frequency |
 | `NODE_ENV` | _(unset)_ | Set to `production` to enable frontend static serving |
 
@@ -173,3 +174,5 @@ This directory is outside version control and must exist with write permissions.
 - **Shared IncidentDetailModal** — extracted to `frontend/src/components/IncidentDetailModal.tsx`; used by both `Incidents.tsx` (admin) and `MyIncidents.tsx` (technician).
 - **Socket auth pattern** — frontend sends `notif:auth` event with raw JWT string after connection; backend verifies and joins `user:{id}` room.
 - **`stepLabels` / `maxStep`** in `utils/steps.ts` accept an incident object but currently ignore it (labels are static). Pass `inc` for forward-compatibility.
+- **Document HTML is generated client-side** — all official documents (Nota Dinas, Surat Pernyataan, combined incident/LKP, Laporan Bulanan) are built as print-ready HTML in `frontend/src/utils/docTemplates.ts` (`buildDocHtml` + helpers) and `utils/laporanReport.ts` (`buildReportHtml`). These functions are pure: pass `lkp` (org config) and `origin` explicitly. Used by `SuratKeluar.tsx` (print) and the public `DocPrint.tsx` (PDF render).
+- **TTE document PDF download** — the public verify page (`VerifyTte.tsx`) auto-downloads `GET /api/verify-tte/:token/document.pdf`. Backend (`services/pdfRenderer.js`, **Puppeteer**) opens the public `/doc-print?token=…` page (which fetches `GET /api/verify-tte/:token/doc-data`) and prints it to a real PDF. Puppeteer downloads Chromium on `npm install` (needs `node` on PATH + system libs on Linux); it can push memory past the PM2 `max_memory_restart` (768M) — raise it if PDF rendering triggers restarts.
