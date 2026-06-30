@@ -111,8 +111,15 @@ export default function IncidentReportModal({
     setTimeout(() => w.print(), 300);
   }
 
+  // Tindakan yang bukan perbaikan nyata: percobaan SSH gagal & status menunggu suku cadang.
+  const isFailedAttempt = (note: string) => /\(gagal[,)]|Tidak Bisa Ditangani/i.test(note);
+
   function fillFromTindakan() {
-    const summary = tindakanList.map((n) => `• ${n.note}`).join('\n');
+    const summary = tindakanList
+      .filter((n) => !isFailedAttempt(n.note))
+      .map((n) => `• ${n.note}`)
+      .join('\n');
+    if (!summary) return; // semua tindakan adalah percobaan gagal — jangan ubah field.
     setPerbaikan((prev) => (prev.trim() ? `${prev.trim()}\n${summary}` : summary));
   }
 
