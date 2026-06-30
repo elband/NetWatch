@@ -127,11 +127,18 @@ export default function SkpPublic() {
                                 <div className="flex-1 min-w-0">
                                   {b.kind === 'data' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 mr-1.5">📊 Data Aplikasi</span>}
                                   <span>{b.deskripsi}</span>
-                                  <span className="ml-2 inline-flex gap-2">
-                                    {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">🔗 Tautan</a>}
-                                    {b.file_url && <a href={b.file_url} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">📄 Berkas</a>}
-                                    {b.public_token && <a href={buktiUrl(b.public_token)} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">🌐 {b.kind === 'data' ? 'Lihat Data' : 'Halaman Bukti'}</a>}
-                                  </span>
+                                  {(b.url || b.file_url) && (
+                                    <span className="ml-2 inline-flex gap-2">
+                                      {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">🔗 Tautan</a>}
+                                      {b.file_url && <a href={b.file_url} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">📄 Berkas</a>}
+                                    </span>
+                                  )}
+                                  {b.public_token && (
+                                    <div className="mt-1 flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                                      <span className="text-[9px] text-slate-400 shrink-0">🌐 Link publik:</span>
+                                      <a href={buktiUrl(b.public_token)} target="_blank" rel="noreferrer" className="text-indigo-600 font-mono text-[10px] break-all hover:underline">{buktiUrl(b.public_token)}</a>
+                                    </div>
+                                  )}
                                 </div>
                               </li>
                             ))}
