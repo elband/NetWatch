@@ -35,6 +35,7 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import notificationPrefsRoutes from './routes/notificationPrefsRoutes.js';
 import slaRoutes from './routes/slaRoutes.js';
 import maintenanceRoutes from './routes/maintenanceRoutes.js';
+import skpRoutes from './routes/skpRoutes.js';
 
 // Membangun & mengembalikan instance Express (tanpa listen/socket/worker) agar
 // bisa dipakai ulang oleh server.js (produksi) maupun test (supertest).
@@ -105,6 +106,7 @@ export function createApp() {
   app.use('/api/performa', performaRoutes);
   app.use('/api/public-reports', publicReportRoutes);
   app.use('/api/rooms', roomRoutes); // sebelum masterRoutes — punya route publik /public/:kode
+  app.use('/api/skp', skpRoutes); // sebelum masterRoutes — punya route publik /public/:token & /bukti/public/:token
   app.use('/api/settings', settingsRoutes);
   app.use('/api', masterRoutes);
   app.use('/api/dashboard', dashboardRoutes);

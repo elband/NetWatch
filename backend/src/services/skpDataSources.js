@@ -1,0 +1,232 @@
+import { pool } from '../db/pool.js';
+
+// ============================================================================
+// Registry sumber data aplikasi NetWatch yang dapat dijadikan "Bukti Dukung" SKP.
+// Setiap bukti tipe 'data' membekukan (snapshot) hasil query saat dibuat.
+// Struktur snapshot seragam agar halaman publik bisa merendernya generik:
+//   { source, title, period, summary:[{label,value}], columns:[...], rows:[[...]], generatedAt }
+// ============================================================================
+
+const BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+// 'YYYY-MM' → { start:'YYYY-MM-01', end: awal bulan berikutnya, label:'Juni 2026' }
+function monthRange(bulan) {
+  const m = /^(\d{4})-(\d{2})$/.exec(bulan || '');
+  if (!m) throw new Error('Parameter bulan tidak valid (format YYYY-MM).');
+  const y = Number(m[1]); const mo = Number(m[2]);
+  const start = `${m[1]}-${m[2]}-01`;
+  const ny = mo === 12 ? y + 1 : y;
+  const nm = mo === 12 ? 1 : mo + 1;
+  const end = `${ny}-${String(nm).padStart(2, '0')}-01`;
+  return { start, end, label: `${BULAN_ID[mo - 1]} ${y}` };
+}
+
+const HASIL_LABEL = { berhasil: 'Berhasil', sebagian: 'Sebagian', gagal: 'Belum berhasil' };
+const MAINT_STATUS = { rencana: 'Rencana', selesai: 'Selesai', batal: 'Batal' };
+
+// Daftar sumber untuk dropdown UI. period: 'month' butuh parameter bulan; 'none' tidak.
+export const DATA_SOURCES = [
+  { key: 'perbaikan', label: 'Rekap Perbaikan (Insiden/LKP)', period: 'month' },
+  { key: 'maintenance', label: 'Pemeliharaan & Perawatan Peralatan', period: 'month' },
+  { key: 'inspeksi', label: 'Inspeksi/Pemeriksaan Peralatan', period: 'month' },
+  { key: 'kegiatan', label: 'Kegiatan Non-Rutin', period: 'month' },
+  { key: 'sla', label: 'Laporan SLA/Uptime Perangkat', period: 'month' },
+  { key: 'laporan_bulanan', label: 'Laporan Bulanan (Rekap)', period: 'month' },
+  { key: 'inventaris', label: 'Daftar / Inventaris Perangkat', period: 'none' },
+  { key: 'qr', label: 'Pelaporan Fasilitas (QR Publik)', period: 'month' },
+];
+const SOURCE_LABEL = Object.fromEntries(DATA_SOURCES.map((s) => [s.key, s.label]));
+
+// ---- Builder per sumber → { title, summary, columns, rows } ----
+const BUILDERS = {
+  async perbaikan({ start, end, label }) {
+    const [rows] = await pool.query(
+      `SELECT DATE_FORMAT(i.resolved_at,'%d-%m-%Y') tgl, i.device_name, i.issue,
+              COALESCE(r.hasil,'') hasil, COALESCE(i.resolved_by,'-') teknisi, COALESCE(i.duration_min,0) dur
+         FROM incidents i LEFT JOIN incident_reports r ON r.incident_id=i.id
+        WHERE i.status='selesai' AND i.resolved_at>=? AND i.resolved_at<? ORDER BY i.resolved_at`, [start, end]);
+    const totalDur = rows.reduce((a, r) => a + Number(r.dur || 0), 0);
+    const avg = rows.length ? Math.round(totalDur / rows.length) : 0;
+    return {
+      title: `Rekap Perbaikan (LKP) — ${label}`,
+      summary: [
+        { label: 'Insiden Selesai', value: rows.length },
+        { label: 'Rata-rata Durasi', value: `${Math.floor(avg / 60)}j ${avg % 60}m` },
+      ],
+      columns: ['Tanggal', 'Perangkat', 'Masalah', 'Hasil', 'Teknisi'],
+      rows: rows.map((r) => [r.tgl, r.device_name, r.issue, HASIL_LABEL[r.hasil] || '-', r.teknisi]),
+    };
+  },
+
+  async maintenance({ bulan, label }) {
+    const [rows] = await pool.query(
+      `SELECT DATE_FORMAT(m.scheduled_date,'%d-%m-%Y') tgl, d.name perangkat, m.task, m.status,
+              COALESCE(u.name,'-') oleh,
+              (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id=m.id) foto
+         FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id
+         LEFT JOIN users u ON u.id=m.done_by
+        WHERE m.plan_month=? ORDER BY m.scheduled_date`, [bulan]);
+    const selesai = rows.filter((r) => r.status === 'selesai').length;
+    const foto = rows.reduce((a, r) => a + Number(r.foto || 0), 0);
+    return {
+      title: `Pemeliharaan & Perawatan Peralatan — ${label}`,
+      summary: [
+        { label: 'Total Kegiatan', value: rows.length },
+        { label: 'Selesai', value: selesai },
+        { label: 'Dokumentasi Foto', value: foto },
+      ],
+      columns: ['Tgl Jadwal', 'Perangkat', 'Tugas', 'Status', 'Dikerjakan Oleh', 'Foto'],
+      rows: rows.map((r) => [r.tgl, r.perangkat, r.task, MAINT_STATUS[r.status] || r.status, r.oleh, String(r.foto)]),
+    };
+  },
+
+  async inspeksi({ start, end, label }) {
+    const [rows] = await pool.query(
+      `SELECT DATE_FORMAT(ei.inspect_date,'%d-%m-%Y') tgl, d.name perangkat, ei.slot, ei.status,
+              COALESCE(ei.note,'-') catatan, COALESCE(ei.inspector_name,'-') pemeriksa
+         FROM equipment_inspections ei JOIN devices d ON d.id=ei.device_id
+        WHERE ei.inspect_date>=? AND ei.inspect_date<? ORDER BY ei.inspect_date, ei.slot`, [start, end]);
+    const cnt = (s) => rows.filter((r) => r.status === s).length;
+    return {
+      title: `Inspeksi Peralatan — ${label}`,
+      summary: [
+        { label: 'Total Inspeksi', value: rows.length },
+        { label: 'Baik', value: cnt('baik') },
+        { label: 'Perhatian', value: cnt('perhatian') },
+        { label: 'Rusak', value: cnt('rusak') },
+      ],
+      columns: ['Tanggal', 'Perangkat', 'Slot', 'Kondisi', 'Catatan', 'Pemeriksa'],
+      rows: rows.map((r) => [r.tgl, r.perangkat, `${r.slot}.00`, r.status, r.catatan, r.pemeriksa]),
+    };
+  },
+
+  async kegiatan({ start, end, label }) {
+    const [rows] = await pool.query(
+      `SELECT DATE_FORMAT(tanggal_kegiatan,'%d-%m-%Y') tgl, judul, kategori, petugas_nama, status,
+              COALESCE(durasi_jam,0) jam, COALESCE(poin,0) poin
+         FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<? ORDER BY tanggal_kegiatan`, [start, end]);
+    const jam = rows.reduce((a, r) => a + Number(r.jam || 0), 0);
+    const poin = rows.reduce((a, r) => a + Number(r.poin || 0), 0);
+    return {
+      title: `Kegiatan Non-Rutin — ${label}`,
+      summary: [
+        { label: 'Total Kegiatan', value: rows.length },
+        { label: 'Total Jam', value: jam },
+        { label: 'Total Poin', value: poin },
+      ],
+      columns: ['Tanggal', 'Judul', 'Kategori', 'Petugas', 'Status'],
+      rows: rows.map((r) => [r.tgl, r.judul, r.kategori, r.petugas_nama || '-', r.status]),
+    };
+  },
+
+  async sla({ start, end, label }) {
+    const [rows] = await pool.query(
+      `SELECT d.name perangkat, SUM(u.samples) samp, SUM(u.up_samples) up_s, SUM(u.warn_samples) warn_s,
+              SUM(u.maint_samples) maint_s, SUM(u.down_seconds) downsec
+         FROM device_uptime_daily u JOIN devices d ON d.id=u.device_id
+        WHERE u.day>=? AND u.day<? GROUP BY u.device_id, d.name ORDER BY d.name`, [start, end]);
+    const calc = (r) => {
+      const denom = Number(r.samp || 0) - Number(r.maint_s || 0);
+      if (denom <= 0) return 100;
+      return Math.round(((Number(r.up_s || 0) + Number(r.warn_s || 0)) / denom) * 1000) / 10;
+    };
+    const avg = rows.length ? Math.round((rows.reduce((a, r) => a + calc(r), 0) / rows.length) * 10) / 10 : 100;
+    return {
+      title: `Laporan SLA / Uptime Perangkat — ${label}`,
+      summary: [
+        { label: 'Perangkat Terpantau', value: rows.length },
+        { label: 'Rata-rata Uptime', value: `${avg}%` },
+      ],
+      columns: ['Perangkat', 'Uptime %', 'Total Downtime (menit)'],
+      rows: rows.map((r) => [r.perangkat, `${calc(r)}%`, String(Math.round(Number(r.downsec || 0) / 60))]),
+    };
+  },
+
+  async qr({ start, end, label }) {
+    const [rows] = await pool.query(
+      `SELECT DATE_FORMAT(created_at,'%d-%m-%Y') tgl, COALESCE(ruang,'-') lokasi, jenis, judul, status
+         FROM public_reports WHERE created_at>=? AND created_at<? ORDER BY created_at`, [start, end]);
+    const cnt = (s) => rows.filter((r) => r.status === s).length;
+    return {
+      title: `Pelaporan Fasilitas (QR Publik) — ${label}`,
+      summary: [
+        { label: 'Total Laporan', value: rows.length },
+        { label: 'Selesai', value: cnt('selesai') },
+        { label: 'Diproses', value: cnt('diproses') },
+        { label: 'Menunggu', value: cnt('menunggu') },
+      ],
+      columns: ['Tanggal', 'Lokasi', 'Jenis', 'Judul', 'Status'],
+      rows: rows.map((r) => [r.tgl, r.lokasi, r.jenis, r.judul, r.status]),
+    };
+  },
+
+  async inventaris() {
+    const [rows] = await pool.query(
+      `SELECT name, type, ip, COALESCE(loc,'-') lokasi, status FROM devices ORDER BY name`);
+    const cnt = (s) => rows.filter((r) => r.status === s).length;
+    return {
+      title: 'Daftar / Inventaris Perangkat Elektronika',
+      summary: [
+        { label: 'Total Perangkat', value: rows.length },
+        { label: 'Online', value: cnt('online') },
+        { label: 'Warning', value: cnt('warning') },
+        { label: 'Offline', value: cnt('offline') },
+      ],
+      columns: ['Perangkat', 'Tipe', 'IP', 'Lokasi', 'Status'],
+      rows: rows.map((r) => [r.name, r.type, r.ip, r.lokasi, r.status]),
+    };
+  },
+
+  async laporan_bulanan(ctx) {
+    const { start, end, bulan, label } = ctx;
+    const [[inc]] = await pool.query("SELECT COUNT(*) c FROM incidents WHERE status='selesai' AND resolved_at>=? AND resolved_at<?", [start, end]);
+    const [[mnt]] = await pool.query("SELECT COUNT(*) c FROM equipment_maintenance WHERE plan_month=? AND status='selesai'", [bulan]);
+    const [[insp]] = await pool.query('SELECT COUNT(*) c FROM equipment_inspections WHERE inspect_date>=? AND inspect_date<?', [start, end]);
+    const [[knr]] = await pool.query('SELECT COUNT(*) c FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?', [start, end]);
+    const [[qr]] = await pool.query('SELECT COUNT(*) c FROM public_reports WHERE created_at>=? AND created_at<?', [start, end]);
+    const sla = await BUILDERS.sla(ctx);
+    const uptime = sla.summary.find((s) => s.label === 'Rata-rata Uptime')?.value || '-';
+    return {
+      title: `Laporan Bulanan (Rekap) — ${label}`,
+      summary: [
+        { label: 'Insiden Selesai', value: inc.c },
+        { label: 'Maintenance Selesai', value: mnt.c },
+        { label: 'Inspeksi', value: insp.c },
+        { label: 'Kegiatan Non-Rutin', value: knr.c },
+        { label: 'Rata-rata Uptime', value: uptime },
+      ],
+      columns: ['Komponen Kinerja', 'Jumlah'],
+      rows: [
+        ['Insiden/Perbaikan selesai', String(inc.c)],
+        ['Pemeliharaan peralatan selesai', String(mnt.c)],
+        ['Inspeksi peralatan', String(insp.c)],
+        ['Kegiatan non-rutin', String(knr.c)],
+        ['Laporan fasilitas (QR publik)', String(qr.c)],
+        ['Rata-rata uptime perangkat', String(uptime)],
+      ],
+    };
+  },
+};
+
+// Bangun snapshot beku untuk sumber + parameter tertentu.
+export async function buildSnapshot(source, params = {}) {
+  const builder = BUILDERS[source];
+  if (!builder) throw new Error('Sumber data tidak dikenali.');
+  const def = DATA_SOURCES.find((s) => s.key === source);
+  let ctx = {};
+  if (def?.period === 'month') {
+    const r = monthRange(params.bulan);
+    ctx = { ...r, bulan: params.bulan };
+  }
+  const out = await builder(ctx);
+  return {
+    source,
+    sourceLabel: SOURCE_LABEL[source] || source,
+    title: out.title,
+    period: ctx.label || null,
+    summary: out.summary || [],
+    columns: out.columns || [],
+    rows: out.rows || [],
+    generatedAt: new Date().toISOString(),
+  };
+}

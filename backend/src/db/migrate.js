@@ -145,6 +145,16 @@ async function migrate() {
   // Pengajuan kegiatan lain: lampiran bukti dukung (foto/PDF).
   await addColumnIfMissing(conn, env.db.database, 'activities', 'bukti_url', 'VARCHAR(255) DEFAULT NULL AFTER end_time');
 
+  // SKP bukti dukung: tipe data aplikasi (snapshot beku dari isi NetWatch).
+  await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'kind', "VARCHAR(10) NOT NULL DEFAULT 'link' AFTER deskripsi");
+  await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'source', 'VARCHAR(40) DEFAULT NULL AFTER kind');
+  await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'params', 'JSON DEFAULT NULL AFTER source');
+  await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'snapshot', 'JSON DEFAULT NULL AFTER params');
+  // SKP bulanan: 1 SKP tahunan dipakai 12 bulan. Realisasi/feedback/bukti per bulan.
+  await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'bulan', 'VARCHAR(7) DEFAULT NULL AFTER skp_id');
+  await dropColumnIfExists(conn, env.db.database, 'skp_indikator', 'realisasi'); // pindah ke skp_realisasi
+  await dropColumnIfExists(conn, env.db.database, 'skp_indikator', 'feedback');  // pindah ke skp_realisasi
+
   // Pelaporan QR: kolom tautan ruangan + seed contoh ruangan.
   await addColumnIfMissing(conn, env.db.database, 'public_reports', 'room_id', 'INT DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'public_reports', 'room_code', 'VARCHAR(40) DEFAULT NULL');
@@ -203,6 +213,17 @@ async function addIndexIfMissing(conn, dbName, table, indexName, colsExpr) {
     }
   } catch (e) {
     console.warn(`  ! lewati index ${table}.${indexName}: ${e.message}`);
+  }
+}
+
+async function dropColumnIfExists(conn, dbName, table, column) {
+  const [rows] = await conn.query(
+    `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [dbName, table, column]
+  );
+  if (rows.length > 0) {
+    await conn.query(`ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``);
+    console.log(`  - dropped ${table}.${column}`);
   }
 }
 

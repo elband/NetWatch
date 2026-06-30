@@ -38,6 +38,9 @@ import Dokumen from './pages/Dokumen';
 import KegiatanNonRutin from './pages/KegiatanNonRutin';
 import PelaporanQR from './pages/PelaporanQR';
 import Notifikasi from './pages/Notifikasi';
+import Skp from './pages/Skp';
+import SkpPublic from './pages/SkpPublic';
+import SkpBuktiPublic from './pages/SkpBuktiPublic';
 
 function HomeRedirect() {
   const { user } = useAuth();
@@ -62,6 +65,8 @@ export default function App() {
       <Route path="/doc-print" element={<DocPrint />} />
       <Route path="/ttd" element={<Ttd />} />
       <Route path="/ttd-pelaksana" element={<TtdPelaksana />} />
+      <Route path="/skp-publik" element={<SkpPublic />} />
+      <Route path="/skp-bukti" element={<SkpBuktiPublic />} />
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
           {/* Terbuka untuk semua user terautentikasi */}
@@ -99,6 +104,7 @@ export default function App() {
             <Route path="/laporan-bulanan" element={<LaporanBulanan />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/pelaporan-qr" element={<PelaporanQR />} />
+            <Route path="/skp" element={<Skp />} />
           </Route>
 
           {/* Admin saja */}

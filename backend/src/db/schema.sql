@@ -703,3 +703,114 @@ CREATE TABLE IF NOT EXISTS incident_collaborators (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+
+-- ===== SKP (Sasaran Kinerja Pegawai / e-Kinerja) =====
+-- Header SKP per pegawai per periode. public_token → halaman publik read-only seluruh SKP.
+CREATE TABLE IF NOT EXISTS skp (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  periode VARCHAR(40) NOT NULL,
+  tahun INT NOT NULL,
+  pendekatan VARCHAR(30) NOT NULL DEFAULT 'Kuantitatif',
+  pegawai_id INT DEFAULT NULL,
+  pegawai_nama VARCHAR(120) DEFAULT NULL,
+  pegawai_nip VARCHAR(40) DEFAULT NULL,
+  pegawai_jabatan VARCHAR(160) DEFAULT NULL,
+  pegawai_unit VARCHAR(160) DEFAULT NULL,
+  penilai_nama VARCHAR(120) DEFAULT NULL,
+  penilai_nip VARCHAR(40) DEFAULT NULL,
+  penilai_jabatan VARCHAR(160) DEFAULT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  tanggal_pengajuan DATE DEFAULT NULL,
+  public_token VARCHAR(80) DEFAULT NULL,
+  created_by INT DEFAULT NULL,
+  creator_name VARCHAR(120) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_skp_token (public_token),
+  INDEX idx_skp_owner (created_by),
+  FOREIGN KEY (pegawai_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Rencana Hasil Kerja (RHK). Satu RHK punya >=1 indikator.
+CREATE TABLE IF NOT EXISTS skp_rhk (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  skp_id INT NOT NULL,
+  urutan INT NOT NULL DEFAULT 0,
+  klasifikasi VARCHAR(20) NOT NULL DEFAULT 'utama',
+  rhk TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_skp_rhk_skp (skp_id),
+  FOREIGN KEY (skp_id) REFERENCES skp(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Indikator Kinerja Individu (IKI) + rencana aksi (renaksi) = DEFINISI TAHUNAN (dipakai tiap bulan).
+-- Realisasi & feedback bersifat bulanan → tabel skp_realisasi.
+CREATE TABLE IF NOT EXISTS skp_indikator (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  rhk_id INT NOT NULL,
+  skp_id INT NOT NULL,
+  urutan INT NOT NULL DEFAULT 0,
+  aspek VARCHAR(20) NOT NULL DEFAULT 'Kuantitas',
+  indikator TEXT NOT NULL,
+  target VARCHAR(200) DEFAULT NULL,
+  renaksi TEXT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_skp_ind_rhk (rhk_id),
+  INDEX idx_skp_ind_skp (skp_id),
+  FOREIGN KEY (rhk_id) REFERENCES skp_rhk(id) ON DELETE CASCADE,
+  FOREIGN KEY (skp_id) REFERENCES skp(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Status & tanggal pengajuan penilaian PER BULAN (1 SKP tahunan dipakai 12 bulan).
+CREATE TABLE IF NOT EXISTS skp_bulan (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  skp_id INT NOT NULL,
+  bulan VARCHAR(7) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  tanggal_pengajuan DATE DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_skp_bulan (skp_id, bulan),
+  FOREIGN KEY (skp_id) REFERENCES skp(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Realisasi & feedback per indikator PER BULAN.
+CREATE TABLE IF NOT EXISTS skp_realisasi (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  indikator_id INT NOT NULL,
+  skp_id INT NOT NULL,
+  bulan VARCHAR(7) NOT NULL,
+  realisasi TEXT DEFAULT NULL,
+  feedback TEXT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_skp_real (indikator_id, bulan),
+  INDEX idx_skp_real_skp_bulan (skp_id, bulan),
+  FOREIGN KEY (indikator_id) REFERENCES skp_indikator(id) ON DELETE CASCADE,
+  FOREIGN KEY (skp_id) REFERENCES skp(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Bukti Data Dukung per indikator. public_token → halaman publik verifikasi item.
+-- kind: 'link' (URL eksternal) | 'file' (unggahan) | 'data' (snapshot data aplikasi).
+-- Untuk 'data': source = kunci sumber, params = filter (mis. {bulan}), snapshot = data beku saat dibuat.
+CREATE TABLE IF NOT EXISTS skp_bukti (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  indikator_id INT NOT NULL,
+  skp_id INT NOT NULL,
+  bulan VARCHAR(7) DEFAULT NULL,
+  urutan INT NOT NULL DEFAULT 0,
+  deskripsi VARCHAR(255) NOT NULL,
+  kind VARCHAR(10) NOT NULL DEFAULT 'link',
+  source VARCHAR(40) DEFAULT NULL,
+  params JSON DEFAULT NULL,
+  snapshot JSON DEFAULT NULL,
+  url VARCHAR(500) DEFAULT NULL,
+  file_url VARCHAR(255) DEFAULT NULL,
+  public_token VARCHAR(80) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_skp_bukti_token (public_token),
+  INDEX idx_skp_bukti_ind (indikator_id),
+  INDEX idx_skp_bukti_skp (skp_id),
+  FOREIGN KEY (indikator_id) REFERENCES skp_indikator(id) ON DELETE CASCADE,
+  FOREIGN KEY (skp_id) REFERENCES skp(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

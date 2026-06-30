@@ -537,3 +537,87 @@ export interface PublicReport {
   incident_id: string | null;
   created_at: string;
 }
+
+// ===== SKP (Sasaran Kinerja Pegawai / e-Kinerja) =====
+export type SkpStatus = 'draft' | 'diajukan' | 'dinilai';
+export type SkpAspek = 'Kuantitas' | 'Kualitas' | 'Waktu' | 'Biaya';
+
+export type SkpBuktiKind = 'link' | 'file' | 'data';
+export interface SkpSnapshot {
+  source: string;
+  sourceLabel: string;
+  title: string;
+  period: string | null;
+  summary: { label: string; value: string | number }[];
+  columns: string[];
+  rows: (string | number)[][];
+  generatedAt: string;
+}
+export interface SkpDataSource { key: string; label: string; period: 'month' | 'none' }
+export interface SkpBukti {
+  id: number;
+  indikator_id?: number;
+  bulan?: string | null;
+  deskripsi: string;
+  kind: SkpBuktiKind;
+  source?: string | null;
+  params?: { bulan?: string | null } | null;
+  snapshot?: SkpSnapshot | null;
+  url: string | null;
+  file_url: string | null;
+  public_token: string | null;
+  created_at?: string;
+}
+export interface SkpBulanInfo { bulan: string; status: SkpStatus; tanggal_pengajuan: string | null }
+export interface SkpLaporanBulanan {
+  nomor: string; hal: string; pdf_url: string; verify_url: string;
+  koordinator: { nama: string | null; signed_at: string | null };
+  kasi: { nama: string | null; signed_at: string | null };
+}
+export interface SkpIndikator {
+  id: number;
+  rhk_id?: number;
+  urutan?: number;
+  aspek: SkpAspek;
+  indikator: string;
+  target: string | null;
+  renaksi: string | null;
+  realisasi: string | null;
+  feedback: string | null;
+  bukti: SkpBukti[];
+}
+export interface SkpRhk {
+  id: number;
+  urutan?: number;
+  klasifikasi: 'utama' | 'tambahan';
+  rhk: string;
+  indikator: SkpIndikator[];
+}
+export interface Skp {
+  id: number;
+  periode: string;
+  tahun: number;
+  pendekatan: string;
+  pegawai_id?: number | null;
+  pegawai_nama: string | null;
+  pegawai_nip: string | null;
+  pegawai_jabatan: string | null;
+  pegawai_unit: string | null;
+  penilai_nama: string | null;
+  penilai_nip: string | null;
+  penilai_jabatan: string | null;
+  status: SkpStatus;
+  tanggal_pengajuan: string | null;
+  public_token: string | null;
+  creator_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  jml_rhk?: number;
+  jml_bukti?: number;
+  rhk?: SkpRhk[];
+  // Konteks bulanan (saat detail dimuat untuk satu bulan).
+  bulan?: string;
+  months?: string[];
+  bulanInfo?: SkpBulanInfo;
+  laporanBulanan?: SkpLaporanBulanan | null;
+}
