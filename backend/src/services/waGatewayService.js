@@ -24,14 +24,27 @@ export async function sendWaGatewayMessage(phone, message) {
   if (env.waGateway.deviceId) payload.deviceId = Number(env.waGateway.deviceId);
 
   const url = `${env.waGateway.baseUrl.replace(/\/$/, '')}/api/v1/messages/send`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'X-API-Key': env.waGateway.apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
+  let resp;
+  try {
+    // Timeout 15s agar tidak menggantung bila gateway tak merespons.
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-API-Key': env.waGateway.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    // fetch gagal di level koneksi (DNS/firewall/TLS/timeout). `err.message` undici
+    // hanya "fetch failed" — sertakan penyebab asli (err.cause) agar bisa didiagnosis.
+    const cause = err?.cause?.code || err?.cause?.message || err?.code || err?.name;
+    throw new Error(
+      `Gagal menghubungi WA Gateway di ${url}: ${err?.message || 'fetch failed'}` +
+      (cause ? ` (${cause})` : '')
+    );
+  }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok || data.success !== true) {
     throw new Error(data.message || data.error || `WA Gateway API error (HTTP ${resp.status})`);
