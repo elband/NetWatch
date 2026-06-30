@@ -107,9 +107,9 @@ REDIS_PORT=6379
 REDIS_PASSWORD=GANTI_PASSWORD_REDIS_KUAT
 REDIS_TLS=false                  # true hanya bila Redis lintas-host via TLS
 
-WABARIER_API_KEY=<api-key-dari-wa.aptpairport.id>
-WABARIER_BASE_URL=https://wa.aptpairport.id
-WABARIER_SESSION_ID=<session-id-wa-barier>
+WAGATEWAY_API_KEY=<api-key-gateway-wa-internal>     # header X-API-Key, format wag_xxx.yyy
+WAGATEWAY_BASE_URL=https://wg.aptpairport.id
+WAGATEWAY_DEVICE_ID=                                # opsional; kosong = device default gateway
 CORS_ORIGIN=https://netwatch.example.com   # WAJIB eksak (bukan *), karena cookie credentials
 
 # Opsional:
@@ -230,7 +230,7 @@ pm2 reload netwatch                               # zero-downtime reload
 
 ## Checklist ringkas (production-ready)
 
-- [ ] `.env`: `NODE_ENV=production`, `JWT_SECRET` acak ≥32, `DB_PASSWORD`, `REDIS_PASSWORD`, `CORS_ORIGIN` eksak, `WABARIER_API_KEY`, `chmod 600`
+- [ ] `.env`: `NODE_ENV=production`, `JWT_SECRET` acak ≥32, `DB_PASSWORD`, `REDIS_PASSWORD`, `CORS_ORIGIN` eksak, `WAGATEWAY_API_KEY`, `chmod 600`
 - [ ] DB user least-privilege (bukan root); `npm run migrate` sukses
 - [ ] Redis `requirepass` + `bind 127.0.0.1`
 - [ ] `frontend/dist` ter-build; folder `uploads/*` ada & writable

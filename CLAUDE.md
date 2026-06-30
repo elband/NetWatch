@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**NetWatch** is an infrastructure monitoring & incident management ERP for airport IT operations. It tracks network devices (ping/SNMP), manages incident tickets, records technician shifts/attendance, generates official letters with digital signatures (TTE), and delivers real-time alerts via WhatsApp (WA Barier / wwebjs-gateway API).
+**NetWatch** is an infrastructure monitoring & incident management ERP for airport IT operations. It tracks network devices (ping/SNMP), manages incident tickets, records technician shifts/attendance, generates official letters with digital signatures (TTE), and delivers real-time alerts via WhatsApp (internal self-hosted WhatsApp Gateway API).
 
 **Stack:** Node.js + Express + Socket.io (backend) · React 19 + TypeScript + Vite + TailwindCSS v4 (frontend) · MySQL 8 · Redis (BullMQ queues) · PM2 (process manager)
 
@@ -61,7 +61,7 @@ In development, Vite dev server (:5173) proxies `/api`, `/uploads`, and `/socket
 | `middleware/upload.js` | Multer config for incident docs and inspection photos |
 | `controllers/` | `authController`, `deviceController`, `incidentController`, `userController` — business logic here |
 | `routes/` | 22 route files, all mounted under `/api/*` in `server.js` |
-| `services/` | `notify.js` (Socket.io per-user rooms), `sshBridge.js` (SSH ↔ WebSocket), `pingService.js`, `coordWatcher.js`, `waBarierService.js` |
+| `services/` | `notify.js` (Socket.io per-user rooms), `sshBridge.js` (SSH ↔ WebSocket), `pingService.js`, `coordWatcher.js`, `waGatewayService.js` |
 | `jobs/` | BullMQ workers: `pingQueue.js` (device health, 15s interval), `waQueue.js`/`waWorker.js` (async WhatsApp sends) |
 
 All route files are ES modules (`"type": "module"` in package.json). Use `import/export` throughout.
@@ -118,9 +118,9 @@ Create `backend/.env` from `backend/.env.example`:
 | `JWT_EXPIRES_IN` | `8h` | Token lifetime |
 | `DB_HOST/PORT/USER/PASSWORD/NAME` | `127.0.0.1/3306/root/''/netwatch_erp` | MySQL connection |
 | `REDIS_HOST/PORT` | `127.0.0.1/6379` | BullMQ queue store |
-| `WABARIER_API_KEY` | _(empty)_ | WhatsApp API key from WA Barier (wwebjs-gateway) dashboard |
-| `WABARIER_BASE_URL` | `https://wa.aptpairport.id` | WA Barier gateway base URL |
-| `WABARIER_SESSION_ID` | _(empty)_ | WA Barier session id to send from |
+| `WAGATEWAY_API_KEY` | _(empty)_ | API key for the internal WhatsApp Gateway (header `X-API-Key`, format `wag_xxx.yyy`) |
+| `WAGATEWAY_BASE_URL` | `https://wg.aptpairport.id` | WhatsApp Gateway base URL (endpoint `POST /api/v1/messages/send`) |
+| `WAGATEWAY_DEVICE_ID` | _(empty)_ | Optional sender device id; empty uses the gateway's default device |
 | `CORS_ORIGIN` | `http://localhost:5173` | Set to production domain in prod |
 | `SELF_BASE_URL` | `http://127.0.0.1:${PORT}` | URL Puppeteer opens to render `/doc-print` → PDF (TTE verify download). Prod: leave default (Express serves the SPA on the same port). Dev: set to the Vite origin, e.g. `http://127.0.0.1:5173`. |
 | `PING_INTERVAL_MS` | `15000` | Device ping frequency |
@@ -141,7 +141,7 @@ cd ../backend && npm install
 ### 2. Configure
 ```bash
 cp backend/.env.example backend/.env
-# Edit backend/.env: set JWT_SECRET, DB credentials, CORS_ORIGIN, WABARIER_API_KEY, NODE_ENV=production
+# Edit backend/.env: set JWT_SECRET, DB credentials, CORS_ORIGIN, WAGATEWAY_API_KEY, NODE_ENV=production
 ```
 
 ### 3. Database

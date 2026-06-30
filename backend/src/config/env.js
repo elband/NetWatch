@@ -42,10 +42,12 @@ export const env = {
     // Aktifkan TLS bila REDIS_TLS=true (Redis lintas host/terkelola).
     tls: process.env.REDIS_TLS === 'true' ? {} : undefined,
   },
-  waBarier: {
-    apiKey: process.env.WABARIER_API_KEY || '',
-    baseUrl: process.env.WABARIER_BASE_URL || 'https://wa.aptpairport.id',
-    sessionId: process.env.WABARIER_SESSION_ID || '',
+  // Gateway WhatsApp internal (dibangun sendiri). Endpoint: POST /api/v1/messages/send
+  // dengan header X-API-Key. deviceId opsional — bila kosong, gateway pakai device default.
+  waGateway: {
+    apiKey: process.env.WAGATEWAY_API_KEY || '',
+    baseUrl: process.env.WAGATEWAY_BASE_URL || 'https://wg.aptpairport.id',
+    deviceId: process.env.WAGATEWAY_DEVICE_ID || '',
   },
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   // URL publik aplikasi — dipakai untuk menyusun link di notifikasi WA (klik utk ambil/ingatkan).

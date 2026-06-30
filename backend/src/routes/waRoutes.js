@@ -13,11 +13,11 @@ router.get('/', async (req, res) => {
   res.json({ waLog: rows });
 });
 
-// Kirim pesan test ke nomor WA untuk memverifikasi konfigurasi gateway (WA Barier).
+// Kirim pesan test ke nomor WA untuk memverifikasi konfigurasi gateway.
 // Pesan masuk ke antrian & tercatat di Log WhatsApp seperti notifikasi biasa.
 router.post('/test', requireRole('admin', 'koordinator'), async (req, res) => {
-  if (!env.waBarier.apiKey || !env.waBarier.sessionId) {
-    return res.status(400).json({ error: 'Gateway WA belum dikonfigurasi (WABARIER_API_KEY / WABARIER_SESSION_ID).' });
+  if (!env.waGateway.apiKey) {
+    return res.status(400).json({ error: 'Gateway WA belum dikonfigurasi (WAGATEWAY_API_KEY).' });
   }
   // Default ke nomor pengirim bila kosong. Normalisasi final dilakukan saat pengiriman.
   const phone = normalizeWaNumber(req.body?.phone || req.user?.phone || '');
