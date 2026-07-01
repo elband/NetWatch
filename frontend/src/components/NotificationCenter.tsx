@@ -28,20 +28,50 @@ function relTime(s: string): string {
 }
 
 let _audioCtx: AudioContext | null = null;
-function ping() {
+function getCtx(): AudioContext | null {
   try {
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
+    if (!Ctx) return null;
     _audioCtx = _audioCtx || new Ctx();
-    const ctx = _audioCtx;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.connect(g); g.connect(ctx.destination);
-    o.type = 'sine'; o.frequency.value = 880;
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.14, ctx.currentTime + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
-    o.start(); o.stop(ctx.currentTime + 0.26);
+    return _audioCtx;
+  } catch { return null; }
+}
+
+// Satu nada singkat pada offset `t` detik dari sekarang (dipakai untuk menyusun pola bunyi).
+function tone(ctx: AudioContext, freq: number, t: number, dur: number, type: OscillatorType = 'sine', peak = 0.14) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.connect(g); g.connect(ctx.destination);
+  o.type = type; o.frequency.value = freq;
+  const start = ctx.currentTime + t;
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  o.start(start); o.stop(start + dur + 0.02);
+}
+
+// Bunyi notifikasi dibedakan per prioritas agar terdengar bedanya tanpa melihat layar.
+function ping(priority: NotifPriority = 'info') {
+  const ctx = getCtx();
+  if (!ctx) return;
+  try {
+    if (priority === 'kritis') {
+      // Tiga bip cepat mendesak, nada tinggi & lebih keras — butuh perhatian segera.
+      tone(ctx, 1046, 0, 0.12, 'square', 0.17);
+      tone(ctx, 1046, 0.17, 0.12, 'square', 0.17);
+      tone(ctx, 1244, 0.34, 0.18, 'square', 0.19);
+    } else if (priority === 'warning') {
+      // Dua nada turun — "perhatian".
+      tone(ctx, 784, 0, 0.14, 'triangle', 0.15);
+      tone(ctx, 587, 0.17, 0.22, 'triangle', 0.15);
+    } else if (priority === 'selesai') {
+      // Dua nada naik — nuansa "sukses/selesai".
+      tone(ctx, 660, 0, 0.13, 'sine', 0.14);
+      tone(ctx, 988, 0.15, 0.26, 'sine', 0.14);
+    } else {
+      // Info — satu nada lembut.
+      tone(ctx, 880, 0, 0.25, 'sine', 0.12);
+    }
   } catch { /* abaikan */ }
 }
 
@@ -66,7 +96,7 @@ export default function NotificationCenter() {
     const onNew = (p: { notification: AppNotification; unread: number }) => {
       setUnread(p.unread);
       if (openRef.current) setItems((prev) => [p.notification, ...prev.filter((n) => n.id !== p.notification.id)]);
-      if (!mutedRef.current) ping();
+      if (!mutedRef.current) ping(p.notification.priority);
     };
     s.on('notification:new', onNew);
     return () => { s.off('notification:new', onNew); };
