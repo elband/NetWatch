@@ -30,6 +30,7 @@ import PublicReports from './pages/PublicReports';
 import MasterData from './pages/MasterData';
 import SshTerminal from './pages/SshTerminal';
 import EquipmentPerf from './pages/EquipmentPerf';
+import Logbook from './pages/Logbook';
 import SuratKeluar from './pages/SuratKeluar';
 import LaporanBulanan from './pages/LaporanBulanan';
 import Attendance from './pages/Attendance';
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/my-incidents" element={<MyIncidents />} />
           <Route path="/jadwal" element={<Jadwal />} />
           <Route path="/equipment" element={<EquipmentPerf />} />
+          <Route path="/logbook" element={<Logbook />} />
           <Route path="/diklat" element={<Diklat />} />
           <Route path="/dokumen" element={<Dokumen />} />
           <Route path="/kegiatan-nr" element={<KegiatanNonRutin />} />

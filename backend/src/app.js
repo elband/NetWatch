@@ -22,6 +22,7 @@ import settingsRoutes from './routes/settingsRoutes.js';
 import masterRoutes from './routes/masterRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import equipmentRoutes from './routes/equipmentRoutes.js';
+import logbookRoutes from './routes/logbookRoutes.js';
 import activityRoutes from './routes/activityRoutes.js';
 import suratRoutes, { getTtdDoc, submitTtd, getPelaksanaSignDoc, submitPelaksanaSign } from './routes/suratRoutes.js';
 import laporanRoutes from './routes/laporanRoutes.js';
@@ -111,6 +112,7 @@ export function createApp() {
   app.use('/api', masterRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/equipment', equipmentRoutes);
+  app.use('/api/logbook', logbookRoutes);
   app.use('/api/activities', activityRoutes);
   app.use('/api/surat', suratRoutes);
   app.use('/api/laporan', laporanRoutes);
