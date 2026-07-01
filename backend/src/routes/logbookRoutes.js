@@ -32,7 +32,8 @@ async function buildLogbook(month, q) {
   );
   const [maint] = await pool.query(
     `SELECT m.device_id, m.scheduled_date, m.task, m.status, m.note, m.done_at, u.name AS done_by_name,
-            (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id = m.id) AS photo_count
+            (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id = m.id) AS photo_count,
+            (SELECT p.url FROM equipment_maintenance_photos p WHERE p.maintenance_id = m.id ORDER BY p.id ASC LIMIT 1) AS first_photo
        FROM equipment_maintenance m LEFT JOIN users u ON u.id = m.done_by
       WHERE m.plan_month = ?`,
     [mm]
@@ -41,17 +42,33 @@ async function buildLogbook(month, q) {
     "SELECT id, device_id, issue, priority, status, created_at, resolved_at, duration_min FROM incidents WHERE device_id IS NOT NULL AND created_at >= ? AND created_at < ?",
     [start, end]
   );
+  // Metrik pemantauan bulan tsb per perangkat: uptime%, latency rata-rata & maks
+  // (kecualikan sampel dalam jendela maintenance) — konsisten dgn getDeviceMetrics.
+  const [metrics] = await pool.query(
+    `SELECT device_id, COUNT(*) AS samples,
+            ROUND(AVG(status <> 'offline') * 100, 2) AS up_pct,
+            ROUND(AVG(ping_ms)) AS avg_ping, MAX(ping_ms) AS max_ping
+       FROM device_metrics WHERE recorded_at >= ? AND recorded_at < ? AND in_maint = 0 GROUP BY device_id`,
+    [start, end]
+  );
+  const metricMap = new Map(metrics.map((m) => [m.device_id, m]));
 
-  // Perangkat yang punya aktivitas bulan ini (union) — beserta info dasarnya.
-  const ids = [...new Set([...insp, ...pon, ...maint, ...inc].map((r) => r.device_id).filter(Boolean))];
+  // Perangkat yang punya aktivitas ATAU metrik pemantauan bulan ini (union) — beserta info dasarnya.
+  const ids = [...new Set([...insp, ...pon, ...maint, ...inc, ...metrics].map((r) => r.device_id).filter(Boolean))];
   if (!ids.length) return { month: mm, devices: [] };
   const [devs] = await pool.query(`SELECT id, name, ip, type, loc FROM devices WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
 
-  const map = new Map(devs.map((d) => [d.id, {
-    ...d,
-    recap: { inspeksi: { total: 0, baik: 0, perhatian: 0, rusak: 0 }, power: { on: 0, off: 0 }, maintenance: { total: 0, selesai: 0 }, insiden: { total: 0, downtime_min: 0 } },
-    events: [],
-  }]));
+  const map = new Map(devs.map((d) => {
+    const mt = metricMap.get(d.id);
+    return [d.id, {
+      ...d,
+      recap: {
+        inspeksi: { total: 0, baik: 0, perhatian: 0, rusak: 0 }, power: { on: 0, off: 0 }, maintenance: { total: 0, selesai: 0 }, insiden: { total: 0, downtime_min: 0 },
+        metrik: mt ? { up_pct: Number(mt.up_pct) || 0, avg_ping: Number(mt.avg_ping) || 0, max_ping: Number(mt.max_ping) || 0, samples: Number(mt.samples) || 0 } : null,
+      },
+      events: [],
+    }];
+  }));
 
   for (const r of insp) {
     const d = map.get(r.device_id); if (!d) continue;
@@ -66,7 +83,7 @@ async function buildLogbook(month, q) {
   for (const r of maint) {
     const d = map.get(r.device_id); if (!d) continue;
     d.recap.maintenance.total++; if (r.status === 'selesai') d.recap.maintenance.selesai++;
-    d.events.push({ date: dstr(r.scheduled_date), time: tstr(r.done_at), kind: 'maintenance', label: r.task, status: r.status, detail: r.note || (r.photo_count ? `${r.photo_count} foto dokumentasi` : ''), by: r.done_by_name || '', photo_url: '', verified: false });
+    d.events.push({ date: dstr(r.scheduled_date), time: tstr(r.done_at), kind: 'maintenance', label: r.task, status: r.status, detail: r.note || (r.photo_count ? `${r.photo_count} foto dokumentasi` : ''), by: r.done_by_name || '', photo_url: r.first_photo || '', verified: false });
   }
   for (const r of inc) {
     const d = map.get(r.device_id); if (!d) continue;
@@ -94,11 +111,15 @@ router.get('/export', async (req, res) => {
   const KIND = { inspeksi: 'Inspeksi Harian', power: 'Hidupkan/Matikan', maintenance: 'Maintenance', insiden: 'Insiden' };
   const rows = [];
   for (const d of devices) {
+    const mk = d.recap.metrik;
+    const up = mk ? `${mk.up_pct}%` : '-', la = mk ? `${mk.avg_ping} ms` : '-', lm = mk ? `${mk.max_ping} ms` : '-';
+    const base = { Perangkat: d.name, IP: d.ip, Lokasi: d.loc || '-', 'Uptime': up, 'Latensi rata-rata': la, 'Latensi maks': lm };
+    if (!d.events.length) {
+      rows.push({ ...base, Tanggal: '-', Jam: '-', Jenis: '-', Uraian: '(tidak ada aktivitas)', Status: '-', Catatan: '-', Oleh: '-' });
+      continue;
+    }
     for (const e of d.events) {
-      rows.push({
-        Perangkat: d.name, IP: d.ip, Lokasi: d.loc || '-', Tanggal: e.date, Jam: e.time || '-',
-        Jenis: KIND[e.kind] || e.kind, Uraian: e.label, Status: e.status || '-', Catatan: e.detail || '-', Oleh: e.by || '-',
-      });
+      rows.push({ ...base, Tanggal: e.date, Jam: e.time || '-', Jenis: KIND[e.kind] || e.kind, Uraian: e.label, Status: e.status || '-', Catatan: e.detail || '-', Oleh: e.by || '-' });
     }
   }
   const buf = await jsonToBuffer(`Logbook ${month}`, rows.length ? rows : [{ Perangkat: '(tidak ada aktivitas)', IP: '', Lokasi: '', Tanggal: '', Jam: '', Jenis: '', Uraian: '', Status: '', Catatan: '', Oleh: '' }]);

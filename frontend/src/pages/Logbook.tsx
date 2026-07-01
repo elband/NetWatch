@@ -3,7 +3,8 @@ import { api } from '../api/client';
 import { openImage } from '../components/ImageLightbox';
 
 interface LogEvent { date: string; time: string; kind: 'inspeksi' | 'power' | 'maintenance' | 'insiden'; label: string; status: string; detail: string; by: string; photo_url: string; verified: boolean }
-interface LogRecap { inspeksi: { total: number; baik: number; perhatian: number; rusak: number }; power: { on: number; off: number }; maintenance: { total: number; selesai: number }; insiden: { total: number; downtime_min: number } }
+interface LogMetrik { up_pct: number; avg_ping: number; max_ping: number; samples: number }
+interface LogRecap { inspeksi: { total: number; baik: number; perhatian: number; rusak: number }; power: { on: number; off: number }; maintenance: { total: number; selesai: number }; insiden: { total: number; downtime_min: number }; metrik: LogMetrik | null }
 interface LogDevice { id: number; name: string; ip: string; type: string; loc: string | null; recap: LogRecap; events: LogEvent[] }
 
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
@@ -45,7 +46,8 @@ export default function Logbook() {
     if (!w) return;
     w.document.write(buildPrintHtml(devices, month));
     w.document.close();
-    setTimeout(() => { try { w.focus(); w.print(); } catch { /**/ } }, 500);
+    // Beri waktu thumbnail dokumentasi termuat sebelum dialog cetak.
+    setTimeout(() => { try { w.focus(); w.print(); } catch { /**/ } }, 900);
   }
 
   const totalEvents = devices.reduce((a, d) => a + d.events.length, 0);
@@ -82,6 +84,7 @@ export default function Logbook() {
                     <div className="font-semibold text-sm truncate">{d.name}</div>
                     <div className="text-text2 text-[10px] truncate">{d.type} · {d.ip}{d.loc ? ` · 📍 ${d.loc}` : ''}</div>
                     <div className="flex flex-wrap gap-1.5 mt-2">
+                      {d.recap.metrik && <Chip label={`🟢 Uptime ${d.recap.metrik.up_pct}%`} sub={`lat ${d.recap.metrik.avg_ping}/${d.recap.metrik.max_ping} ms`} />}
                       <Chip label={`🔍 ${d.recap.inspeksi.total} inspeksi`} sub={`${d.recap.inspeksi.baik}B/${d.recap.inspeksi.perhatian}P/${d.recap.inspeksi.rusak}R`} />
                       <Chip label={`⚡ ${d.recap.power.on}× hidup · ${d.recap.power.off}× mati`} />
                       <Chip label={`🛠️ ${d.recap.maintenance.total} maint.`} sub={`${d.recap.maintenance.selesai} selesai`} />
@@ -131,16 +134,18 @@ function Chip({ label, sub }: { label: string; sub?: string }) {
 
 // HTML untuk cetak/PDF (dibuka di jendela baru).
 function buildPrintHtml(devices: LogDevice[], month: string): string {
+  const origin = window.location.origin;
   const esc = (t: string) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const KIND: Record<string, string> = { inspeksi: 'Inspeksi', power: 'Hidup/Mati', maintenance: 'Maintenance', insiden: 'Insiden' };
   const ml = monthLabel(month);
   const sections = devices.map((d) => `
     <div style="page-break-inside:avoid;margin-bottom:16px">
       <div style="font-weight:bold;font-size:13px">${esc(d.name)} <span style="font-weight:normal;color:#555">· ${esc(d.type)} · ${esc(d.ip)}${d.loc ? ' · ' + esc(d.loc) : ''}</span></div>
+      ${d.recap.metrik ? `<div style="font-size:11px;margin:2px 0 2px"><b>Uptime ${d.recap.metrik.up_pct}%</b> · Latensi rata-rata ${d.recap.metrik.avg_ping} ms · maks ${d.recap.metrik.max_ping} ms</div>` : ''}
       <div style="font-size:11px;color:#555;margin:2px 0 6px">Inspeksi ${d.recap.inspeksi.total} (${d.recap.inspeksi.baik} baik / ${d.recap.inspeksi.perhatian} perhatian / ${d.recap.inspeksi.rusak} rusak) · Hidup ${d.recap.power.on}× · Mati ${d.recap.power.off}× · Maintenance ${d.recap.maintenance.total} (${d.recap.maintenance.selesai} selesai) · Insiden ${d.recap.insiden.total}${d.recap.insiden.downtime_min ? ' (' + d.recap.insiden.downtime_min + ' mnt down)' : ''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:10.5px">
         <thead><tr style="background:#f0f0f0">
-          <th style="border:1px solid #999;padding:3px 6px;text-align:left">Tanggal</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Jenis</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Uraian</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Status</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Oleh</th>
+          <th style="border:1px solid #999;padding:3px 6px;text-align:left">Tanggal</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Jenis</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Uraian</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Status</th><th style="border:1px solid #999;padding:3px 6px;text-align:left">Oleh</th><th style="border:1px solid #999;padding:3px 6px;text-align:center;width:90px">Dokumentasi</th>
         </tr></thead>
         <tbody>${d.events.map((e) => `<tr>
           <td style="border:1px solid #999;padding:3px 6px;white-space:nowrap">${esc(e.date)}${e.time ? ' ' + esc(e.time) : ''}</td>
@@ -148,7 +153,8 @@ function buildPrintHtml(devices: LogDevice[], month: string): string {
           <td style="border:1px solid #999;padding:3px 6px">${esc(e.label)}${e.detail ? `<br><span style="color:#666">${esc(e.detail)}</span>` : ''}</td>
           <td style="border:1px solid #999;padding:3px 6px">${esc(e.status || '-')}</td>
           <td style="border:1px solid #999;padding:3px 6px">${esc(e.by || '-')}</td>
-        </tr>`).join('') || '<tr><td colspan="5" style="border:1px solid #999;padding:6px;text-align:center;color:#888">Tidak ada aktivitas</td></tr>'}</tbody>
+          <td style="border:1px solid #999;padding:3px 6px;text-align:center">${e.photo_url ? `<img src="${origin}${esc(e.photo_url)}" style="max-width:82px;max-height:64px;object-fit:cover;border:1px solid #ccc">` : '-'}</td>
+        </tr>`).join('') || '<tr><td colspan="6" style="border:1px solid #999;padding:6px;text-align:center;color:#888">Tidak ada aktivitas</td></tr>'}</tbody>
       </table>
     </div>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Logbook Peralatan ${esc(ml)}</title>
