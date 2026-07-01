@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS devices (
   loc VARCHAR(150) DEFAULT NULL,
   location_id INT DEFAULT NULL,
   inspect_required TINYINT(1) NOT NULL DEFAULT 1,
+  always_on TINYINT(1) NOT NULL DEFAULT 0,
   status ENUM('online','warning','offline') NOT NULL DEFAULT 'offline',
   ping_ms INT DEFAULT 0,
   cpu INT DEFAULT 0,

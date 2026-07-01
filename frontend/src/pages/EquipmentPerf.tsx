@@ -185,7 +185,11 @@ function InspeksiTab() {
 
               {/* Hidupkan / Matikan peralatan — kontrol monitoring perangkat (di samping kunci slot).
                   Hidupkan (wajib foto) → monitoring mulai · Matikan → status "dimatikan" & monitoring dijeda. */}
-              {(() => {
+              {d.always_on ? (
+                <div className="flex items-center gap-1.5 text-[10px] text-indigo-400 border border-indigo-500/30 bg-indigo-500/10 rounded px-2 py-1.5">
+                  🕒 Selalu aktif 24 jam — tidak dihidupkan/dimatikan
+                </div>
+              ) : (() => {
                 const canPress = canInput && isToday;
                 const isOn = d.monitor_enabled !== 0;
                 const bukti = isOn ? d.poweron : d.poweroff; // bukti sesuai state terkini

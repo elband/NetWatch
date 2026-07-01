@@ -93,6 +93,8 @@ async function migrate() {
   // Override manual: paksa alarmkan perangkat non-server walau di jam malam (sekali pakai sampai online lagi).
   await addColumnIfMissing(conn, env.db.database, 'devices', 'alarm_override', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER off_reason');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'inspect_required', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER loc');
+  // Perangkat selalu aktif 24 jam — dikecualikan dari alur Hidupkan/Matikan peralatan.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'always_on', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER inspect_required');
   // Mode standby: saat 0, perangkat tidak di-ping/dimonitor otomatis dan tidak memicu insiden otomatis.
   await addColumnIfMissing(conn, env.db.database, 'devices', 'monitor_enabled', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER alarm_override');
   // Debounce auto-deteksi offline: kapan perangkat MULAI offline (untuk syarat

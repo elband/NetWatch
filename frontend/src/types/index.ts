@@ -47,6 +47,7 @@ export interface Device {
   location_lat?: number | null;
   location_lng?: number | null;
   inspect_required?: number;
+  always_on?: number;
   status: DeviceStatus;
   off_reason?: string | null;
   monitor_enabled?: number;
@@ -165,6 +166,7 @@ export interface EquipmentRow {
   status: string;
   monitor_enabled?: number;
   off_reason?: string | null;
+  always_on?: number;
   inspections: Partial<Record<'09' | '12' | '15', Inspection>>;
   poweron?: PowerOn | null;
   poweroff?: PowerOn | null;

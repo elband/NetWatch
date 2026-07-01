@@ -48,6 +48,17 @@ export default function Devices() {
     }
   }
 
+  async function toggleAlwaysOn(d: Device) {
+    const turningOn = d.always_on !== 1;
+    if (turningOn && !(await confirmDialog({ title: `Selalu Aktif 24 Jam — ${d.name}`, message: 'Perangkat ditandai selalu aktif (mis. Masterclock/server): dikecualikan dari alur Hidupkan/Matikan peralatan — tidak untuk dihidupkan maupun dimatikan manual. Monitoring tetap berjalan.', confirmText: '🕒 Tandai 24 Jam', variant: 'info' }))) return;
+    try {
+      const r = await api.post(`/devices/${d.id}/toggle-always-on`);
+      setDevices((prev) => prev.map((x) => (x.id === d.id ? r.data.device : x)));
+    } catch (e: any) {
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mengubah status selalu aktif.', variant: 'danger' });
+    }
+  }
+
   async function requestAlarm(d: Device) {
     if (!(await confirmDialog({ title: `Alarmkan ${d.name}`, message: 'Perangkat ini terkategori "dimatikan" (jam malam). Tindakan ini membuat insiden alarm & memberi tahu teknisi on-duty.', confirmText: '🔔 Alarmkan', variant: 'warning' }))) return;
     try {
@@ -235,6 +246,17 @@ export default function Devices() {
                       : 'bg-surface2 text-text2 border border-border rounded px-2 py-0.5 text-[10px]'}
                   >
                     {d.monitor_enabled === 0 ? '▶️ Monitor' : '⏸️ Standby'}
+                  </button>
+                )}
+                {canAlarm && (
+                  <button
+                    onClick={() => toggleAlwaysOn(d)}
+                    title={d.always_on === 1 ? 'Batalkan status selalu aktif — perangkat kembali ikut alur Hidupkan/Matikan' : 'Tandai selalu aktif 24 jam — dikecualikan dari Hidupkan/Matikan (tidak dimatikan maupun dihidupkan)'}
+                    className={d.always_on === 1
+                      ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/40 rounded px-2 py-0.5 text-[10px]'
+                      : 'bg-surface2 text-text2 border border-border rounded px-2 py-0.5 text-[10px]'}
+                  >
+                    {d.always_on === 1 ? '🕒 24 Jam ✓' : '🕒 24 Jam'}
                   </button>
                 )}
                 {canAlarm && d.status === 'offline' && d.off_reason === 'dimatikan' && (

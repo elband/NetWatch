@@ -123,7 +123,7 @@ async function canInspect(user) {
 // ===================== INSPEKSI HARIAN =====================
 router.get('/inspections', async (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : dateKey(new Date());
-  const [devices] = await pool.query('SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason FROM devices WHERE inspect_required=1 ORDER BY name');
+  const [devices] = await pool.query('SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason, always_on FROM devices WHERE inspect_required=1 ORDER BY name');
   const [insp] = await pool.query('SELECT * FROM equipment_inspections WHERE inspect_date = ?', [date]);
   const byDevice = {};
   for (const r of insp) (byDevice[r.device_id] ||= {})[r.slot] = r;
@@ -239,9 +239,10 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
 
-  const [devRows] = await pool.query('SELECT name, lat, lng FROM devices WHERE id = ?', [deviceId]);
+  const [devRows] = await pool.query('SELECT name, lat, lng, always_on FROM devices WHERE id = ?', [deviceId]);
   const device = devRows[0];
   if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  if (device.always_on) return res.status(400).json({ error: 'Perangkat ini ditandai selalu aktif (24 jam) — tidak untuk dihidupkan/dimatikan.' });
 
   const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
 
@@ -307,8 +308,9 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
 
-  const [[device]] = await pool.query('SELECT id, name, lat, lng FROM devices WHERE id=?', [deviceId]);
+  const [[device]] = await pool.query('SELECT id, name, lat, lng, always_on FROM devices WHERE id=?', [deviceId]);
   if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  if (device.always_on) return res.status(400).json({ error: 'Perangkat ini ditandai selalu aktif (24 jam) — tidak untuk dihidupkan/dimatikan.' });
 
   const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
 

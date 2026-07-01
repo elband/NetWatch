@@ -7,15 +7,7 @@ const COLORS: Record<string, string> = {
 };
 
 export function DeviceStatusBadge({ status, offReason, monitorEnabled, underMaintenance }: { status: DeviceStatus; offReason?: string | null; monitorEnabled?: number; underMaintenance?: number | boolean }) {
-  // Mode standby (dimonitor dimatikan manual): tampil netral, bukan status ping lama.
-  if (monitorEnabled === 0) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-slate-300 bg-slate-500/15" title="Mode standby — tidak dimonitor otomatis">
-        ⏸️ STANDBY
-      </span>
-    );
-  }
-  // Jendela maintenance aktif: tampil khas (oranye), bukan alarm.
+  // Jendela maintenance terjadwal: tampil khas (oranye), bukan alarm.
   if (underMaintenance) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-amber-400 bg-amber-500/15" title="Dalam jendela maintenance terjadwal — tidak memicu insiden/alarm">
@@ -23,11 +15,20 @@ export function DeviceStatusBadge({ status, offReason, monitorEnabled, underMain
       </span>
     );
   }
-  // Perangkat dimatikan (bukan gangguan): tampil netral, bukan alarm merah.
-  if (status === 'offline' && offReason === 'dimatikan') {
+  // Perangkat dimatikan (via tombol Matikan / padam jam malam): monitoring dijeda, tidak dialarmkan.
+  if (offReason === 'dimatikan') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-slate-300 bg-slate-500/15" title="Padam terjadwal (jam malam) — tidak dialarmkan">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-slate-300 bg-slate-500/15"
+        title={monitorEnabled === 0 ? 'Peralatan dimatikan — monitoring dijeda, tidak dialarmkan' : 'Padam pada jam malam — tidak dialarmkan'}>
         🌙 DIMATIKAN
+      </span>
+    );
+  }
+  // Mode standby (monitoring dijeda manual): tampil netral, bukan status ping lama.
+  if (monitorEnabled === 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-slate-300 bg-slate-500/15" title="Mode standby — tidak dimonitor otomatis">
+        ⏸️ STANDBY
       </span>
     );
   }

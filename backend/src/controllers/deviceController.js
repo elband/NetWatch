@@ -131,6 +131,21 @@ export async function toggleMonitor(req, res) {
   res.json({ device: updated[0] });
 }
 
+// Toggle "selalu aktif 24 jam": perangkat dikecualikan dari alur Hidupkan/Matikan
+// peralatan (tidak boleh dimatikan maupun dihidupkan manual — mis. Masterclock/server).
+export async function toggleAlwaysOn(req, res) {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  const device = rows[0];
+  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  const next = device.always_on ? 0 : 1;
+  // Saat ditandai selalu aktif, pastikan monitoring hidup & bersihkan status "dimatikan".
+  if (next) await pool.query("UPDATE devices SET always_on=1, monitor_enabled=1, off_reason = CASE WHEN off_reason='dimatikan' THEN NULL ELSE off_reason END WHERE id=?", [id]);
+  else await pool.query('UPDATE devices SET always_on=0 WHERE id=?', [id]);
+  const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  res.json({ device: updated[0] });
+}
+
 // Riwayat metrik (time-series) untuk grafik tren. Rentang 24h/7d/30d di-downsample
 // ke bucket waktu agar payload tetap ringan.
 const RANGE = {
