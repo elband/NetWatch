@@ -107,6 +107,12 @@ export interface MaintenanceWindow {
   location_name?: string | null;
   created_by_name?: string | null;
   is_active?: number;
+  status?: 'terjadwal' | 'selesai';
+  done_note?: string | null;
+  done_by?: number | null;
+  done_by_name?: string | null;
+  done_at?: string | null;
+  photo_count?: number;
 }
 
 export type IncidentPriority = 'kritis' | 'tinggi' | 'sedang';
@@ -161,6 +167,7 @@ export interface EquipmentRow {
   off_reason?: string | null;
   inspections: Partial<Record<'09' | '12' | '15', Inspection>>;
   poweron?: PowerOn | null;
+  poweroff?: PowerOn | null;
 }
 export interface MaintenanceRow {
   id: number;

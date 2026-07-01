@@ -129,8 +129,13 @@ router.get('/inspections', async (req, res) => {
   for (const r of insp) (byDevice[r.device_id] ||= {})[r.slot] = r;
   const [pons] = await pool.query('SELECT * FROM equipment_poweron WHERE on_date = ?', [date]);
   const ponByDevice = {};
-  for (const r of pons) ponByDevice[r.device_id] = r;
-  const list = devices.map((d) => ({ ...d, inspections: byDevice[d.id] || {}, poweron: ponByDevice[d.id] || null }));
+  for (const r of pons) (ponByDevice[r.device_id] ||= {})[r.state] = r;
+  const list = devices.map((d) => ({
+    ...d,
+    inspections: byDevice[d.id] || {},
+    poweron: ponByDevice[d.id]?.on || null,
+    poweroff: ponByDevice[d.id]?.off || null,
+  }));
   const today = dateKey(new Date());
   res.json({
     date,
@@ -257,8 +262,8 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const photoUrl = `/uploads/inspections/${filename}`;
 
   await pool.query(
-    `INSERT INTO equipment_poweron (device_id, on_date, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name)
+     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
        verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name)`,
     [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name]
@@ -287,20 +292,49 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
     }
   }
 
-  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=?', [deviceId, date]);
+  const [rows] = await pool.query("SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=? AND state='on'", [deviceId, date]);
   res.json({ poweron: rows[0], device: updatedDev, verified, distance, warning });
 });
 
-// Mematikan peralatan = hentikan monitoring: perangkat ditandai "dimatikan"
-// (status offline tanpa alarm) & dijeda dari ping/insiden otomatis. Tanpa foto —
-// cukup konfirmasi oleh teknisi on-duty (atau koordinator/admin).
-router.post('/poweroff', async (req, res) => {
+// Mematikan peralatan = hentikan monitoring: perangkat ditandai "dimatikan" (status
+// offline tanpa alarm) & dijeda dari ping/insiden otomatis. WAJIB foto dokumentasi +
+// verifikasi anti-foto-palsu, oleh teknisi on-duty (atau koordinator/admin).
+router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const { deviceId, note } = req.body;
   if (!deviceId) return res.status(400).json({ error: 'Perangkat wajib valid.' });
   if (!(await canInspect(req.user))) return res.status(403).json({ error: 'Hanya teknisi on-duty (atau koordinator/admin) yang bisa mematikan peralatan.' });
 
-  const [[device]] = await pool.query('SELECT id, name FROM devices WHERE id=?', [deviceId]);
+  const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
+  if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
+
+  const [[device]] = await pool.query('SELECT id, name, lat, lng FROM devices WHERE id=?', [deviceId]);
   if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+
+  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
+
+  // Tolak bila foto identik sudah pernah dipakai pada catatan on/off lain.
+  const [dups] = await pool.query(
+    "SELECT id FROM equipment_poweron WHERE photo_hash = ? AND NOT (device_id = ? AND on_date = ? AND state='off') LIMIT 1",
+    [hash, deviceId, date]
+  );
+  if (dups.length) return res.status(409).json({ error: 'Foto ini sudah pernah dipakai. Gunakan foto baru hasil saat ini.' });
+
+  if (STRICT_VERIFY && !verified) {
+    return res.status(422).json({ error: `Verifikasi gagal: ${warning}` });
+  }
+
+  const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
+  const filename = `poweroff-${deviceId}-${date}-${Date.now()}${ext}`;
+  fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
+  const photoUrl = `/uploads/inspections/${filename}`;
+
+  await pool.query(
+    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name)
+     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
+       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name)`,
+    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name]
+  );
 
   await pool.query(
     "UPDATE devices SET monitor_enabled=0, off_reason='dimatikan', status='offline', alarm_override=0, offline_since=NULL WHERE id=?",
@@ -312,17 +346,19 @@ router.post('/poweroff', async (req, res) => {
   // Notifikasi ke koordinator bahwa peralatan dimatikan (monitoring dijeda).
   {
     const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+    const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
     for (const c of coords) {
       if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
       await queueWaNotification({
         type: 'other',
         toUserId: c.id,
-        message: `⏻ PERALATAN DIMATIKAN (monitoring dijeda)\n${device.name}\nOleh: ${req.user.name}${note?.trim() ? `\nCatatan: ${note.trim()}` : ''}`,
+        message: `⏻ PERALATAN DIMATIKAN (monitoring dijeda)\n${device.name}\nOleh: ${req.user.name}\nFoto: ${verifyTag}${distance != null ? ` · ${distance} m` : ''}${note?.trim() ? `\nCatatan: ${note.trim()}` : ''}`,
       });
     }
   }
 
-  res.json({ device: updatedDev });
+  const [rows] = await pool.query("SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=? AND state='off'", [deviceId, date]);
+  res.json({ poweroff: rows[0], device: updatedDev, verified, distance, warning });
 });
 
 // ===================== MAINTENANCE BULANAN =====================

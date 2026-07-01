@@ -141,6 +141,7 @@ function InspeksiTab() {
   const [canInput, setCanInput] = useState(false);
   const [edit, setEdit] = useState<{ dev: EquipmentRow; slot: '09' | '12' | '15' } | null>(null);
   const [powerOn, setPowerOn] = useState<EquipmentRow | null>(null);
+  const [powerOff, setPowerOff] = useState<EquipmentRow | null>(null);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'semua' | 'belum' | 'sudah'>('semua');
 
@@ -156,20 +157,6 @@ function InspeksiTab() {
   }
   useEffect(load, [date]);
   const slotEditable = (s: string) => canInput && isToday && openSlots.includes(s);
-
-  async function powerOff(d: EquipmentRow) {
-    if (!(await confirmDialog({
-      title: `Matikan ${d.name}`,
-      message: 'Peralatan ditandai "dimatikan": status menjadi offline tanpa alarm, dan monitoring otomatis (ping/insiden) dijeda sampai peralatan dihidupkan kembali.',
-      confirmText: '⏻ Matikan', variant: 'warning',
-    }))) return;
-    try {
-      await api.post('/equipment/poweroff', { deviceId: d.id });
-      load();
-    } catch (e: any) {
-      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mematikan peralatan.', variant: 'danger' });
-    }
-  }
 
   const cur = currentSlot as '09' | '12' | '15';
   const filtered = rows.filter((d) => {
@@ -260,19 +247,19 @@ function InspeksiTab() {
               {/* Hidupkan / Matikan peralatan — kontrol monitoring perangkat (di samping kunci slot).
                   Hidupkan (wajib foto) → monitoring mulai · Matikan → status "dimatikan" & monitoring dijeda. */}
               {(() => {
-                const pon = d.poweron;
                 const canPress = canInput && isToday;
                 const isOn = d.monitor_enabled !== 0;
+                const bukti = isOn ? d.poweron : d.poweroff; // bukti sesuai state terkini
                 return (
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center justify-between text-[10px]">
                       <span className={isOn ? 'text-success' : 'text-text2'}>
                         {isOn ? '🟢 Monitoring aktif' : '⚫ Dimatikan · monitoring dijeda'}
                       </span>
-                      {pon?.photo_url && (
-                        <a href={pon.photo_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-                          title={`Bukti dihidupkan oleh ${pon.done_by_name || '-'}${pon.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${pon.distance_m != null ? ' · ' + pon.distance_m + ' m' : ''}`}
-                          className="leading-none">📷{pon.verified ? '✅' : '⚠️'}</a>
+                      {bukti?.photo_url && (
+                        <a href={bukti.photo_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                          title={`Bukti ${isOn ? 'dihidupkan' : 'dimatikan'} oleh ${bukti.done_by_name || '-'}${bukti.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${bukti.distance_m != null ? ' · ' + bukti.distance_m + ' m' : ''}`}
+                          className="leading-none">📷{bukti.verified ? '✅' : '⚠️'}</a>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -288,8 +275,8 @@ function InspeksiTab() {
                       </button>
                       <button
                         disabled={!canPress || !isOn}
-                        onClick={() => canPress && isOn && powerOff(d)}
-                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : !isOn ? 'Peralatan sudah dimatikan' : 'Matikan + jeda monitoring'}
+                        onClick={() => canPress && isOn && setPowerOff(d)}
+                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : !isOn ? 'Peralatan sudah dimatikan' : 'Matikan + jeda monitoring (wajib foto dokumentasi)'}
                         className={`flex-1 border rounded px-2 py-1.5 text-[11px] font-semibold ${!isOn
                           ? 'bg-surface2 border-border text-text2 cursor-default'
                           : canPress ? 'border-danger/40 text-danger hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
@@ -327,6 +314,15 @@ function InspeksiTab() {
           existing={powerOn.poweron || undefined}
           onClose={() => setPowerOn(null)}
           onSaved={() => { setPowerOn(null); load(); }}
+        />
+      )}
+
+      {powerOff && (
+        <PowerOffModal
+          dev={powerOff}
+          existing={powerOff.poweroff || undefined}
+          onClose={() => setPowerOff(null)}
+          onSaved={() => { setPowerOff(null); load(); }}
         />
       )}
     </div>
@@ -450,6 +446,61 @@ function PowerOnModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow; 
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
           <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : 'Simpan'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Matikan peralatan: WAJIB foto dokumentasi (geotag/verifikasi sama seperti Hidupkan).
+// Menandai perangkat "dimatikan" & menjeda monitoring otomatis. Notifikasi ke koordinator.
+function PowerOffModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow; existing?: PowerOn; onClose: () => void; onSaved: () => void }) {
+  const [note, setNote] = useState(existing?.note || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const cap = usePhotoCapture([`Matikan peralatan · ${dev.name}`]);
+
+  async function save() {
+    if (!cap.file) return setErr('Foto dokumentasi wajib diunggah (bukti peralatan dimatikan).');
+    setBusy(true); setErr('');
+    try {
+      const fd = new FormData();
+      fd.append('deviceId', String(dev.id));
+      fd.append('note', note);
+      fd.append('photo', cap.file);
+      if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
+      if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
+      const res = await api.post('/equipment/poweroff', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Gagal menyimpan.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-bold mb-1">⏻ Matikan Peralatan</h3>
+        <p className="text-[11px] text-text2 mb-3">{dev.name} · {dev.type} · {dev.ip}</p>
+        <div className="bg-warn/10 border border-warn/30 rounded-md px-3 py-2 text-[11px] text-warn mb-3">Perangkat ditandai "dimatikan": status offline tanpa alarm, monitoring otomatis (ping/insiden) dijeda sampai dihidupkan kembali.</div>
+        {existing && <div className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px] text-text2 mb-3">Sudah tercatat dimatikan hari ini oleh {existing.done_by_name || '-'}. Mengunggah foto baru akan memperbarui catatan.</div>}
+        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span></label>
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="block w-full text-[11px] text-text2 mb-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-danger file:text-bg file:text-[11px] file:font-semibold"
+          onChange={(e) => cap.pick(e.target.files?.[0] || null)}
+        />
+        <GeoTagStatus cap={cap} />
+        {cap.preview && <img src={cap.preview} alt="preview" className="mt-1 mb-2 max-h-40 rounded border border-border object-contain" />}
+        <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[60px] mb-2 mt-1" placeholder="Catatan (opsional)…" value={note} onChange={(e) => setNote(e.target.value)} />
+        <div className="text-[10px] text-text2 mb-3">⚠️ Ambil foto langsung dari kamera. Waktu tangkap & lokasi GPS otomatis dibakar ke foto (geotag). Izinkan akses lokasi saat diminta. Foto lama/yang sudah pernah dipakai akan ditolak/ditandai.</div>
+        {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+        <div className="flex gap-2 justify-end">
+          <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
+          <button className="bg-danger text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : '⏻ Matikan'}</button>
         </div>
       </div>
     </div>

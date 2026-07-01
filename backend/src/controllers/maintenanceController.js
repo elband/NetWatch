@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 
 // =============================================================================
@@ -6,6 +9,11 @@ import { pool } from '../db/pool.js';
 // sampel metriknya tidak menurunkan SLA (lihat services/maintenanceService.js).
 // =============================================================================
 
+// Direktori dokumentasi foto penyelesaian jendela maintenance.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const MW_PHOTO_DIR = path.join(__dirname, '..', '..', 'uploads', 'maintenance-windows');
+fs.mkdirSync(MW_PHOTO_DIR, { recursive: true });
+
 export async function listMaintenanceWindows(req, res) {
   const scope = req.query.scope || 'all';
   let where = '';
@@ -13,15 +21,75 @@ export async function listMaintenanceWindows(req, res) {
   else if (scope === 'upcoming') where = 'WHERE mw.ends_at >= NOW()';
   const [rows] = await pool.query(
     `SELECT mw.*, d.name AS device_name, l.name AS location_name, u.name AS created_by_name,
-            (NOW() BETWEEN mw.starts_at AND mw.ends_at) AS is_active
+            ud.name AS done_by_name,
+            (NOW() BETWEEN mw.starts_at AND mw.ends_at) AS is_active,
+            (SELECT COUNT(*) FROM maintenance_window_photos p WHERE p.window_id = mw.id) AS photo_count
        FROM maintenance_windows mw
        LEFT JOIN devices d ON d.id = mw.device_id
        LEFT JOIN locations l ON l.id = mw.location_id
        LEFT JOIN users u ON u.id = mw.created_by
+       LEFT JOIN users ud ON ud.id = mw.done_by
        ${where}
       ORDER BY mw.starts_at DESC`
   );
   res.json({ windows: rows });
+}
+
+// Daftar foto dokumentasi sebuah jendela maintenance.
+export async function listWindowPhotos(req, res) {
+  const [photos] = await pool.query(
+    `SELECT p.id, p.url, p.created_at, u.name AS uploaded_by_name
+       FROM maintenance_window_photos p
+       LEFT JOIN users u ON u.id = p.uploaded_by
+      WHERE p.window_id = ? ORDER BY p.id ASC`,
+    [req.params.id]
+  );
+  res.json({ photos });
+}
+
+// Unggah satu/banyak foto dokumentasi untuk sebuah jendela maintenance.
+export async function addWindowPhotos(req, res) {
+  const [[mw]] = await pool.query('SELECT id FROM maintenance_windows WHERE id = ?', [req.params.id]);
+  if (!mw) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan.' });
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: 'Tidak ada foto yang diunggah.' });
+  for (const f of files) {
+    await pool.query(
+      'INSERT INTO maintenance_window_photos (window_id, url, uploaded_by) VALUES (?, ?, ?)',
+      [req.params.id, `/uploads/maintenance-windows/${f.filename}`, req.user?.id || null]
+    );
+  }
+  const [photos] = await pool.query(
+    `SELECT p.id, p.url, p.created_at, u.name AS uploaded_by_name
+       FROM maintenance_window_photos p LEFT JOIN users u ON u.id = p.uploaded_by
+      WHERE p.window_id = ? ORDER BY p.id ASC`,
+    [req.params.id]
+  );
+  res.status(201).json({ photos });
+}
+
+// Hapus satu foto dokumentasi (+ berkas di disk).
+export async function removeWindowPhoto(req, res) {
+  const [[ph]] = await pool.query('SELECT url FROM maintenance_window_photos WHERE id = ?', [req.params.photoId]);
+  if (!ph) return res.status(404).json({ error: 'Foto tidak ditemukan.' });
+  await pool.query('DELETE FROM maintenance_window_photos WHERE id = ?', [req.params.photoId]);
+  try { fs.unlinkSync(path.join(MW_PHOTO_DIR, path.basename(ph.url))); } catch { /* berkas mungkin sudah tiada */ }
+  res.json({ ok: true });
+}
+
+// Selesaikan pekerjaan jendela maintenance — WAJIB minimal 1 foto dokumentasi.
+export async function completeMaintenanceWindow(req, res) {
+  const id = Number(req.params.id);
+  const [[mw]] = await pool.query('SELECT id, status FROM maintenance_windows WHERE id = ?', [id]);
+  if (!mw) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan.' });
+  const [[pc]] = await pool.query('SELECT COUNT(*) AS c FROM maintenance_window_photos WHERE window_id = ?', [id]);
+  if (pc.c === 0) return res.status(400).json({ error: 'Unggah minimal 1 foto dokumentasi sebelum menyelesaikan pekerjaan.' });
+  await pool.query(
+    "UPDATE maintenance_windows SET status='selesai', done_note=?, done_by=?, done_at=NOW() WHERE id=?",
+    [req.body.note?.trim() || null, req.user?.id || null, id]
+  );
+  const [rows] = await pool.query('SELECT * FROM maintenance_windows WHERE id = ?', [id]);
+  res.json({ window: rows[0] });
 }
 
 export async function createMaintenanceWindow(req, res) {

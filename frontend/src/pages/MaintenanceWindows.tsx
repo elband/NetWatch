@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { confirmDialog, alertDialog } from '../components/dialog';
+import MaintenanceWindowCompleteModal from '../components/MaintenanceWindowCompleteModal';
 import type { MaintenanceWindow, Device } from '../types';
 
 function toLocalInput(d: Date) {
@@ -27,6 +28,7 @@ export default function MaintenanceWindows({ embedded = false }: { embedded?: bo
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  const [completeFor, setCompleteFor] = useState<MaintenanceWindow | null>(null);
 
   function load() {
     api.get('/maintenance-windows', { params: { scope } }).then((r) => setWindows(r.data.windows || [])).catch(() => setWindows([]));
@@ -118,19 +120,34 @@ export default function MaintenanceWindows({ embedded = false }: { embedded?: bo
             <div key={w.id} className="bg-surface border border-border rounded-xl p-3.5 flex flex-col gap-2">
               <div className="flex items-start justify-between gap-2">
                 <div className="font-semibold text-sm">{w.title}</div>
-                {w.is_active ? <span className="shrink-0 px-2 py-0.5 rounded-full bg-warn/15 text-warn text-[10px] font-semibold">● Aktif</span>
+                {w.status === 'selesai' ? <span className="shrink-0 px-2 py-0.5 rounded-full bg-success/15 text-success text-[10px] font-semibold">✅ Selesai</span>
+                  : w.is_active ? <span className="shrink-0 px-2 py-0.5 rounded-full bg-warn/15 text-warn text-[10px] font-semibold">● Aktif</span>
                   : <span className="shrink-0 px-2 py-0.5 rounded-full bg-surface2 text-text2 text-[10px]">Terjadwal</span>}
               </div>
               <div className="text-[11px] text-text2">{targetLabel(w)}</div>
               <div className="text-[11px]"><span className="text-text2">Mulai:</span> {fmt(w.starts_at)}</div>
               <div className="text-[11px]"><span className="text-text2">Selesai:</span> {fmt(w.ends_at)}</div>
               {w.reason && <div className="text-[11px] text-text2 italic">"{w.reason}"</div>}
-              {canEdit && (
-                <div className="flex gap-1 pt-2 border-t border-border/50">
-                  <button onClick={() => openEdit(w)} className="bg-accent2/10 text-accent2 border border-accent2/40 rounded px-2 py-0.5 text-[10px]">✏️ Edit</button>
-                  <button onClick={() => remove(w)} className="bg-danger/10 text-danger border border-danger/40 rounded px-2 py-0.5 text-[10px]">🗑️ Hapus</button>
+              {w.status === 'selesai' && (
+                <div className="text-[10px] text-success">
+                  Diselesaikan {w.done_by_name ? `oleh ${w.done_by_name}` : ''}{w.done_at ? ` · ${fmt(w.done_at)}` : ''}
+                  {w.done_note ? ` · "${w.done_note}"` : ''}
                 </div>
               )}
+              <div className="flex gap-1 pt-2 border-t border-border/50 flex-wrap">
+                {w.status === 'selesai'
+                  ? <button onClick={() => setCompleteFor(w)} className="bg-success/10 text-success border border-success/40 rounded px-2 py-0.5 text-[10px]">📸 {w.photo_count || 0} foto dokumentasi</button>
+                  : <button onClick={() => setCompleteFor(w)} className="bg-success/10 text-success border border-success/40 rounded px-2 py-0.5 text-[10px] font-semibold">✅ Selesaikan</button>}
+                {canEdit && w.status !== 'selesai' && (
+                  <>
+                    <button onClick={() => openEdit(w)} className="bg-accent2/10 text-accent2 border border-accent2/40 rounded px-2 py-0.5 text-[10px]">✏️ Edit</button>
+                    <button onClick={() => remove(w)} className="bg-danger/10 text-danger border border-danger/40 rounded px-2 py-0.5 text-[10px]">🗑️ Hapus</button>
+                  </>
+                )}
+                {canEdit && w.status === 'selesai' && (
+                  <button onClick={() => remove(w)} className="bg-danger/10 text-danger border border-danger/40 rounded px-2 py-0.5 text-[10px]">🗑️ Hapus</button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -200,6 +217,14 @@ export default function MaintenanceWindows({ embedded = false }: { embedded?: bo
             </form>
           </div>
         </div>
+      )}
+
+      {completeFor && (
+        <MaintenanceWindowCompleteModal
+          item={completeFor}
+          onClose={() => setCompleteFor(null)}
+          onCompleted={() => { setCompleteFor(null); load(); }}
+        />
       )}
     </div>
   );

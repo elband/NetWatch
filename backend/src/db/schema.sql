@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS maintenance_windows (
   reason TEXT DEFAULT NULL,
   starts_at DATETIME NOT NULL,
   ends_at DATETIME NOT NULL,
+  status ENUM('terjadwal','selesai') NOT NULL DEFAULT 'terjadwal',
+  done_note VARCHAR(255) DEFAULT NULL,
+  done_by INT DEFAULT NULL,
+  done_at DATETIME DEFAULT NULL,
   created_by INT DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_mw_window (starts_at, ends_at),
@@ -671,12 +675,13 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance_photos (
   FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- Catatan "menghidupkan peralatan" harian (1x per perangkat per hari) dengan
--- foto dokumentasi + verifikasi anti-foto-palsu (EXIF freshness & GPS proximity).
+-- Catatan menghidupkan/mematikan peralatan harian (1x per perangkat per state per hari).
+-- Kedua aksi (on/off) wajib foto dokumentasi + verifikasi anti-foto-palsu (waktu tangkap & GPS).
 CREATE TABLE IF NOT EXISTS equipment_poweron (
   id INT AUTO_INCREMENT PRIMARY KEY,
   device_id INT NOT NULL,
   on_date DATE NOT NULL,
+  state ENUM('on','off') NOT NULL DEFAULT 'on',
   note VARCHAR(255) DEFAULT NULL,
   photo_url VARCHAR(255) DEFAULT NULL,
   photo_hash CHAR(64) DEFAULT NULL,
@@ -686,9 +691,21 @@ CREATE TABLE IF NOT EXISTS equipment_poweron (
   done_by_name VARCHAR(120) DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_poweron (device_id, on_date),
+  UNIQUE KEY uniq_poweron (device_id, on_date, state),
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
   FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Dokumentasi foto penyelesaian jendela maintenance (banyak foto per jendela).
+CREATE TABLE IF NOT EXISTS maintenance_window_photos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  window_id INT NOT NULL,
+  url VARCHAR(255) NOT NULL,
+  uploaded_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_mwphoto_window (window_id),
+  FOREIGN KEY (window_id) REFERENCES maintenance_windows(id) ON DELETE CASCADE,
+  FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- Notification Center: notifikasi per-user, dikirim real-time via Socket.IO.

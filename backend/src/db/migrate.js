@@ -109,6 +109,14 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'device_metrics', 'in_maint', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER mem');
   // Dokumentasi (foto/PDF) untuk rencana/pelaksanaan maintenance.
   await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'doc_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
+  // equipment_poweron: dukung state on/off (dokumentasi wajib untuk keduanya). Kolom + unique key.
+  await addColumnIfMissing(conn, env.db.database, 'equipment_poweron', 'state', "ENUM('on','off') NOT NULL DEFAULT 'on' AFTER on_date");
+  await ensurePoweronUnique(conn, env.db.database);
+  // Jendela maintenance: penyelesaian pekerjaan (status selesai + dokumentasi foto).
+  await addColumnIfMissing(conn, env.db.database, 'maintenance_windows', 'status', "ENUM('terjadwal','selesai') NOT NULL DEFAULT 'terjadwal' AFTER ends_at");
+  await addColumnIfMissing(conn, env.db.database, 'maintenance_windows', 'done_note', 'VARCHAR(255) DEFAULT NULL AFTER status');
+  await addColumnIfMissing(conn, env.db.database, 'maintenance_windows', 'done_by', 'INT DEFAULT NULL AFTER done_note');
+  await addColumnIfMissing(conn, env.db.database, 'maintenance_windows', 'done_at', 'DATETIME DEFAULT NULL AFTER done_by');
   // Device binding & akurasi GPS untuk absensi ketat.
   await addColumnIfMissing(conn, env.db.database, 'users', 'device_id', 'VARCHAR(80) DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'attendance', 'accuracy_m', 'INT DEFAULT NULL');
@@ -213,6 +221,26 @@ async function addIndexIfMissing(conn, dbName, table, indexName, colsExpr) {
     }
   } catch (e) {
     console.warn(`  ! lewati index ${table}.${indexName}: ${e.message}`);
+  }
+}
+
+// Pastikan unique key equipment_poweron mencakup kolom `state` (device_id, on_date, state)
+// agar catatan on & off bisa berdampingan di hari yang sama. Untuk DB lama yang masih
+// memakai unique (device_id, on_date), index diganti; DB baru (dari schema.sql) dilewati.
+async function ensurePoweronUnique(conn, dbName) {
+  try {
+    const [cols] = await conn.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA=? AND TABLE_NAME='equipment_poweron' AND INDEX_NAME='uniq_poweron'
+        ORDER BY SEQ_IN_INDEX`, [dbName]
+    );
+    if (cols.length && !cols.some((c) => c.COLUMN_NAME === 'state')) {
+      await conn.query('ALTER TABLE equipment_poweron DROP INDEX uniq_poweron');
+      await conn.query('ALTER TABLE equipment_poweron ADD UNIQUE KEY uniq_poweron (device_id, on_date, state)');
+      console.log('  ~ equipment_poweron.uniq_poweron → sertakan state');
+    }
+  } catch (e) {
+    console.warn(`  ! lewati fix uniq_poweron: ${e.message}`);
   }
 }
 
