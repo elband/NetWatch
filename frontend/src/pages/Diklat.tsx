@@ -110,7 +110,14 @@ export default function Diklat() {
                 <td className="px-3 py-2.5 font-mono text-[10px]">{d.tanggal_mulai || '-'}{d.tanggal_selesai ? ` → ${d.tanggal_selesai}` : ''}</td>
                 <td className="px-3 py-2.5 font-mono text-[11px]">{rupiah(d.biaya)}</td>
                 <td className="px-3 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${STATUS[d.status].cls}`}>{STATUS[d.status].label}</span></td>
-                <td className="px-3 py-2.5"><button onClick={() => setDetail(d)} className="border border-border text-text2 hover:text-text rounded px-2 py-0.5 text-[10px]">👁️ Lihat</button></td>
+                <td className="px-3 py-2.5">
+                  <div className="flex gap-1.5">
+                    <button onClick={() => setDetail(d)} className="border border-border text-text2 hover:text-text rounded px-2 py-0.5 text-[10px]">👁️ Lihat</button>
+                    {(isManager || (d.created_by === user?.id && (d.status === 'draft' || d.status === 'diajukan'))) && (
+                      <button onClick={() => { setEditId(d.id); setShowForm(true); }} title="Edit pengajuan" className="border border-accent2/40 text-accent2 hover:bg-accent2/10 rounded px-2 py-0.5 text-[10px]">✏️ Edit</button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
             {rows.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-text2">Belum ada pengajuan diklat.</td></tr>}
