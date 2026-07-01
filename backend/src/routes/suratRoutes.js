@@ -53,9 +53,10 @@ async function nextNomor(conn, jenis = 'Nota Dinas') {
     return { nomor: `SPL/${String(seq).padStart(3, '0')}/TEKOPS/APTP-${tahun}`, seq, bulan, tahun };
   }
   if (jenis === 'Permintaan Barang') {
+    // Nomor urut dikosongkan (titik-titik) agar diisi manual saat dokumen dicetak.
     const [seqRows] = await conn.query("SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE tahun=? AND jenis='Permintaan Barang'", [tahun]);
     const seq = seqRows[0].s;
-    return { nomor: `PL.108/${String(seq).padStart(3, '0')}/APTP/${tahun}`, seq, bulan, tahun };
+    return { nomor: `PL.108/..................../APTP/${tahun}`, seq, bulan, tahun };
   }
   const [seqRows] = await conn.query('SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE bulan = ? AND tahun = ?', [bulan, tahun]);
   const seq = seqRows[0].s;
