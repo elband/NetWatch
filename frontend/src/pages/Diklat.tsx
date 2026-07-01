@@ -137,7 +137,18 @@ function DiklatForm({ lkp: _lkp, edit, onClose, onSaved }: { lkp: any; edit: Pen
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [pegawaiId, setPegawaiId] = useState<string>(edit?.pegawai_id ? String(edit.pegawai_id) : '');
+  const [users, setUsers] = useState<{ id: number; name: string; nip: string | null; jabatan: string | null; emoji: string | null }[]>([]);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+
+  useEffect(() => { api.get('/surat/users').then((r) => setUsers(r.data.users || [])).catch(() => {}); }, []);
+
+  // Pilih pegawai dari akun → set pegawai_id + auto-isi nama/NIP/jabatan (agar tampil di akun ybs).
+  function pickPegawai(id: string) {
+    setPegawaiId(id);
+    const u = users.find((x) => String(x.id) === id);
+    if (u) setF((p) => ({ ...p, pegawai_nama: u.name, nip: u.nip || p.nip, jabatan: u.jabatan || p.jabatan }));
+  }
 
   async function save() {
     if (!f.nama_diklat.trim() || !f.pegawai_nama.trim()) return setErr('Nama pegawai & nama diklat wajib diisi.');
@@ -145,6 +156,7 @@ function DiklatForm({ lkp: _lkp, edit, onClose, onSaved }: { lkp: any; edit: Pen
     try {
       const fd = new FormData();
       Object.entries(f).forEach(([k, v]) => v && fd.append(k, v));
+      if (pegawaiId) fd.append('pegawai_id', pegawaiId);
       if (file) fd.append('file', file);
       if (edit) await api.put(`/diklat/${edit.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       else await api.post('/diklat', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -158,6 +170,12 @@ function DiklatForm({ lkp: _lkp, edit, onClose, onSaved }: { lkp: any; edit: Pen
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-bold">🎓 {edit ? 'Edit' : 'Form'} Pengajuan Diklat</h3><button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button></div>
         <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Pilih Pegawai (akun) — agar pengajuan tampil di akun ybs" full>
+            <select className={inp} value={pegawaiId} onChange={(e) => pickPegawai(e.target.value)}>
+              <option value="">— pilih dari daftar pegawai (opsional) —</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.emoji || '👤'} {u.name}{u.jabatan ? ' · ' + u.jabatan : ''}</option>)}
+            </select>
+          </Field>
           <Field label="Nama Pegawai *"><input className={inp} value={f.pegawai_nama} onChange={(e) => set('pegawai_nama', e.target.value)} /></Field>
           <Field label="NIP / NIK"><input className={inp} value={f.nip} onChange={(e) => set('nip', e.target.value)} /></Field>
           <Field label="Jabatan"><input className={inp} value={f.jabatan} onChange={(e) => set('jabatan', e.target.value)} /></Field>

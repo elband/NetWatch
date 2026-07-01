@@ -65,8 +65,8 @@ async function notifyCoords(message) {
 
 // ===== Dashboard statistik =====
 router.get('/stats', async (req, res) => {
-  const scope = isManager(req.user) ? '' : ' AND created_by=?';
-  const params = isManager(req.user) ? [] : [req.user.id];
+  const scope = isManager(req.user) ? '' : ' AND (created_by=? OR pegawai_id=?)';
+  const params = isManager(req.user) ? [] : [req.user.id, req.user.id];
   const [[r]] = await pool.query(
     `SELECT COUNT(*) total,
             SUM(status IN ('diajukan','diverifikasi')) menunggu,
@@ -82,7 +82,7 @@ router.get('/stats', async (req, res) => {
 function buildList(req) {
   let sql = 'SELECT * FROM pengajuan_diklat WHERE 1=1';
   const params = [];
-  if (!isManager(req.user)) { sql += ' AND created_by=?'; params.push(req.user.id); }
+  if (!isManager(req.user)) { sql += ' AND (created_by=? OR pegawai_id=?)'; params.push(req.user.id, req.user.id); }
   if (/^\d{4}$/.test(req.query.year)) { sql += ' AND tahun=?'; params.push(Number(req.query.year)); }
   if (['draft', 'diajukan', 'diverifikasi', 'disetujui', 'ditolak', 'selesai'].includes(req.query.status)) { sql += ' AND status=?'; params.push(req.query.status); }
   if (req.query.q) { sql += " AND (nama_diklat LIKE ? ESCAPE '\\\\' OR pegawai_nama LIKE ? ESCAPE '\\\\' OR nomor_pengajuan LIKE ? ESCAPE '\\\\' OR penyelenggara LIKE ? ESCAPE '\\\\')"; const k = `%${escapeLike(req.query.q)}%`; params.push(k, k, k, k); }
@@ -113,7 +113,7 @@ router.get('/export', requireRole('admin', 'koordinator'), async (req, res) => {
 router.get('/:id', async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [Number(req.params.id)]);
   if (!rows[0]) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
-  if (!isManager(req.user) && rows[0].created_by !== req.user.id) return res.status(403).json({ error: 'Tidak punya akses.' });
+  if (!isManager(req.user) && rows[0].created_by !== req.user.id && rows[0].pegawai_id !== req.user.id) return res.status(403).json({ error: 'Tidak punya akses.' });
   res.json({ diklat: (await withDetail(rows))[0] });
 });
 
@@ -148,8 +148,8 @@ router.put('/:id', upload.single('file'), async (req, res) => {
   const b = req.body;
   const file = req.file ? `/uploads/diklat/${req.file.filename}` : null;
   await pool.query(
-    `UPDATE pengajuan_diklat SET pegawai_nama=?, nip=?, jabatan=?, unit_kerja=?, nama_diklat=?, penyelenggara=?, lokasi=?, tanggal_mulai=?, tanggal_selesai=?, durasi=?, biaya=?, tujuan=?, keterangan=?, file_pendukung=COALESCE(?,file_pendukung) WHERE id=?`,
-    [b.pegawai_nama || d.pegawai_nama, b.nip ?? d.nip, b.jabatan ?? d.jabatan, b.unit_kerja ?? d.unit_kerja, b.nama_diklat?.trim() || d.nama_diklat, b.penyelenggara ?? d.penyelenggara,
+    `UPDATE pengajuan_diklat SET pegawai_id=?, pegawai_nama=?, nip=?, jabatan=?, unit_kerja=?, nama_diklat=?, penyelenggara=?, lokasi=?, tanggal_mulai=?, tanggal_selesai=?, durasi=?, biaya=?, tujuan=?, keterangan=?, file_pendukung=COALESCE(?,file_pendukung) WHERE id=?`,
+    [b.pegawai_id || d.pegawai_id, b.pegawai_nama || d.pegawai_nama, b.nip ?? d.nip, b.jabatan ?? d.jabatan, b.unit_kerja ?? d.unit_kerja, b.nama_diklat?.trim() || d.nama_diklat, b.penyelenggara ?? d.penyelenggara,
       b.lokasi ?? d.lokasi, b.tanggal_mulai || d.tanggal_mulai, b.tanggal_selesai || d.tanggal_selesai, b.durasi ?? d.durasi, Number(b.biaya) || d.biaya, b.tujuan ?? d.tujuan, b.keterangan ?? d.keterangan, file, id]
   );
   const [u] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
@@ -180,9 +180,13 @@ router.patch('/:id/status', async (req, res) => {
     await notifyCoords(`📚 *Pengajuan Diklat Baru*\n${d.pegawai_nama}: ${d.nama_diklat}\nNo. ${d.nomor_pengajuan}\nMohon ditinjau.`);
     await notifyRoles(['koordinator', 'admin'], { type: 'diklat_new', title: `Pengajuan diklat baru: ${d.nama_diklat}`, message: `${d.pegawai_nama} · ${d.nomor_pengajuan} — mohon ditinjau.`, refId: id, refType: 'diklat', link: `/diklat?focus=${id}` });
   }
-  if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) {
-    try { if (await isNotifyEnabledForUser('pengajuan_keputusan', d.created_by)) await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Pengajuan diklat "${d.nama_diklat}" (${d.nomor_pengajuan}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ }
-    await createNotification({ userId: d.created_by, type: next === 'ditolak' ? 'diklat_rejected' : 'diklat_approved', title: `Diklat ${next}: ${d.nama_diklat}`, message: `${d.nomor_pengajuan}${note ? ` — ${note}` : ''}`, refId: id, refType: 'diklat', link: `/diklat?focus=${id}` });
+  if (['disetujui', 'ditolak', 'selesai'].includes(next)) {
+    // Beri tahu pengusul (created_by) DAN pegawai yang bersangkutan (pegawai_id), tanpa duplikat.
+    const targets = [...new Set([d.created_by, d.pegawai_id].filter(Boolean))];
+    for (const uid of targets) {
+      try { if (await isNotifyEnabledForUser('pengajuan_keputusan', uid)) await queueWaNotification({ type: 'other', toUserId: uid, message: `Pengajuan diklat "${d.nama_diklat}" (${d.nomor_pengajuan}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ }
+      await createNotification({ userId: uid, type: next === 'ditolak' ? 'diklat_rejected' : 'diklat_approved', title: `Diklat ${next}: ${d.nama_diklat}`, message: `${d.nomor_pengajuan}${note ? ` — ${note}` : ''}`, refId: id, refType: 'diklat', link: `/diklat?focus=${id}` });
+    }
   }
   const [u] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
   res.json({ diklat: (await withDetail(u))[0] });
@@ -220,7 +224,7 @@ router.post('/:id/laporan', upload.single('laporan'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
   const d = rows[0];
   if (!d) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
-  if (!isManager(req.user) && d.created_by !== req.user.id) return res.status(403).json({ error: 'Tidak punya akses.' });
+  if (!isManager(req.user) && d.created_by !== req.user.id && d.pegawai_id !== req.user.id) return res.status(403).json({ error: 'Tidak punya akses.' });
   if (!['disetujui', 'selesai'].includes(d.status)) return res.status(400).json({ error: 'Laporan hanya bisa diunggah setelah pengajuan disetujui.' });
   if (!req.file) return res.status(400).json({ error: 'File laporan wajib diunggah.' });
   const url = `/uploads/diklat/${req.file.filename}`;
