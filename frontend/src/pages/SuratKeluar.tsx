@@ -100,8 +100,8 @@ export default function SuratKeluar() {
     return { kasi_nama: lkp.kasie_nama || '', kasi_nip: lkp.kasie_nip || '', kasi_golongan: 'Pembina (IV/a)', kasi_jabatan: lkp.kasie_jabatan || 'Kepala Seksi Teknik dan Operasi', tanggal_kegiatan: '', hari_kegiatan: 'Jumat', kegiatan: '', durasi_jam: '5', dasar: 'Pengaduan Penumpang\nPerintah Lisan Kepala Seksi', tujuan_kegiatan: '', hasil: '' };
   }
   function defaultBarangData(): BarangFormData {
-    // Peminta = koordinator (ber-TTE). PPK & Perlengkapan dibiarkan kosong = tanda tangan manual (basah).
-    return { keperluan: '', ppk_nama: '', ppk_nip: '', perlengkapan_nama: '', perlengkapan_nip: '', peminta_nama: lkp.koord_nama || '', peminta_nip: lkp.koord_nip || '' };
+    // Peminta = koordinator (ber-TTE). PPK & Perlengkapan: nama tercetak, tanda tangan manual (basah).
+    return { keperluan: '', ppk_nama: 'GUNAWAN', ppk_nip: '19841105 200712 1 001', perlengkapan_nama: 'BUDI SUPANGAT', perlengkapan_nip: '19791111 201012 1 002', peminta_nama: lkp.koord_nama || '', peminta_nip: lkp.koord_nip || '' };
   }
 
   async function openInWindow(s: Surat, autoPrint = false) {
@@ -491,14 +491,14 @@ export default function SuratKeluar() {
                 </div>
 
                 {/* Penanda tangan */}
-                <div className="text-[9px] text-text2 -mb-1">PPK Rutin & Perlengkapan = tanda tangan manual (basah). Kosongkan untuk garis tanda tangan kosong di dokumen.</div>
+                <div className="text-[9px] text-text2 -mb-1">PPK Rutin & Perlengkapan: nama tercetak di dokumen, tanda tangan manual (basah). Hanya Peminta yang ber-TTE.</div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div><label className="block text-[10px] text-text2 mb-1">PPK Rutin <span className="font-normal">(manual, opsional)</span></label>
-                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs mb-1" value={barangData.ppk_nama} onChange={e=>setBarangData({...barangData,ppk_nama:e.target.value})} placeholder="Nama (kosongkan = manual)" />
-                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={barangData.ppk_nip} onChange={e=>setBarangData({...barangData,ppk_nip:e.target.value})} placeholder="NIP (opsional)" /></div>
-                  <div><label className="block text-[10px] text-text2 mb-1">Perlengkapan <span className="font-normal">(manual, opsional)</span></label>
-                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs mb-1" value={barangData.perlengkapan_nama} onChange={e=>setBarangData({...barangData,perlengkapan_nama:e.target.value})} placeholder="Nama (kosongkan = manual)" />
-                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={barangData.perlengkapan_nip} onChange={e=>setBarangData({...barangData,perlengkapan_nip:e.target.value})} placeholder="NIP (opsional)" /></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">PPK Rutin <span className="font-normal">(TTD manual)</span></label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs mb-1" value={barangData.ppk_nama} onChange={e=>setBarangData({...barangData,ppk_nama:e.target.value})} placeholder="Nama" />
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={barangData.ppk_nip} onChange={e=>setBarangData({...barangData,ppk_nip:e.target.value})} placeholder="NIP" /></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">Perlengkapan <span className="font-normal">(TTD manual)</span></label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs mb-1" value={barangData.perlengkapan_nama} onChange={e=>setBarangData({...barangData,perlengkapan_nama:e.target.value})} placeholder="Nama" />
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={barangData.perlengkapan_nip} onChange={e=>setBarangData({...barangData,perlengkapan_nip:e.target.value})} placeholder="NIP" /></div>
                   <div className="col-span-2"><label className="block text-[10px] text-text2 mb-1">Peminta Barang <span className="font-normal">(penanda tangan TTE)</span></label>
                   <div className="grid grid-cols-2 gap-2">
                     <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={barangData.peminta_nama} onChange={e=>setBarangData({...barangData,peminta_nama:e.target.value})} placeholder="Nama" />
