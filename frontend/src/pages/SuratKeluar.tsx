@@ -188,6 +188,15 @@ export default function SuratKeluar() {
       } else setMsg(err);
     }
   }
+  async function kirimSiKeren(s: Surat) {
+    if (!s.sign_token) { setMsg('Sahkan (TTE) dokumen dulu sebelum kirim ke SiKeren.'); return; }
+    if (!(await confirmDialog({ title: 'Kirim ke SiKeren', message: 'Kirim dokumen Laporan Bulanan ke aplikasi SiKeren untuk verifikasi a.n. Kepala Seksi?', confirmText: '📤 Kirim', variant: 'info' }))) return;
+    try {
+      const r = await api.post(`/surat/${s.id}/kirim-sikeren`);
+      setDetail(r.data.surat); load();
+      setMsg('✓ Dokumen terkirim ke SiKeren untuk verifikasi.');
+    } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal mengirim ke SiKeren.'); }
+  }
   async function notifyPelaksana(s: Surat) {
     if (!(await confirmDialog({ title: 'Kirim notifikasi TTD', message: 'Kirim notifikasi tanda tangan ke semua pelaksana lembur? Link unik akan dibuat untuk setiap pegawai.', confirmText: '📲 Kirim', variant: 'info' }))) return;
     try {
@@ -638,6 +647,27 @@ export default function SuratKeluar() {
                   <div className="text-text2">— Belum di-TTE</div>
                 )}
               </div>
+
+              {detail.report_month && (
+                <div className="border-t border-border pt-2 mt-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-text2">🗄️ Verifikasi SiKeren</div>
+                    <button onClick={() => kirimSiKeren(detail)} className="text-[10px] text-accent2 hover:underline">📤 Kirim ke SiKeren</button>
+                  </div>
+                  {detail.sikeren_status === 'terkirim' ? (
+                    <div className="bg-success/10 border border-success/30 rounded-md p-2.5 text-[11px]">
+                      <div className="text-success font-semibold">✓ Terkirim ke SiKeren</div>
+                      {detail.sikeren_ref && <div className="mt-0.5">Ref: <span className="font-mono">{detail.sikeren_ref}</span></div>}
+                      {detail.sikeren_at && <div className="text-text2">{new Date(detail.sikeren_at).toLocaleString('id-ID')}</div>}
+                      {detail.sikeren_url && <a href={detail.sikeren_url} target="_blank" rel="noreferrer" className="text-accent2 hover:underline">🔗 Lihat di SiKeren</a>}
+                    </div>
+                  ) : detail.sikeren_status === 'gagal' ? (
+                    <div className="bg-danger/10 border border-danger/30 rounded-md p-2.5 text-[11px] text-danger">🚫 Gagal kirim{detail.sikeren_note ? ` — ${detail.sikeren_note}` : ''}</div>
+                  ) : (
+                    <div className="text-text2 text-[11px]">— Belum dikirim. Otomatis terkirim saat TTE laporan, atau klik "Kirim ke SiKeren".</div>
+                  )}
+                </div>
+              )}
 
               <div className="border-t border-border pt-2 mt-2">
                 <div className="flex items-center justify-between mb-1">

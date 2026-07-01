@@ -10,6 +10,8 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { queueWaRaw } from '../jobs/waQueue.js';
 import { buildLaporanData } from './laporanRoutes.js';
 import { createNotification } from '../services/notify.js';
+import { renderDocPdf } from '../services/pdfRenderer.js';
+import { sendToSiKeren, isSiKerenConfigured } from '../services/siKerenService.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -207,8 +209,30 @@ router.post('/:id/sign', requireRole('koordinator', 'admin'), async (req, res) =
   const token = 'NS' + crypto.createHmac('sha256', env.jwtSecret).update(payload).digest('hex').slice(0, 22).toUpperCase();
   await pool.query('UPDATE nota_dinas SET signed_by=?, signer_name=?, signer_nip=?, signed_at=?, sign_token=? WHERE id=?',
     [req.user.id, name, nip, signedAt, token, id]);
-  const [updated] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
+  let [updated] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
+  // Laporan Bulanan → otomatis kirim ke SiKeren untuk verifikasi (best-effort; tidak menggagalkan TTE).
+  if (updated[0]?.report_month && isSiKerenConfigured()) {
+    try { await pushSuratSiKeren(updated[0]); }
+    catch (e) { await pool.query("UPDATE nota_dinas SET sikeren_status='gagal', sikeren_note=? WHERE id=?", [String(e?.message || e).slice(0, 255), id]); }
+    [updated] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
+  }
   res.json({ surat: (await withLampiran(updated))[0] });
+});
+
+// Kirim manual dokumen ke SiKeren untuk verifikasi (a.n. Kepala Seksi/Murdoko).
+router.post('/:id/kirim-sikeren', requireRole('koordinator', 'admin'), async (req, res) => {
+  if (!isSiKerenConfigured()) return res.status(400).json({ error: 'Integrasi SiKeren belum dikonfigurasi di server (SIKEREN_BASE_URL & SIKEREN_API_KEY).' });
+  const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [Number(req.params.id)]);
+  const s = rows[0];
+  if (!s) return res.status(404).json({ error: 'Surat tidak ditemukan' });
+  try {
+    const r = await pushSuratSiKeren(s);
+    const [u] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [s.id]);
+    res.json({ surat: (await withLampiran(u))[0], sikeren: r });
+  } catch (e) {
+    await pool.query("UPDATE nota_dinas SET sikeren_status='gagal', sikeren_note=? WHERE id=?", [String(e?.message || e).slice(0, 255), s.id]);
+    res.status(502).json({ error: e?.message || 'Gagal mengirim ke SiKeren.' });
+  }
 });
 
 // Baca pengaturan kop/penanda-tangan (LKP) dari tabel settings.
@@ -222,6 +246,29 @@ async function getLkp() {
   lkp.kasie_jabatan = lkp.kasie_jabatan || lkp.kepala_jabatan || 'KEPALA SEKSI TEKNIK DAN OPERASI';
   lkp.kasie_phone = lkp.kasie_phone || lkp.kepala_phone || '';
   return lkp;
+}
+
+// Kirim surat (Laporan Bulanan ber-TTE) ke SiKeren untuk verifikasi a.n. Kepala Seksi.
+// Render PDF dari halaman cetak publik lalu POST berkas + metadata + tautan verifikasi.
+// Menyimpan status ke kolom sikeren_*; melempar error bila gagal (dipakai manual & auto).
+async function pushSuratSiKeren(s) {
+  if (!s.sign_token) throw new Error('Surat belum di-TTE — sahkan dulu sebelum kirim ke SiKeren.');
+  const lkp = await getLkp();
+  const { buffer } = await renderDocPdf(s.sign_token);
+  const periode = s.report_month || '';
+  const verifyUrl = `${env.appUrl}/verify-tte?token=${s.sign_token}`;
+  const metadata = {
+    jenis: s.jenis, nomor: s.nomor, hal: s.hal, periode,
+    penandatangan_nama: s.signer_name || '', penandatangan_nip: s.signer_nip || '',
+    verifikator_nama: lkp.kasie_nama || 'MURDOKO', verifikator_nip: lkp.kasie_nip || '',
+  };
+  const filename = `laporan-${(periode || s.nomor).replace(/[^\w-]+/g, '-')}.pdf`;
+  const r = await sendToSiKeren({ pdfBuffer: buffer, filename, metadata, verifyUrl });
+  await pool.query(
+    'UPDATE nota_dinas SET sikeren_status=?, sikeren_ref=?, sikeren_url=?, sikeren_at=NOW(), sikeren_note=NULL WHERE id=?',
+    ['terkirim', r.ref || null, r.url || null, s.id]
+  );
+  return r;
 }
 
 // Kirim permohonan TTD ke Kepala Seksi via WhatsApp (berisi tautan halaman TTD).

@@ -74,6 +74,12 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'kasi_note', 'VARCHAR(255) DEFAULT NULL');
   // Penanda bahwa surat adalah pengantar Laporan Bulanan periode tertentu (YYYY-MM) → TTD tampilkan laporan penuh.
   await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'report_month', 'VARCHAR(7) DEFAULT NULL');
+  // Status pengiriman ke SiKeren (verifikasi dokumen Laporan Bulanan a.n. Kepala Seksi).
+  await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'sikeren_status', "VARCHAR(20) DEFAULT NULL");
+  await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'sikeren_ref', 'VARCHAR(120) DEFAULT NULL');
+  await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'sikeren_url', 'VARCHAR(255) DEFAULT NULL');
+  await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'sikeren_at', 'DATETIME DEFAULT NULL');
+  await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'sikeren_note', 'VARCHAR(255) DEFAULT NULL');
 
   await addColumnIfMissing(conn, env.db.database, 'users', 'pin_hash', 'VARCHAR(255) DEFAULT NULL AFTER password_hash');
   await addColumnIfMissing(conn, env.db.database, 'users', 'roles', 'JSON DEFAULT NULL AFTER role');

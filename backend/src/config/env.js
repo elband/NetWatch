@@ -49,6 +49,16 @@ export const env = {
     baseUrl: process.env.WAGATEWAY_BASE_URL || 'https://wg.aptpairport.id',
     deviceId: process.env.WAGATEWAY_DEVICE_ID || '',
   },
+  // Integrasi keluar ke aplikasi SiKeren (SI-Keren BLU) untuk verifikasi dokumen
+  // Laporan Bulanan a.n. Kepala Seksi (Murdoko). Autentikasi: API Key di header.
+  // Endpoint & nama field dibuat konfigurable agar mudah diarahkan ke API asli.
+  siKeren: {
+    baseUrl: (process.env.SIKEREN_BASE_URL || '').replace(/\/$/, ''),
+    verifyPath: process.env.SIKEREN_VERIFY_PATH || '/api/v1/documents/verify',
+    apiKey: process.env.SIKEREN_API_KEY || '',
+    apiKeyHeader: process.env.SIKEREN_API_KEY_HEADER || 'X-API-Key',
+    account: process.env.SIKEREN_ACCOUNT || '', // id/username akun Murdoko di SiKeren (opsional)
+  },
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   // URL publik aplikasi — dipakai untuk menyusun link di notifikasi WA (klik utk ambil/ingatkan).
   appUrl: (process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173').replace(/\/$/, ''),

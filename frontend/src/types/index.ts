@@ -354,6 +354,11 @@ export interface Surat {
   kasi_sign_token?: string | null;
   kasi_note?: string | null;
   report_month?: string | null;
+  sikeren_status?: 'terkirim' | 'gagal' | null;
+  sikeren_ref?: string | null;
+  sikeren_url?: string | null;
+  sikeren_at?: string | null;
+  sikeren_note?: string | null;
 }
 
 export interface SuratLampiran {
