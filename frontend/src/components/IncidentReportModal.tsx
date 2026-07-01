@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { confirmDialog } from './dialog';
+import { openImage } from './ImageLightbox';
 import type { Incident, IncidentReport, RepairResult } from '../types';
 
 const HASIL_LABEL: Record<RepairResult, string> = {
@@ -259,9 +260,8 @@ export default function IncidentReportModal({
               {tindakanList.map((n) => (
                 <div key={n.id} className="flex gap-2 items-start text-[11px] border-b border-border/30 pb-2 last:border-0 last:pb-0">
                   {n.doc_url && (
-                    <a href={n.doc_url} target="_blank" rel="noreferrer" className="flex-shrink-0">
-                      <img src={n.doc_url} alt="dok" className="w-10 h-10 rounded object-cover border border-border" />
-                    </a>
+                    <img src={n.doc_url} alt="dok" onClick={() => openImage(n.doc_url!)}
+                      className="w-10 h-10 rounded object-cover border border-border flex-shrink-0 cursor-zoom-in" />
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="leading-snug">{n.note}</div>

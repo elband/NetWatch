@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { stampFiles } from '../utils/photoStamp';
+import { openImage } from './ImageLightbox';
 import type { MaintenanceWindow } from '../types';
 
 interface MWPhoto {
@@ -27,7 +28,6 @@ export default function MaintenanceWindowCompleteModal({ item, onClose, onComple
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
   const pickRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const done = item.status === 'selesai';
@@ -124,7 +124,7 @@ export default function MaintenanceWindowCompleteModal({ item, onClose, onComple
                 {isPdf(p.url) ? (
                   <a href={p.url} target="_blank" rel="noreferrer" className="w-full h-full flex flex-col items-center justify-center text-text2 text-[10px] gap-1"><span className="text-2xl">📄</span>PDF</a>
                 ) : (
-                  <img src={p.url} alt="Dokumentasi" loading="lazy" onClick={() => setLightbox(p.url)}
+                  <img src={p.url} alt="Dokumentasi" loading="lazy" onClick={() => openImage(p.url)}
                     className="w-full h-full object-cover cursor-zoom-in transition group-hover:brightness-75" />
                 )}
                 <button title="Hapus foto" onClick={() => removePhoto(p.id)}
@@ -154,14 +154,6 @@ export default function MaintenanceWindowCompleteModal({ item, onClose, onComple
           )}
         </div>
       </div>
-
-      {/* Lightbox */}
-      {lightbox && (
-        <div className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-6" onClick={(e) => { e.stopPropagation(); setLightbox(null); }}>
-          <img src={lightbox} alt="Dokumentasi" className="max-w-full max-h-full rounded-lg object-contain" />
-          <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-5 text-white text-3xl leading-none">×</button>
-        </div>
-      )}
     </div>
   );
 }

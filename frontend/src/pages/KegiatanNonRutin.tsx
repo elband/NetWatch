@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { confirmDialog, promptDialog } from '../components/dialog';
 import { stampFiles } from '../utils/photoStamp';
+import { openImage } from '../components/ImageLightbox';
 import type { KegiatanNr as Keg, KnrStats, KnrRecap, KnrStatus } from '../types';
 
 const STATUS: Record<KnrStatus, { label: string; cls: string }> = {
@@ -232,7 +233,7 @@ function KegDetail({ id, isManager, userId, onClose, onChanged, onEdit }: { id: 
         </div>
         {(foto.length > 0 || dok.length > 0) && (
           <div className="border border-border rounded-lg p-3 mb-3">
-            {foto.length > 0 && <><div className="text-[11px] text-text2 mb-1.5">📷 Dokumentasi ({foto.length})</div><div className="grid grid-cols-4 gap-2 mb-2">{foto.map((f) => <a key={f.id} href={f.file_url} target="_blank" rel="noreferrer"><img src={f.file_url} className="w-full h-16 object-cover rounded border border-border" /></a>)}</div></>}
+            {foto.length > 0 && <><div className="text-[11px] text-text2 mb-1.5">📷 Dokumentasi ({foto.length})</div><div className="grid grid-cols-4 gap-2 mb-2">{foto.map((f) => <img key={f.id} src={f.file_url} onClick={() => openImage(f.file_url)} className="w-full h-16 object-cover rounded border border-border cursor-zoom-in" />)}</div></>}
             {dok.length > 0 && <div className="space-y-1">{dok.map((f) => <a key={f.id} href={f.file_url} target="_blank" rel="noreferrer" className="block text-[11px] text-accent2 hover:underline">📎 {f.filename}</a>)}</div>}
           </div>
         )}

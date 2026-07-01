@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { IncidentStatusBadge, PriorityBadge } from './StatusBadge';
 import { downtimeMs, fmtDowntime, downtimeColor } from '../utils/downtime';
 import { stepLabels as getStepLabels, maxStep as getMaxStep } from '../utils/steps';
+import { openImage } from './ImageLightbox';
 import type { Incident, Device } from '../types';
 
 interface Props {
@@ -109,9 +110,8 @@ export default function IncidentDetailModal({
                 </div>
                 <div className="text-[11px] text-text2">{n.note}</div>
                 {n.doc_url && (
-                  <a href={n.doc_url} target="_blank" rel="noreferrer" className="inline-block mt-1">
-                    <img src={n.doc_url} alt="dokumentasi" className="max-h-24 rounded border border-border object-contain" />
-                  </a>
+                  <img src={n.doc_url} alt="dokumentasi" onClick={() => openImage(n.doc_url!)}
+                    className="max-h-24 rounded border border-border object-contain mt-1 cursor-zoom-in" />
                 )}
               </div>
             ))

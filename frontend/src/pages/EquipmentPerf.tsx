@@ -6,6 +6,7 @@ import MaintenancePhotosModal from '../components/MaintenancePhotosModal';
 import MaintenanceWindows from './MaintenanceWindows';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import { getGeo, stampPhoto, stampFiles, type GeoPoint } from '../utils/photoStamp';
+import { openImage } from '../components/ImageLightbox';
 import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
@@ -175,7 +176,7 @@ function InspeksiTab() {
                         {insp ? ST_META[insp.status].t : editable ? '+ isi' : '🔒'}
                       </button>
                       {insp?.photo_url
-                        ? <a href={insp.photo_url} target="_blank" rel="noreferrer" title={insp.verified ? `Terverifikasi${insp.distance_m != null ? ' · ' + insp.distance_m + ' m' : ''}` : 'Belum terverifikasi (EXIF/GPS)'} onClick={(e) => e.stopPropagation()} className="text-[11px] leading-none">📷{insp.verified ? '✅' : '⚠️'}</a>
+                        ? <button type="button" title={insp.verified ? `Terverifikasi${insp.distance_m != null ? ' · ' + insp.distance_m + ' m' : ''}` : 'Belum terverifikasi (EXIF/GPS)'} onClick={(e) => { e.stopPropagation(); openImage(insp.photo_url!); }} className="text-[11px] leading-none">📷{insp.verified ? '✅' : '⚠️'}</button>
                         : <span className="h-[11px]" />}
                     </div>
                   );
@@ -195,9 +196,9 @@ function InspeksiTab() {
                         {isOn ? '🟢 Monitoring aktif' : '⚫ Dimatikan · monitoring dijeda'}
                       </span>
                       {bukti?.photo_url && (
-                        <a href={bukti.photo_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); openImage(bukti.photo_url!); }}
                           title={`Bukti ${isOn ? 'dihidupkan' : 'dimatikan'} oleh ${bukti.done_by_name || '-'}${bukti.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${bukti.distance_m != null ? ' · ' + bukti.distance_m + ' m' : ''}`}
-                          className="leading-none">📷{bukti.verified ? '✅' : '⚠️'}</a>
+                          className="leading-none">📷{bukti.verified ? '✅' : '⚠️'}</button>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5">

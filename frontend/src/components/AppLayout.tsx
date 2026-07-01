@@ -6,6 +6,7 @@ import { hasRole, userRoles } from '../utils/roles';
 import { NAV_ITEMS, PAGE_TITLES, type NavEntry } from './NavConfig';
 import NotificationCenter from './NotificationCenter';
 import ThemeToggle from './ThemeToggle';
+import ImageLightbox from './ImageLightbox';
 import type { Role, User } from '../types';
 
 const ROLE_COLOR: Record<string, string> = {
@@ -118,6 +119,9 @@ export default function AppLayout() {
       <main className="flex-1 p-5">
         <div key={location.pathname} className="nw-page-in"><Outlet /></div>
       </main>
+
+      <ImageLightbox />
+
 
       {/* Tombol profil mengambang: bisa digeser ke mana saja, klik = menu (gabungan ☰ + profil). */}
       <FloatingMenu navItems={navItems} user={user} allRoles={allRoles} notif={notif} onEditProfile={() => setShowProfile(true)} onLogout={logout} />

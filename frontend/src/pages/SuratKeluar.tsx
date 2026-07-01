@@ -5,6 +5,7 @@ import type { Surat, Incident } from '../types';
 import { type LaporanData } from '../utils/laporanReport';
 import { buildDocHtml as buildDocHtmlShared, LKP_DEFAULT } from '../utils/docTemplates';
 import { confirmDialog, promptDialog } from '../components/dialog';
+import { openImage } from '../components/ImageLightbox';
 
 const JENIS = ['Nota Dinas', 'Telaahan Staf', 'Surat Pengantar', 'Surat Pernyataan', 'Permintaan Barang', 'Surat Lain'];
 
@@ -712,11 +713,9 @@ export default function SuratKeluar() {
                       const isImg = (l.mimetype || '').startsWith('image');
                       return (
                         <div key={l.id} className="border border-border rounded-md overflow-hidden bg-surface2">
-                          <a href={`${l.file_url}`} target="_blank" rel="noreferrer" className="block">
-                            {isImg
-                              ? <img src={l.file_url} alt={l.filename || ''} className="w-full h-24 object-cover" />
-                              : <div className="h-24 flex items-center justify-center text-2xl">📄</div>}
-                          </a>
+                          {isImg
+                            ? <img src={l.file_url} alt={l.filename || ''} onClick={() => openImage(l.file_url)} className="w-full h-24 object-cover cursor-zoom-in" />
+                            : <a href={`${l.file_url}`} target="_blank" rel="noreferrer" className="block"><div className="h-24 flex items-center justify-center text-2xl">📄</div></a>}
                           <div className="flex items-center justify-between px-2 py-1 gap-1">
                             <span className="text-[10px] truncate" title={l.filename || ''}>{l.filename || 'Lampiran'}</span>
                             <button onClick={() => delLampiran(detail, l.id)} className="text-danger text-[10px] shrink-0" title="Hapus">✕</button>
