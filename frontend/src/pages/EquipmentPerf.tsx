@@ -5,7 +5,7 @@ import { hasRole } from '../utils/roles';
 import MaintenancePhotosModal from '../components/MaintenancePhotosModal';
 import MaintenanceWindows from './MaintenanceWindows';
 import { confirmDialog, alertDialog } from '../components/dialog';
-import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device } from '../types';
+import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
 const SLOT_LABEL: Record<string, string> = { '09': '09:00', '12': '12:00', '15': '15:00' };
@@ -14,6 +14,93 @@ const ST_META: Record<InspectStatus, { c: string; bg: string; t: string }> = {
   perhatian: { c: 'text-warn', bg: 'bg-warn/15 border-warn/40', t: 'Perhatian' },
   rusak: { c: 'text-danger', bg: 'bg-danger/15 border-danger/40', t: 'Rusak' },
 };
+// Geolokasi browser (fallback lokasi foto bila EXIF GPS kosong) — dipakai modal inspeksi & hidupkan peralatan.
+function getGeo(): Promise<{ lat: number; lng: number; acc: number } | null> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  });
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// Bakar geotag (waktu tangkap + koordinat + konteks) ke foto lewat kanvas, agar bukti
+// tetap membawa lokasi & jam walau browser membuang metadata EXIF pada kamera langsung.
+// Waktu overlay diambil dari file.lastModified (waktu tangkap kamera), jujur untuk foto lama.
+async function stampPhoto(file: File, geo: { lat: number; lng: number; acc: number } | null, extraLines: string[]): Promise<File> {
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await loadImage(url);
+    URL.revokeObjectURL(url);
+    const maxW = 1280;
+    const scale = img.width > maxW ? maxW / img.width : 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const when = new Date(file.lastModified || Date.now());
+    const lines = [
+      `🕒 ${when.toLocaleString('id-ID')}`,
+      geo ? `📍 ${geo.lat.toFixed(6)}, ${geo.lng.toFixed(6)} (±${Math.round(geo.acc)}m)` : '📍 Lokasi tidak terdeteksi',
+      ...extraLines,
+    ];
+    const fs = Math.max(13, Math.round(canvas.width * 0.030));
+    const pad = Math.round(fs * 0.7);
+    const lineH = Math.round(fs * 1.35);
+    const boxH = lineH * lines.length + pad * 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, canvas.height - boxH, canvas.width, boxH);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'top';
+    ctx.font = `${fs}px system-ui, sans-serif`;
+    lines.forEach((l, i) => ctx.fillText(l, pad, canvas.height - boxH + pad + i * lineH));
+
+    const blob: Blob | null = await new Promise((r) => canvas.toBlob((b) => r(b), 'image/jpeg', 0.9));
+    if (!blob) return file;
+    return new File([blob], (file.name.replace(/\.[^.]+$/, '') || 'foto') + '-geo.jpg', { type: 'image/jpeg', lastModified: file.lastModified || Date.now() });
+  } catch {
+    return file; // bila stamping gagal, unggah file asli
+  }
+}
+
+// Hook kamera+geotag bersama untuk modal inspeksi & hidupkan peralatan: saat foto dipilih,
+// ambil lokasi aktif, catat waktu tangkap (file.lastModified), lalu bakar geotag ke foto.
+function usePhotoCapture(contextLines: string[]) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [geo, setGeo] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  const [capturedAt, setCapturedAt] = useState<number | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [geoErr, setGeoErr] = useState('');
+
+  async function pick(f: File | null) {
+    if (!f) { setFile(null); setPreview(null); setGeo(null); setCapturedAt(null); setGeoErr(''); return; }
+    setProcessing(true); setGeoErr('');
+    setCapturedAt(f.lastModified || Date.now());
+    const g = await getGeo();
+    setGeo(g);
+    if (!g) setGeoErr('Lokasi tidak aktif — izinkan akses lokasi, lalu ambil foto ulang agar geotag tercatat.');
+    const stamped = await stampPhoto(f, g, contextLines);
+    setFile(stamped);
+    setPreview(URL.createObjectURL(stamped));
+    setProcessing(false);
+  }
+  return { file, preview, geo, capturedAt, processing, geoErr, pick };
+}
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 
@@ -53,6 +140,7 @@ function InspeksiTab() {
   const [isToday, setIsToday] = useState(true);
   const [canInput, setCanInput] = useState(false);
   const [edit, setEdit] = useState<{ dev: EquipmentRow; slot: '09' | '12' | '15' } | null>(null);
+  const [powerOn, setPowerOn] = useState<EquipmentRow | null>(null);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'semua' | 'belum' | 'sudah'>('semua');
 
@@ -68,6 +156,20 @@ function InspeksiTab() {
   }
   useEffect(load, [date]);
   const slotEditable = (s: string) => canInput && isToday && openSlots.includes(s);
+
+  async function powerOff(d: EquipmentRow) {
+    if (!(await confirmDialog({
+      title: `Matikan ${d.name}`,
+      message: 'Peralatan ditandai "dimatikan": status menjadi offline tanpa alarm, dan monitoring otomatis (ping/insiden) dijeda sampai peralatan dihidupkan kembali.',
+      confirmText: '⏻ Matikan', variant: 'warning',
+    }))) return;
+    try {
+      await api.post('/equipment/poweroff', { deviceId: d.id });
+      load();
+    } catch (e: any) {
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mematikan peralatan.', variant: 'danger' });
+    }
+  }
 
   const cur = currentSlot as '09' | '12' | '15';
   const filtered = rows.filter((d) => {
@@ -154,6 +256,50 @@ function InspeksiTab() {
                   );
                 })}
               </div>
+
+              {/* Hidupkan / Matikan peralatan — kontrol monitoring perangkat (di samping kunci slot).
+                  Hidupkan (wajib foto) → monitoring mulai · Matikan → status "dimatikan" & monitoring dijeda. */}
+              {(() => {
+                const pon = d.poweron;
+                const canPress = canInput && isToday;
+                const isOn = d.monitor_enabled !== 0;
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className={isOn ? 'text-success' : 'text-text2'}>
+                        {isOn ? '🟢 Monitoring aktif' : '⚫ Dimatikan · monitoring dijeda'}
+                      </span>
+                      {pon?.photo_url && (
+                        <a href={pon.photo_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                          title={`Bukti dihidupkan oleh ${pon.done_by_name || '-'}${pon.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${pon.distance_m != null ? ' · ' + pon.distance_m + ' m' : ''}`}
+                          className="leading-none">📷{pon.verified ? '✅' : '⚠️'}</a>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        disabled={!canPress || isOn}
+                        onClick={() => canPress && !isOn && setPowerOn(d)}
+                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : isOn ? 'Peralatan sudah hidup & dimonitor' : 'Hidupkan + mulai monitoring (wajib foto dokumentasi)'}
+                        className={`flex-1 border rounded px-2 py-1.5 text-[11px] font-semibold ${isOn
+                          ? 'bg-success/15 border-success/40 text-success cursor-default'
+                          : canPress ? 'border-accent/40 text-accent hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
+                      >
+                        {!canPress && !isOn ? '🔒 ' : ''}⚡ {isOn ? 'Hidup' : 'Hidupkan'}
+                      </button>
+                      <button
+                        disabled={!canPress || !isOn}
+                        onClick={() => canPress && isOn && powerOff(d)}
+                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : !isOn ? 'Peralatan sudah dimatikan' : 'Matikan + jeda monitoring'}
+                        className={`flex-1 border rounded px-2 py-1.5 text-[11px] font-semibold ${!isOn
+                          ? 'bg-surface2 border-border text-text2 cursor-default'
+                          : canPress ? 'border-danger/40 text-danger hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
+                      >
+                        ⏻ {isOn ? 'Matikan' : 'Mati'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -174,6 +320,15 @@ function InspeksiTab() {
           onSaved={() => { setEdit(null); load(); }}
         />
       )}
+
+      {powerOn && (
+        <PowerOnModal
+          dev={powerOn}
+          existing={powerOn.poweron || undefined}
+          onClose={() => setPowerOn(null)}
+          onSaved={() => { setPowerOn(null); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -181,40 +336,23 @@ function InspeksiTab() {
 function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: string; dev: EquipmentRow; slot: '09' | '12' | '15'; existing?: Inspection; onClose: () => void; onSaved: () => void }) {
   const [status, setStatus] = useState<InspectStatus>(existing?.status || 'baik');
   const [note, setNote] = useState(existing?.note || '');
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-
-  function pick(f: File | null) {
-    setFile(f); setErr('');
-    setPreview(f ? URL.createObjectURL(f) : null);
-  }
-
-  function getGeo(): Promise<{ lat: number; lng: number } | null> {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) return resolve(null);
-      navigator.geolocation.getCurrentPosition(
-        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-        () => resolve(null),
-        { enableHighAccuracy: true, timeout: 6000 }
-      );
-    });
-  }
+  const cap = usePhotoCapture([`Inspeksi ${SLOT_LABEL[slot]} · ${dev.name}`]);
 
   async function save() {
-    if (!file) return setErr('Foto dokumentasi wajib diunggah (hasil pengecekan saat ini).');
+    if (!cap.file) return setErr('Foto dokumentasi wajib diunggah (hasil pengecekan saat ini).');
     setBusy(true); setErr('');
     try {
-      const geo = await getGeo();
       const fd = new FormData();
       fd.append('deviceId', String(dev.id));
       fd.append('slot', slot);
       fd.append('status', status);
       fd.append('note', note);
       fd.append('date', date);
-      fd.append('photo', file);
-      if (geo) { fd.append('lat', String(geo.lat)); fd.append('lng', String(geo.lng)); }
+      fd.append('photo', cap.file);
+      if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
+      if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
       const res = await api.post('/equipment/inspections', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
       onSaved();
@@ -239,15 +377,79 @@ function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: 
           accept="image/*"
           capture="environment"
           className="block w-full text-[11px] text-text2 mb-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-accent file:text-bg file:text-[11px] file:font-semibold"
-          onChange={(e) => pick(e.target.files?.[0] || null)}
+          onChange={(e) => cap.pick(e.target.files?.[0] || null)}
         />
-        {preview && <img src={preview} alt="preview" className="mt-1 mb-2 max-h-36 rounded border border-border object-contain" />}
+        <GeoTagStatus cap={cap} />
+        {cap.preview && <img src={cap.preview} alt="preview" className="mt-1 mb-2 max-h-40 rounded border border-border object-contain" />}
         <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[60px] mb-2 mt-1" placeholder="Catatan kondisi (opsional)…" value={note} onChange={(e) => setNote(e.target.value)} />
-        <div className="text-[10px] text-text2 mb-3">⚠️ Foto wajib hasil pengecekan saat ini (akan dicek EXIF & lokasi GPS). Izinkan akses lokasi saat diminta. Foto lama/yang sudah pernah dipakai akan ditolak/ditandai.</div>
+        <div className="text-[10px] text-text2 mb-3">⚠️ Ambil foto langsung dari kamera. Waktu tangkap & lokasi GPS otomatis dibakar ke foto (geotag). Izinkan akses lokasi saat diminta. Foto lama/yang sudah pernah dipakai akan ditolak/ditandai.</div>
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
-          <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan'}</button>
+          <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : 'Simpan'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Ringkasan status geotag di modal: sedang ambil lokasi / koordinat terkunci / lokasi mati.
+function GeoTagStatus({ cap }: { cap: ReturnType<typeof usePhotoCapture> }) {
+  if (cap.processing) return <div className="text-[10px] text-text2 mb-1">⏳ Mengambil lokasi & membakar geotag ke foto…</div>;
+  if (cap.geo) return <div className="text-[10px] text-success mb-1">📍 Geotag aktif: {cap.geo.lat.toFixed(6)}, {cap.geo.lng.toFixed(6)} (±{Math.round(cap.geo.acc)} m)</div>;
+  if (cap.geoErr) return <div className="text-[10px] text-warn mb-1">⚠️ {cap.geoErr}</div>;
+  return null;
+}
+
+// ===================== MENGHIDUPKAN PERALATAN =====================
+// Catat "peralatan dihidupkan" untuk hari ini (1× per perangkat), wajib foto dokumentasi
+// dengan verifikasi EXIF/GPS yang sama seperti inspeksi. Notifikasi otomatis ke koordinator.
+function PowerOnModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow; existing?: PowerOn; onClose: () => void; onSaved: () => void }) {
+  const [note, setNote] = useState(existing?.note || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const cap = usePhotoCapture([`Hidupkan peralatan · ${dev.name}`]);
+
+  async function save() {
+    if (!cap.file) return setErr('Foto dokumentasi wajib diunggah (bukti peralatan dihidupkan).');
+    setBusy(true); setErr('');
+    try {
+      const fd = new FormData();
+      fd.append('deviceId', String(dev.id));
+      fd.append('note', note);
+      fd.append('photo', cap.file);
+      if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
+      if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
+      const res = await api.post('/equipment/poweron', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Gagal menyimpan.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-bold mb-1">⚡ Hidupkan Peralatan</h3>
+        <p className="text-[11px] text-text2 mb-4">{dev.name} · {dev.type} · {dev.ip}</p>
+        {existing && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mb-3">Sudah tercatat dihidupkan hari ini oleh {existing.done_by_name || '-'}. Mengunggah foto baru akan memperbarui catatan.</div>}
+        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span></label>
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="block w-full text-[11px] text-text2 mb-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-accent file:text-bg file:text-[11px] file:font-semibold"
+          onChange={(e) => cap.pick(e.target.files?.[0] || null)}
+        />
+        <GeoTagStatus cap={cap} />
+        {cap.preview && <img src={cap.preview} alt="preview" className="mt-1 mb-2 max-h-40 rounded border border-border object-contain" />}
+        <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[60px] mb-2 mt-1" placeholder="Catatan (opsional)…" value={note} onChange={(e) => setNote(e.target.value)} />
+        <div className="text-[10px] text-text2 mb-3">⚠️ Ambil foto langsung dari kamera. Waktu tangkap & lokasi GPS otomatis dibakar ke foto (geotag). Izinkan akses lokasi saat diminta. Foto lama/yang sudah pernah dipakai akan ditolak/ditandai.</div>
+        {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+        <div className="flex gap-2 justify-end">
+          <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
+          <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : 'Simpan'}</button>
         </div>
       </div>
     </div>

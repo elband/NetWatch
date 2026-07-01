@@ -138,6 +138,18 @@ export interface Inspection {
   inspected_by: number | null;
   inspector_name: string | null;
 }
+export interface PowerOn {
+  id: number;
+  device_id: number;
+  on_date: string;
+  note: string | null;
+  photo_url: string | null;
+  photo_hash: string | null;
+  verified: number;
+  distance_m: number | null;
+  done_by: number | null;
+  done_by_name: string | null;
+}
 export interface EquipmentRow {
   id: number;
   name: string;
@@ -145,7 +157,10 @@ export interface EquipmentRow {
   type: string;
   loc: string | null;
   status: string;
+  monitor_enabled?: number;
+  off_reason?: string | null;
   inspections: Partial<Record<'09' | '12' | '15', Inspection>>;
+  poweron?: PowerOn | null;
 }
 export interface MaintenanceRow {
   id: number;
@@ -191,6 +206,7 @@ export interface Incident {
   issue: string;
   priority: IncidentPriority;
   tech_id: number | null;
+  tech_name?: string | null;
   coord_id: number | null;
   status: IncidentStatus;
   step: number;

@@ -468,7 +468,7 @@ export default function CoordDashboard() {
                           <td className={`px-2 py-2 font-mono font-semibold ${breach ? 'text-danger' : 'text-text2'}`}>{breach && '⏰ '}{fmtAge(age)}</td>
                           <td className="px-2 py-2 text-[10px]">
                             {i.tech_id ? (
-                              <span className="text-text2">Teknisi #{i.tech_id}</span>
+                              <span className="text-text2">{i.tech_name || `Teknisi #${i.tech_id}`}</span>
                             ) : reminding === i.id ? (
                               <span className="text-warn">…</span>
                             ) : (

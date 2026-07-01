@@ -43,8 +43,10 @@ router.get('/coordinator', async (req, res) => {
 
   // Semua insiden aktif (belum selesai), prioritas tinggi dulu lalu terlama.
   const [active] = await pool.query(
-    `SELECT * FROM incidents WHERE status != 'selesai'
-      ORDER BY FIELD(priority,'kritis','tinggi','sedang'), created_at ASC`
+    `SELECT i.*, u.name AS tech_name FROM incidents i
+       LEFT JOIN users u ON u.id = i.tech_id
+      WHERE i.status != 'selesai'
+      ORDER BY FIELD(i.priority,'kritis','tinggi','sedang'), i.created_at ASC`
   );
 
   const overMin = (inc) => Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000);

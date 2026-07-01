@@ -43,6 +43,52 @@ function haversine(lat1, lng1, lat2, lng2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+// Verifikasi anti-foto-palsu untuk foto dokumentasi lapangan (inspeksi & menghidupkan
+// peralatan): hash SHA-256 (dedup), kesegaran waktu, dan proximity GPS ke perangkat.
+// `device` butuh { lat, lng }; `bodyLat/bodyLng` = fallback geolokasi browser dari form.
+// `capturedAt` (ms epoch) = waktu tangkap dari klien (file.lastModified) — dipakai bila
+// EXIF kosong, sebab kamera langsung via browser umumnya membuang metadata EXIF.
+// Mengembalikan { hash, verified, distance, warning }.
+async function verifyPhoto(buffer, device, bodyLat, bodyLng, capturedAt) {
+  const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+  let exifTime = null, exifGps = null;
+  try { const p = await exifr.parse(buffer, ['DateTimeOriginal', 'CreateDate']); if (p) exifTime = p.DateTimeOriginal || p.CreateDate || null; } catch { /* abaikan */ }
+  try { exifGps = await exifr.gps(buffer); } catch { /* abaikan */ }
+
+  // Sumber waktu tangkap: EXIF (paling kuat), lalu waktu tangkap klien (file.lastModified).
+  let captureTime = exifTime ? new Date(exifTime) : null;
+  if (!captureTime && capturedAt) {
+    const t = Number(capturedAt);
+    if (Number.isFinite(t) && t > 0) captureTime = new Date(t);
+  }
+
+  let freshOk = false, freshReason = 'Foto tanpa waktu tangkap — ambil foto langsung dari kamera.';
+  if (captureTime && !Number.isNaN(captureTime.getTime())) {
+    const diffMin = Math.abs(Date.now() - captureTime.getTime()) / 60000;
+    freshOk = diffMin <= FRESH_MINUTES;
+    if (!freshOk) freshReason = `Foto diambil ${Math.round(diffMin)} menit lalu (maks ${FRESH_MINUTES} menit) — bukan foto saat ini.`;
+  }
+
+  // Sumber lokasi foto: EXIF GPS, lalu fallback geolokasi browser (lat/lng form).
+  const photoLat = exifGps?.latitude ?? (bodyLat ? Number(bodyLat) : null);
+  const photoLng = exifGps?.longitude ?? (bodyLng ? Number(bodyLng) : null);
+  let distance = null, proxOk = true, proxReason = '';
+  if (device.lat != null && device.lng != null) {
+    if (photoLat != null && photoLng != null && !Number.isNaN(photoLat) && !Number.isNaN(photoLng)) {
+      distance = haversine(Number(device.lat), Number(device.lng), photoLat, photoLng);
+      proxOk = distance <= PROXIMITY_M;
+      if (!proxOk) proxReason = `Lokasi foto ${distance} m dari perangkat (maks ${PROXIMITY_M} m).`;
+    } else {
+      proxOk = false; proxReason = 'Lokasi foto tidak terdeteksi (aktifkan GPS/izin lokasi).';
+    }
+  }
+
+  const verified = freshOk && proxOk;
+  const warning = verified ? null : [!freshOk && freshReason, !proxOk && proxReason].filter(Boolean).join(' ');
+  return { hash, verified, distance, warning };
+}
+
 // Jendela jam tiap slot inspeksi (jam desimal). Inspeksi hanya boleh diisi
 // dalam jendelanya dan untuk hari ini; setelah lewat, slot terkunci.
 const SLOT_WINDOWS = { '09': [8.5, 11], '12': [11, 14], '15': [14, 17] };
@@ -77,11 +123,14 @@ async function canInspect(user) {
 // ===================== INSPEKSI HARIAN =====================
 router.get('/inspections', async (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : dateKey(new Date());
-  const [devices] = await pool.query('SELECT id, name, ip, type, loc, status FROM devices WHERE inspect_required=1 ORDER BY name');
+  const [devices] = await pool.query('SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason FROM devices WHERE inspect_required=1 ORDER BY name');
   const [insp] = await pool.query('SELECT * FROM equipment_inspections WHERE inspect_date = ?', [date]);
   const byDevice = {};
   for (const r of insp) (byDevice[r.device_id] ||= {})[r.slot] = r;
-  const list = devices.map((d) => ({ ...d, inspections: byDevice[d.id] || {} }));
+  const [pons] = await pool.query('SELECT * FROM equipment_poweron WHERE on_date = ?', [date]);
+  const ponByDevice = {};
+  for (const r of pons) ponByDevice[r.device_id] = r;
+  const list = devices.map((d) => ({ ...d, inspections: byDevice[d.id] || {}, poweron: ponByDevice[d.id] || null }));
   const today = dateKey(new Date());
   res.json({
     date,
@@ -116,9 +165,15 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   // Foto dokumentasi WAJIB.
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi inspeksi wajib diunggah.' });
 
-  // Anti-foto-palsu: tolak bila foto identik (hash sama) sudah pernah dipakai
-  // pada inspeksi lain (mencegah pakai ulang foto yang sama).
-  const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+  // Ambil koordinat perangkat (untuk cek GPS proximity).
+  const [devRows] = await pool.query('SELECT name, lat, lng FROM devices WHERE id = ?', [deviceId]);
+  const device = devRows[0];
+  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+
+  // Anti-foto-palsu: hash + kesegaran waktu tangkap + proximity GPS.
+  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
+
+  // Tolak bila foto identik (hash sama) sudah pernah dipakai pada inspeksi lain.
   const [dups] = await pool.query(
     `SELECT id FROM equipment_inspections
       WHERE photo_hash = ? AND NOT (device_id = ? AND inspect_date = ? AND slot = ?) LIMIT 1`,
@@ -126,41 +181,8 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   );
   if (dups.length) return res.status(409).json({ error: 'Foto ini sudah pernah dipakai pada inspeksi lain. Gunakan foto baru hasil pengecekan saat ini.' });
 
-  // Ambil koordinat perangkat (untuk cek GPS proximity).
-  const [devRows] = await pool.query('SELECT name, lat, lng FROM devices WHERE id = ?', [deviceId]);
-  const device = devRows[0];
-  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
-
-  // ---- EXIF freshness ----
-  let exifTime = null, exifGps = null;
-  try { const p = await exifr.parse(req.file.buffer, ['DateTimeOriginal', 'CreateDate']); if (p) exifTime = p.DateTimeOriginal || p.CreateDate || null; } catch { /* abaikan */ }
-  try { exifGps = await exifr.gps(req.file.buffer); } catch { /* abaikan */ }
-
-  let freshOk = false, freshReason = 'Foto tanpa metadata waktu (EXIF) — gunakan foto kamera langsung.';
-  if (exifTime) {
-    const diffMin = Math.abs(Date.now() - new Date(exifTime).getTime()) / 60000;
-    freshOk = diffMin <= FRESH_MINUTES;
-    if (!freshOk) freshReason = `Foto diambil ${Math.round(diffMin)} menit lalu (maks ${FRESH_MINUTES} menit) — bukan foto saat ini.`;
-  }
-
-  // ---- GPS proximity ----
-  // Sumber lokasi foto: EXIF GPS, lalu fallback geolokasi browser (lat/lng form).
-  const photoLat = exifGps?.latitude ?? (req.body.lat ? Number(req.body.lat) : null);
-  const photoLng = exifGps?.longitude ?? (req.body.lng ? Number(req.body.lng) : null);
-  let distance = null, proxOk = true, proxReason = '';
-  if (device.lat != null && device.lng != null) {
-    if (photoLat != null && photoLng != null && !Number.isNaN(photoLat) && !Number.isNaN(photoLng)) {
-      distance = haversine(Number(device.lat), Number(device.lng), photoLat, photoLng);
-      proxOk = distance <= PROXIMITY_M;
-      if (!proxOk) proxReason = `Lokasi foto ${distance} m dari perangkat (maks ${PROXIMITY_M} m).`;
-    } else {
-      proxOk = false; proxReason = 'Lokasi foto tidak terdeteksi (aktifkan GPS/izin lokasi).';
-    }
-  }
-
-  const verified = freshOk && proxOk;
   if (STRICT_VERIFY && !verified) {
-    return res.status(422).json({ error: `Verifikasi gagal: ${[!freshOk && freshReason, !proxOk && proxReason].filter(Boolean).join(' ')}` });
+    return res.status(422).json({ error: `Verifikasi gagal: ${warning}` });
   }
 
   // Tulis file ke disk setelah lolos validasi.
@@ -197,7 +219,110 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
     'SELECT * FROM equipment_inspections WHERE device_id=? AND inspect_date=? AND slot=?',
     [deviceId, date, String(slot)]
   );
-  res.json({ inspection: rows[0], verified, distance, warning: verified ? null : [!freshOk && freshReason, !proxOk && proxReason].filter(Boolean).join(' ') });
+  res.json({ inspection: rows[0], verified, distance, warning });
+});
+
+// ===================== MENGHIDUPKAN PERALATAN (HARIAN) =====================
+// Catatan "peralatan dihidupkan" 1x per perangkat per hari, wajib foto dokumentasi
+// + verifikasi anti-foto-palsu, lalu notifikasi ke koordinator. Boleh diisi kapan
+// saja pada hari ini oleh teknisi on-duty (atau koordinator/admin).
+router.post('/poweron', withInspectionPhoto, async (req, res) => {
+  const { deviceId, note } = req.body;
+  if (!deviceId) return res.status(400).json({ error: 'Perangkat wajib valid.' });
+  if (!(await canInspect(req.user))) return res.status(403).json({ error: 'Hanya teknisi on-duty (atau koordinator/admin) yang bisa mencatat menghidupkan peralatan.' });
+
+  const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
+  if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
+
+  const [devRows] = await pool.query('SELECT name, lat, lng FROM devices WHERE id = ?', [deviceId]);
+  const device = devRows[0];
+  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+
+  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
+
+  // Tolak bila foto identik sudah pernah dipakai pada catatan menghidupkan lain.
+  const [dups] = await pool.query(
+    'SELECT id FROM equipment_poweron WHERE photo_hash = ? AND NOT (device_id = ? AND on_date = ?) LIMIT 1',
+    [hash, deviceId, date]
+  );
+  if (dups.length) return res.status(409).json({ error: 'Foto ini sudah pernah dipakai. Gunakan foto baru hasil saat ini.' });
+
+  if (STRICT_VERIFY && !verified) {
+    return res.status(422).json({ error: `Verifikasi gagal: ${warning}` });
+  }
+
+  const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
+  const filename = `poweron-${deviceId}-${date}-${Date.now()}${ext}`;
+  fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
+  const photoUrl = `/uploads/inspections/${filename}`;
+
+  await pool.query(
+    `INSERT INTO equipment_poweron (device_id, on_date, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
+       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name)`,
+    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name]
+  );
+
+  // Menghidupkan peralatan = mulai monitoring: aktifkan pantauan otomatis & bersihkan
+  // kategori "dimatikan"/override agar ping berikutnya menentukan status riil.
+  await pool.query(
+    "UPDATE devices SET monitor_enabled=1, alarm_override=0, offline_since=NULL, off_reason = CASE WHEN off_reason='dimatikan' THEN NULL ELSE off_reason END WHERE id=?",
+    [deviceId]
+  );
+  const [[updatedDev]] = await pool.query('SELECT * FROM devices WHERE id=?', [deviceId]);
+  req.app.get('io')?.emit('device:update', updatedDev);
+
+  // Notifikasi ke koordinator bahwa peralatan sudah dihidupkan.
+  {
+    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+    const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
+    for (const c of coords) {
+      if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
+      await queueWaNotification({
+        type: 'other',
+        toUserId: c.id,
+        message: `⚡ PERALATAN DIHIDUPKAN (monitoring aktif)\n${device.name}\nOleh: ${req.user.name}\nFoto: ${verifyTag}${distance != null ? ` · ${distance} m` : ''}${note?.trim() ? `\nCatatan: ${note.trim()}` : ''}`,
+      });
+    }
+  }
+
+  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=?', [deviceId, date]);
+  res.json({ poweron: rows[0], device: updatedDev, verified, distance, warning });
+});
+
+// Mematikan peralatan = hentikan monitoring: perangkat ditandai "dimatikan"
+// (status offline tanpa alarm) & dijeda dari ping/insiden otomatis. Tanpa foto —
+// cukup konfirmasi oleh teknisi on-duty (atau koordinator/admin).
+router.post('/poweroff', async (req, res) => {
+  const { deviceId, note } = req.body;
+  if (!deviceId) return res.status(400).json({ error: 'Perangkat wajib valid.' });
+  if (!(await canInspect(req.user))) return res.status(403).json({ error: 'Hanya teknisi on-duty (atau koordinator/admin) yang bisa mematikan peralatan.' });
+
+  const [[device]] = await pool.query('SELECT id, name FROM devices WHERE id=?', [deviceId]);
+  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+
+  await pool.query(
+    "UPDATE devices SET monitor_enabled=0, off_reason='dimatikan', status='offline', alarm_override=0, offline_since=NULL WHERE id=?",
+    [deviceId]
+  );
+  const [[updatedDev]] = await pool.query('SELECT * FROM devices WHERE id=?', [deviceId]);
+  req.app.get('io')?.emit('device:update', updatedDev);
+
+  // Notifikasi ke koordinator bahwa peralatan dimatikan (monitoring dijeda).
+  {
+    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+    for (const c of coords) {
+      if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
+      await queueWaNotification({
+        type: 'other',
+        toUserId: c.id,
+        message: `⏻ PERALATAN DIMATIKAN (monitoring dijeda)\n${device.name}\nOleh: ${req.user.name}${note?.trim() ? `\nCatatan: ${note.trim()}` : ''}`,
+      });
+    }
+  }
+
+  res.json({ device: updatedDev });
 });
 
 // ===================== MAINTENANCE BULANAN =====================

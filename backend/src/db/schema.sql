@@ -671,6 +671,26 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance_photos (
   FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- Catatan "menghidupkan peralatan" harian (1x per perangkat per hari) dengan
+-- foto dokumentasi + verifikasi anti-foto-palsu (EXIF freshness & GPS proximity).
+CREATE TABLE IF NOT EXISTS equipment_poweron (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  on_date DATE NOT NULL,
+  note VARCHAR(255) DEFAULT NULL,
+  photo_url VARCHAR(255) DEFAULT NULL,
+  photo_hash CHAR(64) DEFAULT NULL,
+  verified TINYINT(1) NOT NULL DEFAULT 0,
+  distance_m INT DEFAULT NULL,
+  done_by INT DEFAULT NULL,
+  done_by_name VARCHAR(120) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_poweron (device_id, on_date),
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+  FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 -- Notification Center: notifikasi per-user, dikirim real-time via Socket.IO.
 CREATE TABLE IF NOT EXISTS notifications (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
