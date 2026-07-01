@@ -19,7 +19,7 @@ const dstr = (v) => (v ? String(v).slice(0, 10) : '');
 const tstr = (v) => { if (!v) return ''; const d = new Date(String(v).replace(' ', 'T')); return isNaN(d.getTime()) ? '' : d.toTimeString().slice(0, 5); };
 
 // Kumpulkan semua data bulan tsb lalu susun per perangkat + kronologi + rekap.
-async function buildLogbook(month, q) {
+export async function buildLogbook(month, q) {
   const { month: mm, start, end } = monthRange(month);
 
   const [insp] = await pool.query(

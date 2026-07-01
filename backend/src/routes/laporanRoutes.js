@@ -3,6 +3,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { SLA_MINUTES, COORD_BREACH_MINUTES } from '../config/shifts.js';
 import { metricsFor } from './performaRoutes.js';
+import { buildLogbook } from './logbookRoutes.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -282,11 +283,24 @@ export async function buildLaporanData(monthIn) {
   }
   performaKoordinator.sort((a, b) => b.score - a.score);
 
+  // Logbook peralatan: rekap bulanan per perangkat (uptime/latency + inspeksi/on-off/maint/insiden).
+  const lb = await buildLogbook(month);
+  const logbook = lb.devices.map((d, i) => ({
+    no: i + 1, peralatan: d.name, ip: d.ip,
+    uptimePct: d.recap.metrik ? d.recap.metrik.up_pct : null,
+    avgPing: d.recap.metrik ? d.recap.metrik.avg_ping : null,
+    maxPing: d.recap.metrik ? d.recap.metrik.max_ping : null,
+    inspeksi: d.recap.inspeksi.total, baik: d.recap.inspeksi.baik, perhatian: d.recap.inspeksi.perhatian, rusak: d.recap.inspeksi.rusak,
+    hidup: d.recap.power.on, mati: d.recap.power.off,
+    maintenance: d.recap.maintenance.total, maintSelesai: d.recap.maintenance.selesai,
+    insiden: d.recap.insiden.total, downtimeMin: d.recap.insiden.downtime_min,
+  }));
+
   return {
     month, monthName, year: y, nextMonthName,
     personil: personil.map((p, i) => ({ no: i + 1, ...p })),
     inventaris: inventaris.map((d, i) => ({ no: i + 1, nama: d.name, merk: d.merk || d.type || '-', serial: d.serial || '-', tahun: d.tahun || '-', lokasi: d.loc || '-', kondisi: devKondisi(d), ket: d.category || '-' })),
-    jadwalBulanIni, jadwal, kegiatanHarian, dokumentasi, dokumentasiTruncated, unjukHasil, evaluasi, perbaikan: perbaikanRows, lkp,
+    jadwalBulanIni, jadwal, kegiatanHarian, dokumentasi, dokumentasiTruncated, unjukHasil, evaluasi, perbaikan: perbaikanRows, lkp, logbook,
     recap, performaTeknisi, performaKoordinator, coordBreachMinutes: COORD_BREACH_MINUTES, opsHoursPerDay: OPS_HOURS_PER_DAY,
   };
 }

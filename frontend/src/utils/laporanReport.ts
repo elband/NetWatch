@@ -14,6 +14,7 @@ export interface LaporanData {
   evaluasi: { no: number; fasilitas: string; terjadwalJam: number; operasiJam: number; kegagalanJam: number; jumlahKegagalan: number; performancePct: number; ket: string; measuredUptimePct: number | null; avgPingMs: number | null }[];
   perbaikan: { no: number; tanggal: string; peralatan: string; lokasi: string; kategori: string; bagian: string; kerusakan: string; tindakan: string; tglKerusakan: string; tglSelesai: string; jam: string; ket: string }[];
   lkp: { incidentId: string; tanggal: string; lokasi: string; peralatan: string; bagian: string; kategori: string; uraian: string; tindakan: string; penyebab: string; oleh: string; tglKerusakan: string; tglSelesai: string; sparepart: string; hasil: string }[];
+  logbook?: { no: number; peralatan: string; ip: string; uptimePct: number | null; avgPing: number | null; maxPing: number | null; inspeksi: number; baik: number; perhatian: number; rusak: number; hidup: number; mati: number; maintenance: number; maintSelesai: number; insiden: number; downtimeMin: number }[];
   recap: { tiketIn: number; tiketDone: number; mttr: number; slaPct: number; escalations: number; measuredUptimePct?: number | null };
   performaTeknisi: PerfTek[];
   performaKoordinator: PerfKoord[];
@@ -33,7 +34,7 @@ export interface CoverInfo {
   kasi_signer_name?: string | null; kasi_signer_nip?: string | null; kasi_sign_token?: string | null;
 }
 
-export type SectionKey = 'cover' | 'personil' | 'inventaris' | 'jadwalBulanIni' | 'jadwal' | 'kegiatan' | 'dokumentasi' | 'unjukHasil' | 'evaluasi' | 'perbaikan' | 'lkp' | 'lampiran';
+export type SectionKey = 'cover' | 'personil' | 'inventaris' | 'jadwalBulanIni' | 'jadwal' | 'kegiatan' | 'dokumentasi' | 'unjukHasil' | 'evaluasi' | 'perbaikan' | 'lkp' | 'logbook' | 'lampiran';
 export const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: 'cover', label: 'Halaman Sampul' },
   { key: 'personil', label: 'I. Data Personil Teknisi' },
@@ -46,6 +47,7 @@ export const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: 'evaluasi', label: 'VIII. Evaluasi Kinerja Fasilitas' },
   { key: 'perbaikan', label: 'IX. Daftar Kegiatan Perbaikan & Kerusakan' },
   { key: 'lkp', label: 'X. LKP per Kerusakan' },
+  { key: 'logbook', label: 'XI. Logbook Peralatan' },
   { key: 'lampiran', label: 'Lampiran: Ringkasan & Grafik Kinerja' },
 ];
 
@@ -207,6 +209,21 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
         <tr><td style="text-align:center">12</td><td>Suku Cadang</td><td>${esc(r.sparepart)}</td></tr>
         <tr><td style="text-align:center">13</td><td>Hasil</td><td>${esc(r.hasil)}</td></tr>
       </tbody></table>${sign()}</div>`));
+  }
+  if (has('logbook')) {
+    const rows = (data.logbook || []).map((r) => `<tr>
+      <td style="text-align:center">${r.no}</td>
+      <td>${esc(r.peralatan)}<div style="font-size:8px;color:#666">${esc(r.ip)}</div></td>
+      <td style="text-align:center">${r.uptimePct != null ? r.uptimePct + '%' : '–'}</td>
+      <td style="text-align:center">${r.avgPing != null ? r.avgPing + '/' + r.maxPing + ' ms' : '–'}</td>
+      <td style="text-align:center">${r.inspeksi} <span style="font-size:8px;color:#666">(${r.baik}/${r.perhatian}/${r.rusak})</span></td>
+      <td style="text-align:center">${r.hidup}× / ${r.mati}×</td>
+      <td style="text-align:center">${r.maintenance} (${r.maintSelesai}✓)</td>
+      <td style="text-align:center">${r.insiden}${r.downtimeMin ? ' · ' + r.downtimeMin + 'm' : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#666">Tidak ada aktivitas peralatan</td></tr>';
+    pages.push(`<div class="page">${sec('Logbook Peralatan (Rekap Bulanan)')}${head2(`BULAN/TAHUN : ${bln}`)}
+      <table class="data"><thead><tr><th style="width:20px">No</th><th>Peralatan</th><th>Uptime</th><th>Latensi (rata/maks)</th><th>Inspeksi (B/P/R)</th><th>Hidup/Mati</th><th>Maintenance</th><th>Insiden</th></tr></thead><tbody>${rows}</tbody></table>
+      <div style="font-size:9px;margin-top:4px">Inspeksi: total (Baik/Perhatian/Rusak). Uptime &amp; latensi dari pemantauan (mengecualikan maintenance terjadwal).</div>${sign()}</div>`);
   }
   if (has('lampiran')) {
     const tek = data.performaTeknisi.map((t) => `<tr><td>${esc(t.name)}</td><td style="text-align:center">${t.done}</td><td style="text-align:center">${t.onTime}/${t.taken}</td><td style="text-align:center">${t.kritisDone}</td><td style="text-align:center">${t.inspeksi} (${t.inspeksiV}✓)</td><td style="text-align:center;color:#b91c1c">${t.breaches}</td><td style="text-align:center;font-weight:bold">${t.score}</td></tr>`).join('');
