@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { stampFiles } from '../utils/photoStamp';
 import type { Attendance } from '../types';
 
 const jam = (s: string | null) => (s ? new Date(s.replace(' ', 'T')).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '--:--');
@@ -127,7 +128,7 @@ function LeaveModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
       const fd = new FormData();
       fd.append('type', type); fd.append('startDate', startDate); fd.append('endDate', endDate);
       if (reason.trim()) fd.append('reason', reason.trim());
-      if (doc) fd.append('doc', doc);
+      if (doc) { const [d0] = await stampFiles([doc], ['Izin/Cuti']); fd.append('doc', d0); }
       await api.post('/leave', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       onSaved();
     } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal mengirim.'); }

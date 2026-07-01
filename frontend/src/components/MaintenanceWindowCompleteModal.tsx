@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { stampFiles } from '../utils/photoStamp';
 import type { MaintenanceWindow } from '../types';
 
 interface MWPhoto {
@@ -46,8 +47,9 @@ export default function MaintenanceWindowCompleteModal({ item, onClose, onComple
     if (!files || !files.length) return;
     setErr(''); setUploading(true);
     try {
+      const stamped = await stampFiles(files, [`Maintenance · ${item.title}`]);
       const fd = new FormData();
-      Array.from(files).forEach((f) => fd.append('photos', f));
+      stamped.forEach((f) => fd.append('photos', f));
       const r = await api.post(`/maintenance-windows/${item.id}/photos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setPhotos(r.data.photos);
     } catch (e: any) {

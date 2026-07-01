@@ -5,6 +5,7 @@ import { hasRole } from '../utils/roles';
 import MaintenancePhotosModal from '../components/MaintenancePhotosModal';
 import MaintenanceWindows from './MaintenanceWindows';
 import { confirmDialog, alertDialog } from '../components/dialog';
+import { getGeo, stampPhoto, stampFiles, type GeoPoint } from '../utils/photoStamp';
 import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
@@ -14,75 +15,12 @@ const ST_META: Record<InspectStatus, { c: string; bg: string; t: string }> = {
   perhatian: { c: 'text-warn', bg: 'bg-warn/15 border-warn/40', t: 'Perhatian' },
   rusak: { c: 'text-danger', bg: 'bg-danger/15 border-danger/40', t: 'Rusak' },
 };
-// Geolokasi browser (fallback lokasi foto bila EXIF GPS kosong) — dipakai modal inspeksi & hidupkan peralatan.
-function getGeo(): Promise<{ lat: number; lng: number; acc: number } | null> {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  });
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-// Bakar geotag (waktu tangkap + koordinat + konteks) ke foto lewat kanvas, agar bukti
-// tetap membawa lokasi & jam walau browser membuang metadata EXIF pada kamera langsung.
-// Waktu overlay diambil dari file.lastModified (waktu tangkap kamera), jujur untuk foto lama.
-async function stampPhoto(file: File, geo: { lat: number; lng: number; acc: number } | null, extraLines: string[]): Promise<File> {
-  try {
-    const url = URL.createObjectURL(file);
-    const img = await loadImage(url);
-    URL.revokeObjectURL(url);
-    const maxW = 1280;
-    const scale = img.width > maxW ? maxW / img.width : 1;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return file;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    const when = new Date(file.lastModified || Date.now());
-    const lines = [
-      `🕒 ${when.toLocaleString('id-ID')}`,
-      geo ? `📍 ${geo.lat.toFixed(6)}, ${geo.lng.toFixed(6)} (±${Math.round(geo.acc)}m)` : '📍 Lokasi tidak terdeteksi',
-      ...extraLines,
-    ];
-    const fs = Math.max(13, Math.round(canvas.width * 0.030));
-    const pad = Math.round(fs * 0.7);
-    const lineH = Math.round(fs * 1.35);
-    const boxH = lineH * lines.length + pad * 2;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(0, canvas.height - boxH, canvas.width, boxH);
-    ctx.fillStyle = '#fff';
-    ctx.textBaseline = 'top';
-    ctx.font = `${fs}px system-ui, sans-serif`;
-    lines.forEach((l, i) => ctx.fillText(l, pad, canvas.height - boxH + pad + i * lineH));
-
-    const blob: Blob | null = await new Promise((r) => canvas.toBlob((b) => r(b), 'image/jpeg', 0.9));
-    if (!blob) return file;
-    return new File([blob], (file.name.replace(/\.[^.]+$/, '') || 'foto') + '-geo.jpg', { type: 'image/jpeg', lastModified: file.lastModified || Date.now() });
-  } catch {
-    return file; // bila stamping gagal, unggah file asli
-  }
-}
-
-// Hook kamera+geotag bersama untuk modal inspeksi & hidupkan peralatan: saat foto dipilih,
-// ambil lokasi aktif, catat waktu tangkap (file.lastModified), lalu bakar geotag ke foto.
+// Hook kamera+geotag bersama untuk modal inspeksi & hidupkan/matikan peralatan: saat foto
+// dipilih, ambil lokasi aktif, catat waktu tangkap (file.lastModified), lalu bakar geotag ke foto.
 function usePhotoCapture(contextLines: string[]) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [geo, setGeo] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  const [geo, setGeo] = useState<GeoPoint | null>(null);
   const [capturedAt, setCapturedAt] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [geoErr, setGeoErr] = useState('');
@@ -638,6 +576,8 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
     if (deviceIds.length === 0 || !task.trim()) return setErr('Pilih minimal satu perangkat dan isi tugas.');
     setBusy(true); setErr('');
     try {
+      // Geotag dokumentasi (bila gambar) — stamp sekali, dipakai untuk semua perangkat.
+      const stampedDoc = doc ? (await stampFiles([doc], ['Rencana Maintenance']))[0] : null;
       // Satu rencana maintenance dibuat untuk tiap perangkat yang dipilih.
       for (const id of deviceIds) {
         const fd = new FormData();
@@ -645,7 +585,7 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
         fd.append('scheduledDate', scheduledDate);
         fd.append('task', task.trim());
         if (note.trim()) fd.append('note', note.trim());
-        if (doc) fd.append('doc', doc);
+        if (stampedDoc) fd.append('doc', stampedDoc);
         await api.post('/equipment/maintenance', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
       onSaved();

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { stampFiles } from '../utils/photoStamp';
 
-const KATEGORI = ['Komputer', 'Printer', 'Internet', 'WiFi', 'CCTV', 'Access Control', 'FIDS', 'Telepon', 'Monitor Informasi', 'Server', 'Keamanan', 'Operasional', 'Umum', 'Lainnya'];
+const KATEGORI =['Komputer', 'Printer', 'Internet', 'WiFi', 'CCTV', 'Access Control', 'FIDS', 'Telepon', 'Monitor Informasi', 'Server', 'Keamanan', 'Operasional', 'Umum', 'Lainnya'];
 const URG: Record<string, string> = { kritis: '🔴 Kritis', tinggi: '🟠 Tinggi', sedang: '🟡 Sedang', rendah: '🟢 Rendah' };
 const MAX_MB = 10;
 const emptyForm = { nama: '', hp: '', jenis: 'Komputer', judul: '', urgensi: 'sedang', detail: '', gedung: '', ruang: '' };
@@ -76,7 +77,8 @@ export default function LaporPublik() {
       Object.entries(form).forEach(([k, v]) => v && fd.append(k, v));
       if (roomCode) fd.append('room_code', roomCode);
       fd.append('baseUrl', location.origin);
-      files.forEach((f) => fd.append('foto', f));
+      const stampedFiles = await stampFiles(files, [`Laporan · ${form.judul.trim()}`]);
+      stampedFiles.forEach((f) => fd.append('foto', f));
       const res = await api.post('/public-reports', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setSubmitted({ id: res.data.id }); setForm(emptyForm); setFiles([]);
     } catch (e: any) { setError(e?.response?.data?.error || 'Gagal mengirim laporan.'); }

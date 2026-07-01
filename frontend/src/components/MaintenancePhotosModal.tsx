@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { stampFiles } from '../utils/photoStamp';
 import type { MaintenanceRow } from '../types';
 
 interface MPhoto {
@@ -47,8 +48,9 @@ export default function MaintenancePhotosModal({ item, onClose, onCompleted }: {
     if (!files || !files.length) return;
     setErr(''); setUploading(true);
     try {
+      const stamped = await stampFiles(files, [`Maintenance · ${item.device_name}`]);
       const fd = new FormData();
-      Array.from(files).forEach((f) => fd.append('photos', f));
+      stamped.forEach((f) => fd.append('photos', f));
       const r = await api.post(`/equipment/maintenance/${item.id}/photos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setPhotos(r.data.photos);
     } catch (e: any) {

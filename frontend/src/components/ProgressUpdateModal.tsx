@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { hasIp } from '../utils/steps';
+import { getGeo, stampPhoto, type GeoPoint } from '../utils/photoStamp';
 import type { Incident } from '../types';
 
 // Definisi tindakan. `key` = nilai dikirim ke backend (action).
@@ -32,12 +33,21 @@ export default function ProgressUpdateModal({ incident, onClose, onDone }: { inc
   const [note, setNote] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [geo, setGeo] = useState<GeoPoint | null>(null);
+  const [processing, setProcessing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  function pick(f: File | null) {
-    setFile(f); setErr('');
-    setPreview(f ? URL.createObjectURL(f) : null);
+  async function pick(f: File | null) {
+    setErr('');
+    if (!f) { setFile(null); setPreview(null); setGeo(null); return; }
+    setProcessing(true);
+    const g = await getGeo();
+    setGeo(g);
+    const stamped = await stampPhoto(f, g, [`Insiden ${incident.id} · ${incident.device_name}`]);
+    setFile(stamped);
+    setPreview(URL.createObjectURL(stamped));
+    setProcessing(false);
   }
 
   async function submit() {
@@ -97,6 +107,9 @@ export default function ProgressUpdateModal({ incident, onClose, onDone }: { inc
 
             <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span></label>
             <input type="file" accept="image/*" capture="environment" className="block w-full text-[11px] text-text2 mb-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-accent file:text-bg file:text-[11px] file:font-semibold" onChange={(e) => pick(e.target.files?.[0] || null)} />
+            {processing ? <div className="text-[10px] text-text2 mb-1">⏳ Mengambil lokasi & membakar geotag ke foto…</div>
+              : geo ? <div className="text-[10px] text-success mb-1">📍 Geotag aktif: {geo.lat.toFixed(6)}, {geo.lng.toFixed(6)} (±{Math.round(geo.acc)} m)</div>
+              : file ? <div className="text-[10px] text-warn mb-1">⚠️ Lokasi tidak aktif — izinkan akses lokasi lalu ambil ulang agar geotag tercatat.</div> : null}
             {preview && <img src={preview} alt="preview" className="mt-1 mb-2 max-h-36 rounded border border-border object-contain" />}
 
             <label className="block text-[11px] text-text2 mb-1 mt-2">Penjelasan <span className="text-danger">*</span></label>
@@ -106,7 +119,7 @@ export default function ProgressUpdateModal({ incident, onClose, onDone }: { inc
 
             <div className="flex gap-2 justify-end">
               <button type="button" className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text" onClick={onClose} disabled={busy}>Batal</button>
-              <button type="button" className={`rounded-md px-3 py-1.5 text-xs font-semibold text-bg disabled:opacity-50 ${sel?.final ? 'bg-success' : 'bg-accent'}`} onClick={submit} disabled={busy}>{busy ? 'Menyimpan…' : sel?.final ? '✅ Selesaikan' : 'Simpan Tindakan'}</button>
+              <button type="button" className={`rounded-md px-3 py-1.5 text-xs font-semibold text-bg disabled:opacity-50 ${sel?.final ? 'bg-success' : 'bg-accent'}`} onClick={submit} disabled={busy || processing}>{busy ? 'Menyimpan…' : processing ? 'Memproses foto…' : sel?.final ? '✅ Selesaikan' : 'Simpan Tindakan'}</button>
             </div>
           </>
         )}

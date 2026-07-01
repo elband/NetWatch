@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { confirmDialog, promptDialog } from '../components/dialog';
+import { stampFiles } from '../utils/photoStamp';
 import type { KegiatanNr as Keg, KnrStats, KnrRecap, KnrStatus } from '../types';
 
 const STATUS: Record<KnrStatus, { label: string; cls: string }> = {
@@ -165,7 +166,8 @@ function KegForm({ cats, edit, onClose, onSaved }: { cats: string[]; edit: Keg |
     try {
       const fd = new FormData();
       ['tanggal_kegiatan', 'petugas_nama', 'unit_kerja', 'kategori', 'judul', 'lokasi', 'uraian', 'hasil', 'durasi_jam', 'jumlah_personel', 'tingkat_kesulitan'].forEach((k) => f[k] && fd.append(k, f[k]));
-      foto.forEach((x) => fd.append('foto', x)); dok.forEach((x) => fd.append('dokumen', x));
+      const stampedFoto = await stampFiles(foto, [`Kegiatan · ${f.judul?.trim() || ''}`]);
+      stampedFoto.forEach((x) => fd.append('foto', x)); dok.forEach((x) => fd.append('dokumen', x));
       if (edit) await api.put(`/kegiatan-nr/${edit.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       else await api.post('/kegiatan-nr', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       onSaved();

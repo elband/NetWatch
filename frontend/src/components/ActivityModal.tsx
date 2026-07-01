@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api/client';
+import { stampFiles } from '../utils/photoStamp';
 
 const TYPES = [
   { v: 'rapat', l: '📅 Rapat' },
@@ -32,7 +33,7 @@ export default function ActivityModal({ onClose, onDone }: { onClose: () => void
       fd.append('activityDate', date);
       if (start) fd.append('startTime', start);
       if (end) fd.append('endTime', end);
-      if (bukti) fd.append('bukti', bukti);
+      if (bukti) { const [b] = await stampFiles([bukti], [`Kegiatan · ${title.trim()}`]); fd.append('bukti', b); }
       await api.post('/activities', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       onDone(); onClose();
     } catch (e: any) {
