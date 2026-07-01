@@ -13,6 +13,8 @@ export interface SplPegawaiRow {
   pelaksana_token?: string; signed_at?: string; sign_token?: string;
 }
 
+export interface BarangItem { nama: string; jumlah: string; keterangan: string; }
+
 // Default org config (dipakai sebagai fallback bila settings.lkp belum lengkap).
 export const LKP_DEFAULT: LkpHead = {
   kantor: 'BANDAR UDARA A.P.T. PRANOTO - SAMARINDA', kota: 'Samarinda',
@@ -170,6 +172,86 @@ export function suratPernyataanHtml(s: Surat, lkp: LkpHead, origin: string, kasi
   return `<!doctype html><html><head><meta charset="utf-8"><title>Surat Pernyataan ${esc(s.nomor)}</title>
     <style>* { box-sizing:border-box;margin:0;padding:0 } body { background:#fff } .page { background:#fff } @media print { .page { page-break-after:always } }</style>
     </head><body>${page1}${page2}${page3}</body></html>`;
+}
+
+// Render Format Permintaan Barang: tabel barang dinamis + 3 blok tanda tangan
+// (PPK Rutin, Perlengkapan, Peminta Barang). Data diambil dari body JSON.
+export function permintaanBarangHtml(s: Surat, lkp: LkpHead, origin: string, qr = ''): string {
+  const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let d: Record<string, unknown> = {};
+  try { d = JSON.parse(s.body || '{}'); } catch { /* body bukan JSON valid */ }
+  const intro = String(d.intro || 'Mohon dipenuhi barang-barang material sebagai berikut :');
+  const keperluan = String(d.keperluan || '');
+  const items = (Array.isArray(d.items) ? d.items : []) as BarangItem[];
+  const ppkNama = String(d.ppk_nama || '');
+  const ppkNip = String(d.ppk_nip || '');
+  const perlNama = String(d.perlengkapan_nama || '');
+  const perlNip = String(d.perlengkapan_nip || '');
+  const pemintaNama = String(d.peminta_nama || s.signer_name || lkp.koord_nama || '');
+  const pemintaNip = String(d.peminta_nip || s.signer_nip || lkp.koord_nip || '');
+  const kota = lkp.kota || 'Samarinda';
+  const tgl = new Date(s.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  const kopUrl = lkp.kop_url ? `${origin}${lkp.kop_url}` : '';
+  const kop = kopUrl
+    ? `<img src="${kopUrl}" alt="Kop Surat" style="display:block;width:100%;margin:0 auto 20px">`
+    : '<div style="margin-bottom:10px"></div>';
+
+  const rows = items.map((it, i) => `<tr>
+    <td style="border:1px solid #000;padding:5px 8px;text-align:center;vertical-align:top">${i + 1}</td>
+    <td style="border:1px solid #000;padding:5px 8px;vertical-align:top">${esc(it.nama).replace(/\n/g, '<br>')}</td>
+    <td style="border:1px solid #000;padding:5px 8px;text-align:center;vertical-align:top">${esc(it.jumlah)}</td>
+    <td style="border:1px solid #000;padding:5px 8px;text-align:center;vertical-align:top">${esc(it.keterangan)}</td>
+  </tr>`).join('');
+
+  const pemintaTtd = qr && s.sign_token
+    ? `<div style="margin:2px 0;width:120px"><img src="${qr}" style="width:92px;height:92px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:7px;color:#666">Token: ${esc(s.sign_token)}</div></div>`
+    : '<div style="height:72px"></div>';
+
+  const sigCol = (label: string, nama: string, nip: string, ttd: string) => {
+    // Nama kosong → garis tanda tangan manual (basah) untuk ditulis tangan.
+    const nameBlock = String(nama).trim()
+      ? `<div style="text-decoration:underline;font-weight:bold">${esc(nama)}</div><div>NIP. ${esc(nip)}</div>`
+      : `<div>( ................................ )</div><div>NIP. ................................</div>`;
+    return `
+    <td style="width:33%;text-align:left;vertical-align:top;padding:2px 6px">
+      <div style="margin-bottom:2px">${esc(label)}</div>
+      ${ttd}
+      ${nameBlock}
+    </td>`;
+  };
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Permintaan Barang ${esc(s.nomor)}</title>
+    <style>*{box-sizing:border-box;margin:0;padding:0} body{font-family:'Times New Roman',serif;color:#000;background:#fff}
+      .page{width:190mm;margin:0 auto;padding:18mm 20mm;font-size:13px;line-height:1.55}
+      @media print{.page{padding:14mm}}</style></head><body>
+    <div class="page">
+      ${kop}
+      <div style="text-align:center;font-weight:bold;font-size:18px;text-decoration:underline;text-transform:uppercase">FORMAT PERMINTAAN BARANG</div>
+      <div style="text-align:center;margin-bottom:18px">Nomor : ${esc(s.nomor)}</div>
+      <p style="margin-bottom:12px">${esc(intro)}</p>
+      <table style="border-collapse:collapse;width:100%;font-size:13px">
+        <tr>
+          <th style="border:1px solid #000;padding:6px 8px;width:38px">No.</th>
+          <th style="border:1px solid #000;padding:6px 8px">Nama Barang</th>
+          <th style="border:1px solid #000;padding:6px 8px;width:90px">Jumlah</th>
+          <th style="border:1px solid #000;padding:6px 8px;width:130px">Keterangan</th>
+        </tr>
+        ${rows || '<tr><td colspan="4" style="border:1px solid #000;padding:8px;text-align:center;color:#888">(belum ada barang)</td></tr>'}
+      </table>
+      <p style="margin:16px 0">Demikian permohonan ini kami buat agar kiranya dapat dipenuhi${keperluan ? ` guna ${esc(keperluan)}` : ''} .</p>
+      <div style="text-align:right;margin-bottom:8px">${esc(kota)}, ${tgl}</div>
+      <div style="margin-bottom:4px">Mengetahui,</div>
+      <table style="width:100%;border-collapse:collapse;margin-top:2px">
+        <tr>
+          ${sigCol('PPK Rutin', ppkNama, ppkNip, '<div style="height:72px"></div>')}
+          ${sigCol('Perlengkapan', perlNama, perlNip, '<div style="height:72px"></div>')}
+          ${sigCol('Peminta Barang', pemintaNama, pemintaNip, pemintaTtd)}
+        </tr>
+      </table>
+      ${lampiranHtml(s, origin)}
+    </div>
+  </body></html>`;
 }
 
 // HTML dokumen surat tunggal (dipakai untuk pratinjau iframe).
@@ -331,6 +413,10 @@ export async function buildDocHtml(s: Surat, deps: BuildDocDeps): Promise<string
       }
     } catch { /* body bukan JSON valid */ }
     return suratPernyataanHtml(s, lkp, origin, kasiQr, pelaksanaQr);
+  }
+  if (s.jenis === 'Permintaan Barang') {
+    const qr = await tokenQr(origin, s.sign_token, 120);
+    return permintaanBarangHtml(s, lkp, origin, qr);
   }
   if (s.incident_id) {
     try {

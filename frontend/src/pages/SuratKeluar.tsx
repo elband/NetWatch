@@ -6,7 +6,7 @@ import { type LaporanData } from '../utils/laporanReport';
 import { buildDocHtml as buildDocHtmlShared, LKP_DEFAULT } from '../utils/docTemplates';
 import { confirmDialog, promptDialog } from '../components/dialog';
 
-const JENIS = ['Nota Dinas', 'Telaahan Staf', 'Surat Pengantar', 'Surat Pernyataan', 'Surat Lain'];
+const JENIS = ['Nota Dinas', 'Telaahan Staf', 'Surat Pengantar', 'Surat Pernyataan', 'Permintaan Barang', 'Surat Lain'];
 
 interface SplFormData {
   kasi_nama: string; kasi_nip: string; kasi_golongan: string; kasi_jabatan: string;
@@ -16,6 +16,8 @@ interface SplFormData {
 }
 interface SplPegawaiRow { user_id?: number; nama: string; nip: string; mulai: string; selesai: string; pelaksana_token?: string; signed_at?: string; sign_token?: string; }
 interface SplUser { id: number; name: string; nip: string | null; emoji: string | null; jabatan: string | null; }
+interface BarangItemRow { nama: string; jumlah: string; keterangan: string; }
+interface BarangFormData { keperluan: string; ppk_nama: string; ppk_nip: string; perlengkapan_nama: string; perlengkapan_nip: string; peminta_nama: string; peminta_nip: string; }
 
 export default function SuratKeluar() {
   const navigate = useNavigate();
@@ -35,6 +37,8 @@ export default function SuratKeluar() {
   const [splData, setSplData] = useState<SplFormData>({ kasi_nama:'', kasi_nip:'', kasi_golongan:'Pembina (IV/a)', kasi_jabatan:'Kepala Seksi Teknik dan Operasi', tanggal_kegiatan:'', hari_kegiatan:'Jumat', kegiatan:'', durasi_jam:'5', dasar:'', tujuan_kegiatan:'', hasil:'' });
   const [splPegawai, setSplPegawai] = useState<SplPegawaiRow[]>([{ nama:'', nip:'', mulai:'18:00', selesai:'23:00' }]);
   const [splUsers, setSplUsers] = useState<SplUser[]>([]);
+  const [barangItems, setBarangItems] = useState<BarangItemRow[]>([{ nama:'', jumlah:'1', keterangan:'Paket' }]);
+  const [barangData, setBarangData] = useState<BarangFormData>({ keperluan:'', ppk_nama:'', ppk_nip:'', perlengkapan_nama:'', perlengkapan_nip:'', peminta_nama:'', peminta_nip:'' });
   const [showKop, setShowKop] = useState(false);
   const [kopBusy, setKopBusy] = useState(false);
   const kopInputRef = useRef<HTMLInputElement>(null);
@@ -95,6 +99,10 @@ export default function SuratKeluar() {
   function defaultSplData(): SplFormData {
     return { kasi_nama: lkp.kasie_nama || '', kasi_nip: lkp.kasie_nip || '', kasi_golongan: 'Pembina (IV/a)', kasi_jabatan: lkp.kasie_jabatan || 'Kepala Seksi Teknik dan Operasi', tanggal_kegiatan: '', hari_kegiatan: 'Jumat', kegiatan: '', durasi_jam: '5', dasar: 'Pengaduan Penumpang\nPerintah Lisan Kepala Seksi', tujuan_kegiatan: '', hasil: '' };
   }
+  function defaultBarangData(): BarangFormData {
+    // Peminta = koordinator (ber-TTE). PPK & Perlengkapan dibiarkan kosong = tanda tangan manual (basah).
+    return { keperluan: '', ppk_nama: '', ppk_nip: '', perlengkapan_nama: '', perlengkapan_nip: '', peminta_nama: lkp.koord_nama || '', peminta_nip: lkp.koord_nip || '' };
+  }
 
   async function openInWindow(s: Surat, autoPrint = false) {
     setBusy(true);
@@ -130,12 +138,19 @@ export default function SuratKeluar() {
         if (!pegawaiValid.length) { setBusy(false); return setMsg('Pilih minimal satu pegawai pelaksana lembur.'); }
         fd.set('body', JSON.stringify({ type: 'spl', ...splData, pegawai: pegawaiValid }));
       }
+      if (form.jenis === 'Permintaan Barang') {
+        const itemsValid = barangItems.filter((it) => it.nama.trim());
+        if (!itemsValid.length) { setBusy(false); return setMsg('Tambahkan minimal satu barang.'); }
+        fd.set('body', JSON.stringify({ type: 'barang', intro: 'Mohon dipenuhi barang-barang material sebagai berikut :', ...barangData, items: itemsValid }));
+      }
       files.forEach((f) => fd.append('files', f));
       await api.post('/surat', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setShowForm(false);
       setForm({ jenis: 'Nota Dinas', hal: '', tujuan: '', body: '', incident_id: '' });
       setSplData(defaultSplData());
       setSplPegawai([{ nama: '', nip: '', mulai: '18:00', selesai: '23:00' }]);
+      setBarangItems([{ nama: '', jumlah: '1', keterangan: 'Paket' }]);
+      setBarangData(defaultBarangData());
       setFiles([]);
       load();
     } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal membuat surat.'); }
@@ -271,7 +286,7 @@ export default function SuratKeluar() {
           </div>
           <button onClick={() => navigate('/laporan-bulanan')} className="border border-accent2/50 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">📅 Laporan Bulanan</button>
           <button onClick={() => setShowKop(true)} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs font-semibold">🖼️ Kop Surat</button>
-          <button onClick={() => { setShowForm(true); setSplData(defaultSplData()); setSplPegawai([{nama:'',nip:'',mulai:'18:00',selesai:'23:00'}]); }} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Buat Surat</button>
+          <button onClick={() => { setShowForm(true); setSplData(defaultSplData()); setSplPegawai([{nama:'',nip:'',mulai:'18:00',selesai:'23:00'}]); setBarangItems([{nama:'',jumlah:'1',keterangan:'Paket'}]); setBarangData(defaultBarangData()); }} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Buat Surat</button>
         </div>
       </div>
       {msg && <div className="bg-accent2/10 border border-accent2/30 rounded-md px-3 py-2 text-[11px] text-accent2 mb-3">{msg}</div>}
@@ -360,7 +375,7 @@ export default function SuratKeluar() {
             <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={form.hal} onChange={(e) => setForm({ ...form, hal: e.target.value })} placeholder="mis. Permohonan Persetujuan…" />
             <label className="block text-[11px] text-text2 mb-1">Ditujukan (Yth)</label>
             <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={form.tujuan} onChange={(e) => setForm({ ...form, tujuan: e.target.value })} placeholder={lkp.nd_yth} />
-            {form.jenis !== 'Surat Pernyataan' && (<>
+            {form.jenis !== 'Surat Pernyataan' && form.jenis !== 'Permintaan Barang' && (<>
             <label className="block text-[11px] text-text2 mb-1">Isi Surat (opsional)</label>
             <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3 min-h-[80px]" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} placeholder="Kosongkan untuk teks standar 'Dengan ini disampaikan [hal]…'" />
             </>)}
@@ -448,6 +463,50 @@ export default function SuratKeluar() {
                 <textarea className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs min-h-[68px]" value={splData.hasil} onChange={e=>setSplData({...splData,hasil:e.target.value})} placeholder="Kegiatan pertama: pembongkaran speker…&#10;Kegiatan selanjutnya: penarikan kabel LAN…" /></div>
               </div>
             )}
+            {form.jenis === 'Permintaan Barang' && (
+              <div className="border border-border rounded-lg p-3 bg-surface2/40 space-y-3 mb-3">
+                <div className="text-[10px] font-semibold text-text2 uppercase tracking-wide">Data Permintaan Barang</div>
+
+                {/* Daftar barang dinamis */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[10px] text-text2">Daftar Barang</label>
+                    <button type="button" onClick={() => setBarangItems([...barangItems, { nama: '', jumlah: '1', keterangan: 'Paket' }])} className="text-[10px] text-accent2 hover:underline">+ Tambah Baris</button>
+                  </div>
+                  <div className="text-[9px] text-text2 mb-1 grid grid-cols-[20px_minmax(0,1fr)_52px_72px_18px] gap-1"><span>No</span><span>Nama Barang</span><span className="text-center">Jml</span><span className="text-center">Ket.</span><span></span></div>
+                  {barangItems.map((it, i) => (
+                    <div key={i} className="grid grid-cols-[20px_minmax(0,1fr)_52px_72px_18px] gap-1 items-start mb-1.5">
+                      <span className="text-xs text-text2 pt-1.5 text-center">{i + 1}</span>
+                      <textarea rows={1} className="min-w-0 w-full bg-surface2 border border-border rounded px-2 py-1 text-xs resize-y" placeholder="Pembersih Lantai: Sapu ijuk, pengki…" value={it.nama} onChange={(e) => { const a = [...barangItems]; a[i] = { ...a[i], nama: e.target.value }; setBarangItems(a); }} />
+                      <input className="w-full min-w-0 bg-surface2 border border-border rounded px-1 py-1 text-xs text-center" value={it.jumlah} onChange={(e) => { const a = [...barangItems]; a[i] = { ...a[i], jumlah: e.target.value }; setBarangItems(a); }} />
+                      <input className="w-full min-w-0 bg-surface2 border border-border rounded px-1 py-1 text-xs text-center" value={it.keterangan} onChange={(e) => { const a = [...barangItems]; a[i] = { ...a[i], keterangan: e.target.value }; setBarangItems(a); }} />
+                      <button type="button" onClick={() => setBarangItems(barangItems.filter((_, j) => j !== i))} className="text-danger text-xs leading-none pt-1.5">✕</button>
+                    </div>
+                  ))}
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-text2 mb-1">Keperluan / Guna <span className="font-normal">(mis. Kebersihan Gedung ECC)</span></label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={barangData.keperluan} onChange={(e) => setBarangData({ ...barangData, keperluan: e.target.value })} placeholder="Kebersihan Gedung ECC" />
+                </div>
+
+                {/* Penanda tangan */}
+                <div className="text-[9px] text-text2 -mb-1">PPK Rutin & Perlengkapan = tanda tangan manual (basah). Kosongkan untuk garis tanda tangan kosong di dokumen.</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="block text-[10px] text-text2 mb-1">PPK Rutin <span className="font-normal">(manual, opsional)</span></label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs mb-1" value={barangData.ppk_nama} onChange={e=>setBarangData({...barangData,ppk_nama:e.target.value})} placeholder="Nama (kosongkan = manual)" />
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={barangData.ppk_nip} onChange={e=>setBarangData({...barangData,ppk_nip:e.target.value})} placeholder="NIP (opsional)" /></div>
+                  <div><label className="block text-[10px] text-text2 mb-1">Perlengkapan <span className="font-normal">(manual, opsional)</span></label>
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs mb-1" value={barangData.perlengkapan_nama} onChange={e=>setBarangData({...barangData,perlengkapan_nama:e.target.value})} placeholder="Nama (kosongkan = manual)" />
+                  <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={barangData.perlengkapan_nip} onChange={e=>setBarangData({...barangData,perlengkapan_nip:e.target.value})} placeholder="NIP (opsional)" /></div>
+                  <div className="col-span-2"><label className="block text-[10px] text-text2 mb-1">Peminta Barang <span className="font-normal">(penanda tangan TTE)</span></label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs" value={barangData.peminta_nama} onChange={e=>setBarangData({...barangData,peminta_nama:e.target.value})} placeholder="Nama" />
+                    <input className="w-full bg-surface2 border border-border rounded px-2 py-1.5 text-xs font-mono" value={barangData.peminta_nip} onChange={e=>setBarangData({...barangData,peminta_nip:e.target.value})} placeholder="NIP" />
+                  </div></div>
+                </div>
+              </div>
+            )}
             <label className="block text-[11px] text-text2 mb-1">🔗 ID Insiden Terkait (opsional — untuk sertakan LKP)</label>
             <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3 font-mono" value={form.incident_id} onChange={(e) => setForm({ ...form, incident_id: e.target.value.toUpperCase() })} placeholder="INC-001" />
             <label className="block text-[11px] text-text2 mb-1">📎 Lampiran Bukti Dukung (gambar/PDF, opsional)</label>
@@ -520,7 +579,7 @@ export default function SuratKeluar() {
               <Row label="Ditujukan (Yth)" value={detail.tujuan || lkp.nd_yth} />
               <Row label="Tanggal" value={new Date(detail.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} />
               <Row label="Pembuat" value={detail.creator_name || '-'} />
-              {detail.body && (
+              {detail.body && detail.jenis !== 'Surat Pernyataan' && detail.jenis !== 'Permintaan Barang' && (
                 <div>
                   <div className="text-text2 mb-1">Isi Surat</div>
                   <div className="bg-surface2 border border-border rounded-md p-2.5 whitespace-pre-wrap leading-relaxed">{detail.body}</div>
