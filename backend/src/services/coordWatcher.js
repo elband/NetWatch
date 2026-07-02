@@ -8,16 +8,28 @@ import { isNotifyEnabledForUser, notifyKasiIfEnabled } from './notifyPrefs.js';
 const takeLink = (id) => `${env.appUrl}/my-incidents?focus=${id}&action=take`;
 const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
 
+// Saring daftar user id: hanya yang se-unit (insiden lama ber-unit NULL = tanpa saringan).
+async function filterIdsByUnit(ids, unitId) {
+  if (!unitId || !ids.length) return ids;
+  const [rows] = await pool.query('SELECT id FROM users WHERE id IN (?) AND unit_id = ?', [ids, unitId]);
+  return rows.map((r) => r.id);
+}
+
 // Kirim WA pengingat ke teknisi on-duty agar insiden segera diambil.
 // Dipakai oleh auto-reminder (coordWatcher) maupun tombol manual koordinator.
 // Mengembalikan jumlah teknisi yang diingatkan.
 export async function remindOnDutyTechs(inc, { manual = false, by = null } = {}) {
   let targetIds = await getOnDutyTechIds(pool);
-  // Fallback: bila tidak ada teknisi on-duty, ingatkan SEMUA teknisi aktif
+  // Multi-unit: hanya teknisi se-unit dengan insiden yang diingatkan.
+  targetIds = await filterIdsByUnit(targetIds, inc.unit_id);
+  // Fallback: bila tidak ada teknisi on-duty, ingatkan SEMUA teknisi aktif (se-unit)
   // agar pengingat tetap sampai (WA + notifikasi sistem).
   let fallback = false;
   if (!targetIds.length) {
-    const [techs] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"'))");
+    const [techs] = await pool.query(
+      "SELECT id FROM users WHERE active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"'))" + (inc.unit_id ? ' AND unit_id = ?' : ''),
+      inc.unit_id ? [inc.unit_id] : []
+    );
     targetIds = techs.map((t) => t.id);
     fallback = true;
   }
@@ -68,8 +80,10 @@ export async function checkUnclaimedIncidents(io) {
   );
   if (toEscalate.length === 0) return;
 
-  const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+  const [allCoords] = await pool.query("SELECT id, unit_id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
   for (const inc of toEscalate) {
+    // Eskalasi hanya ke koordinator unit insiden (insiden lama tanpa unit → semua koordinator).
+    const coords = allCoords.filter((c) => !inc.unit_id || Number(c.unit_id) === Number(inc.unit_id));
     await pool.query('UPDATE incidents SET coord_alerted = 1 WHERE id = ?', [inc.id]);
     const mins = Math.max(COORD_SLA_MINUTES, Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000));
     await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [

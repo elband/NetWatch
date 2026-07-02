@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { notifyRoles } from '../services/notify.js';
 import { audit } from '../services/audit.js';
@@ -12,6 +13,7 @@ import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 const WEIGHT = { rendah: 1, sedang: 3, tinggi: 5, kritis: 10 };
@@ -72,12 +74,13 @@ router.delete('/categories/:id', requireRole('admin'), async (req, res) => { awa
 router.get('/stats', async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7);
   const { start, end } = monthRange(month);
+  const uf = unitFilter(req.unitId);
   const [[s]] = await pool.query(
     `SELECT COUNT(*) total, SUM(status='selesai') selesai, SUM(status IN ('diajukan','diverifikasi')) menunggu,
             COALESCE(SUM(durasi_jam),0) jam, COALESCE(SUM(poin),0) poin, SUM(tingkat_kesulitan='kritis') kritis
-       FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?`, [start, end]);
-  const [topKontrib] = await pool.query('SELECT petugas_nama nama, COUNT(*) jumlah, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<? GROUP BY petugas_nama ORDER BY poin DESC LIMIT 5', [start, end]);
-  const [topKategori] = await pool.query('SELECT kategori, COUNT(*) jumlah FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<? GROUP BY kategori ORDER BY jumlah DESC LIMIT 5', [start, end]);
+       FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${uf.clause}`, [start, end, ...uf.params]);
+  const [topKontrib] = await pool.query(`SELECT petugas_nama nama, COUNT(*) jumlah, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${uf.clause} GROUP BY petugas_nama ORDER BY poin DESC LIMIT 5`, [start, end, ...uf.params]);
+  const [topKategori] = await pool.query(`SELECT kategori, COUNT(*) jumlah FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${uf.clause} GROUP BY kategori ORDER BY jumlah DESC LIMIT 5`, [start, end, ...uf.params]);
   const insight = [];
   const total = s.total || 0;
   if (total > 0) {
@@ -97,16 +100,17 @@ router.get('/stats', async (req, res) => {
 router.get('/recap', requireRole('admin', 'koordinator'), async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7);
   const { start, end } = monthRange(month);
-  const [[tot]] = await pool.query('SELECT COUNT(*) total, COALESCE(SUM(durasi_jam),0) jam, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?', [start, end]);
-  const [perKategori] = await pool.query('SELECT kategori, COUNT(*) jumlah, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<? GROUP BY kategori ORDER BY jumlah DESC', [start, end]);
-  const [perTeknisi] = await pool.query('SELECT petugas_nama nama, COUNT(*) jumlah, COALESCE(SUM(durasi_jam),0) jam, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<? GROUP BY petugas_nama ORDER BY poin DESC', [start, end]);
+  const uf = unitFilter(req.unitId);
+  const [[tot]] = await pool.query(`SELECT COUNT(*) total, COALESCE(SUM(durasi_jam),0) jam, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${uf.clause}`, [start, end, ...uf.params]);
+  const [perKategori] = await pool.query(`SELECT kategori, COUNT(*) jumlah, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${uf.clause} GROUP BY kategori ORDER BY jumlah DESC`, [start, end, ...uf.params]);
+  const [perTeknisi] = await pool.query(`SELECT petugas_nama nama, COUNT(*) jumlah, COALESCE(SUM(durasi_jam),0) jam, COALESCE(SUM(poin),0) poin FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${uf.clause} GROUP BY petugas_nama ORDER BY poin DESC`, [start, end, ...uf.params]);
   // Tren 6 bulan.
   const tren = [];
   const base = new Date(`${month}-01T00:00:00`);
   for (let i = 5; i >= 0; i--) {
     const dt = new Date(base.getFullYear(), base.getMonth() - i, 1);
     const r = monthRange(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`);
-    const [[c]] = await pool.query('SELECT COUNT(*) c, COALESCE(SUM(poin),0) p FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?', [r.start, r.end]);
+    const [[c]] = await pool.query(`SELECT COUNT(*) c, COALESCE(SUM(poin),0) p FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${uf.clause}`, [r.start, r.end, ...uf.params]);
     tren.push({ label: dt.toLocaleDateString('id-ID', { month: 'short' }), jumlah: c.c, poin: Number(c.p) });
   }
   res.json({ month, total: tot.total, jam: Number(tot.jam), poin: Number(tot.poin), perKategori, perTeknisi, tren });
@@ -114,8 +118,9 @@ router.get('/recap', requireRole('admin', 'koordinator'), async (req, res) => {
 
 // ===== Daftar =====
 router.get('/', async (req, res) => {
-  let sql = 'SELECT * FROM kegiatan_non_rutin WHERE 1=1';
-  const params = [];
+  const uf = unitFilter(req.unitId);
+  let sql = `SELECT * FROM kegiatan_non_rutin WHERE 1=1${uf.clause}`;
+  const params = [...uf.params];
   if (!isManager(req.user)) { sql += ' AND created_by=?'; params.push(req.user.id); }
   if (/^\d{4}-\d{2}$/.test(req.query.month)) { const r = monthRange(req.query.month); sql += ' AND tanggal_kegiatan>=? AND tanggal_kegiatan<?'; params.push(r.start, r.end); }
   if (STATUSES.includes(req.query.status)) { sql += ' AND status=?'; params.push(req.query.status); }
@@ -128,7 +133,7 @@ router.get('/', async (req, res) => {
 // ===== Detail =====
 router.get('/:id', async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM kegiatan_non_rutin WHERE id=?', [Number(req.params.id)]);
-  if (!rows[0]) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
   if (!isManager(req.user) && rows[0].created_by !== req.user.id) return res.status(403).json({ error: 'Tidak punya akses.' });
   res.json({ kegiatan: (await withDetail(rows))[0] });
 });
@@ -138,14 +143,19 @@ router.post('/', uploadFields, async (req, res) => {
   const b = req.body;
   if (!b.judul?.trim() || !b.kategori?.trim()) return res.status(400).json({ error: 'Judul & kategori wajib diisi.' });
   const tingkat = WEIGHT[b.tingkat_kesulitan] ? b.tingkat_kesulitan : 'rendah';
+  // unit_id kegiatan mengikuti unit PETUGAS target; fallback unit efektif request.
+  const petugasId = Number(b.petugas_id) || req.user.id;
+  const [[ptg]] = await pool.query('SELECT unit_id FROM users WHERE id=?', [petugasId]);
+  const unitId = ptg?.unit_id ?? insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const conn = await pool.getConnection();
   try {
     const { nomor, seq, tahun } = await nextNomor(conn);
     const [r] = await conn.query(
-      `INSERT INTO kegiatan_non_rutin (nomor, seq, tahun, tanggal_kegiatan, petugas_id, petugas_nama, unit_kerja, kategori, judul, lokasi, uraian, hasil, durasi_jam, jumlah_personel, tingkat_kesulitan, poin, status, created_by, creator_name)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?)`,
-      [nomor, seq, tahun, b.tanggal_kegiatan || new Date().toISOString().slice(0, 10), b.petugas_id || req.user.id, b.petugas_nama || req.user.name, b.unit_kerja || 'Unit Elektronika Bandara',
-        b.kategori.trim(), b.judul.trim(), b.lokasi || null, b.uraian || null, b.hasil || null, Number(b.durasi_jam) || 0, Number(b.jumlah_personel) || 1, tingkat, WEIGHT[tingkat], req.user.id, req.user.name]
+      `INSERT INTO kegiatan_non_rutin (nomor, seq, tahun, tanggal_kegiatan, petugas_id, petugas_nama, unit_kerja, kategori, judul, lokasi, uraian, hasil, durasi_jam, jumlah_personel, tingkat_kesulitan, poin, status, created_by, creator_name, unit_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?,?)`,
+      [nomor, seq, tahun, b.tanggal_kegiatan || new Date().toISOString().slice(0, 10), petugasId, b.petugas_nama || req.user.name, b.unit_kerja || 'Unit Elektronika Bandara',
+        b.kategori.trim(), b.judul.trim(), b.lokasi || null, b.uraian || null, b.hasil || null, Number(b.durasi_jam) || 0, Number(b.jumlah_personel) || 1, tingkat, WEIGHT[tingkat], req.user.id, req.user.name, unitId]
     );
     for (const f of req.files?.foto || []) await conn.query('INSERT INTO kegiatan_non_rutin_files (kegiatan_id, file_url, filename, mimetype, jenis) VALUES (?,?,?,?,?)', [r.insertId, `/uploads/kegiatan/${f.filename}`, f.originalname.slice(0, 200), f.mimetype, 'foto']);
     for (const f of req.files?.dokumen || []) await conn.query('INSERT INTO kegiatan_non_rutin_files (kegiatan_id, file_url, filename, mimetype, jenis) VALUES (?,?,?,?,?)', [r.insertId, `/uploads/kegiatan/${f.filename}`, f.originalname.slice(0, 200), f.mimetype, 'dokumen']);
@@ -160,7 +170,7 @@ router.put('/:id', uploadFields, async (req, res) => {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM kegiatan_non_rutin WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
   if (!isManager(req.user) && (d.created_by !== req.user.id || !['draft', 'diajukan'].includes(d.status))) return res.status(403).json({ error: 'Tidak bisa mengubah kegiatan ini.' });
   const b = req.body;
   const tingkat = WEIGHT[b.tingkat_kesulitan] ? b.tingkat_kesulitan : d.tingkat_kesulitan;
@@ -182,7 +192,7 @@ router.patch('/:id/status', async (req, res) => {
   const poinOverride = req.body.poin != null && req.body.poin !== '' ? Number(req.body.poin) : null;
   const [rows] = await pool.query('SELECT * FROM kegiatan_non_rutin WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
   if (!FLOW[d.status]?.includes(next)) return res.status(400).json({ error: `Transisi ${d.status} → ${next} tidak valid.` });
   if (next === 'diajukan') { if (d.created_by !== req.user.id && !isManager(req.user)) return res.status(403).json({ error: 'Hanya pengusul yang dapat mengajukan.' }); }
   else if (!isManager(req.user)) return res.status(403).json({ error: 'Hanya koordinator/admin.' });
@@ -204,7 +214,8 @@ router.patch('/:id/status', async (req, res) => {
       const ndNomor = `${String(s.s).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`;
       const hal = `Laporan Kegiatan Non-Rutin: ${d.judul}`;
       const body = `Dengan ini dilaporkan pelaksanaan kegiatan non-rutin "${d.judul}" (${d.kategori}) di ${d.lokasi || '-'} pada ${d.tanggal_kegiatan} oleh ${d.petugas_nama}. Hasil: ${d.hasil || '-'}.`;
-      const [nd] = await conn.query(`INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, body, tanggal, created_by, creator_name) VALUES ('Nota Dinas',?,?,?,?,?,?,CURDATE(),?,?)`, [ndNomor, s.s, bulan, tahun, hal, body, req.user.id, req.user.name]);
+      // unit_id nota dinas mengikuti unit kegiatan.
+      const [nd] = await conn.query(`INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, body, tanggal, created_by, creator_name, unit_id) VALUES ('Nota Dinas',?,?,?,?,?,?,CURDATE(),?,?,?)`, [ndNomor, s.s, bulan, tahun, hal, body, req.user.id, req.user.name, d.unit_id ?? insertUnitId(req)]);
       await conn.query('UPDATE kegiatan_non_rutin SET nomor_nota_dinas=?, nota_dinas_id=? WHERE id=?', [ndNomor, nd.insertId, id]);
     }
   } finally { conn.release(); }
@@ -220,9 +231,9 @@ router.patch('/:id/status', async (req, res) => {
 
 // ===== Hapus =====
 router.delete('/:id', async (req, res) => {
-  const [rows] = await pool.query('SELECT created_by, status FROM kegiatan_non_rutin WHERE id=?', [Number(req.params.id)]);
+  const [rows] = await pool.query('SELECT created_by, status, unit_id FROM kegiatan_non_rutin WHERE id=?', [Number(req.params.id)]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
   if (!isManager(req.user) && (d.created_by !== req.user.id || d.status !== 'draft')) return res.status(403).json({ error: 'Hanya draft milik sendiri yang bisa dihapus.' });
   const [files] = await pool.query('SELECT file_url FROM kegiatan_non_rutin_files WHERE kegiatan_id=?', [Number(req.params.id)]);
   await pool.query('DELETE FROM kegiatan_non_rutin WHERE id=?', [Number(req.params.id)]);

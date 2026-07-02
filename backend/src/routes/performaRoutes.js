@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit } from '../middleware/unitScope.js';
 import { SLA_MINUTES } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 // ===== Aturan penilaian baru (skor 0–100) =====
 // Skor = 30 + selesai×2 + tepatSLA×4 + kritis×6 + PM×3 + dok×5 − pelanggaran×10 − eskalasi×5 − reopen×8 − absen×15
@@ -76,15 +78,17 @@ export async function metricsFor(id, start, end) {
   return { ...m, raw, scoreBeforePenalty: base, score, grade: g.grade, gradeLabel: g.label };
 }
 
-async function allTechs() {
-  const [rows] = await pool.query("SELECT id, name, jabatan, emoji FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"')) ORDER BY name");
+async function allTechs(unitId) {
+  // Daftar teknisi dibatasi unit efektif request (null = semua unit, khusus admin).
+  const uf = unitFilter(unitId, 'unit_id');
+  const [rows] = await pool.query(`SELECT id, name, jabatan, emoji FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles, '"teknisi"'))${uf.clause} ORDER BY name`, uf.params);
   return rows;
 }
 
 // Daftar performa semua teknisi (tabel + ranking).
 router.get('/', async (req, res) => {
   const { start, end } = monthRange(req.query.month);
-  const techs = await allTechs();
+  const techs = await allTechs(req.unitId);
   const rows = [];
   for (const t of techs) {
     const m = await metricsFor(t.id, start, end);
@@ -98,7 +102,7 @@ router.get('/', async (req, res) => {
 router.get('/dashboard', async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : null;
   const { start, end } = monthRange(month);
-  const techs = await allTechs();
+  const techs = await allTechs(req.unitId);
 
   // Ranking semua teknisi.
   const ranking = [];
@@ -108,16 +112,19 @@ router.get('/dashboard', async (req, res) => {
   // Teknisi terpilih: teknisi → diri sendiri; lainnya → query / peringkat teratas.
   let techId = req.query.techId ? Number(req.query.techId) : (req.user.role === 'teknisi' ? req.user.id : (ranking[0]?.techId || req.user.id));
   if (req.user.role === 'teknisi') techId = req.user.id;
+  // Cegah intip teknisi di luar scope unit: teknisi terpilih harus ada di ranking (yang sudah ter-scope).
+  else if (!ranking.some((r) => r.techId === techId)) techId = ranking[0]?.techId || req.user.id;
   const self = ranking.find((r) => r.techId === techId) || ranking[0] || null;
   const rankPos = ranking.findIndex((r) => r.techId === techId) + 1;
 
   // Top 5 layanan paling banyak ditangani (insiden selesai), dengan bobot.
+  const ufI = unitFilter(req.unitId, 'i.unit_id');
   const [svc] = await pool.query(
     `SELECT COALESCE(NULLIF(d.category,''), i.device_name) svc, COUNT(*) n
        FROM incidents i LEFT JOIN devices d ON d.id=i.device_id
-      WHERE i.status='selesai' AND i.resolved_at>=? AND i.resolved_at<? ${techId ? 'AND i.tech_id=?' : ''}
+      WHERE i.status='selesai' AND i.resolved_at>=? AND i.resolved_at<?${ufI.clause} ${techId ? 'AND i.tech_id=?' : ''}
       GROUP BY svc ORDER BY n DESC LIMIT 5`,
-    techId ? [start, end, techId] : [start, end]
+    techId ? [start, end, ...ufI.params, techId] : [start, end, ...ufI.params]
   );
   const topServices = svc.map((s) => ({ name: s.svc || 'Lainnya', count: s.n, weight: svcWeight(s.svc) }));
 
@@ -173,6 +180,9 @@ router.get('/dashboard', async (req, res) => {
 // Deret harian per metrik (untuk sparkline di kartu MyDashboard).
 router.get('/sparkline', async (req, res) => {
   const techId = req.query.techId ? Number(req.query.techId) : req.user.id;
+  // Teknisi target harus berada dalam scope unit request.
+  const [[tu]] = await pool.query('SELECT unit_id FROM users WHERE id=?', [techId]);
+  if (!tu || !rowInUnit(tu, req.unitId)) return res.status(404).json({ error: 'Teknisi tidak ditemukan' });
   const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
   const [y, m] = month.split('-').map(Number);
   const days = new Date(y, m, 0).getDate();
@@ -203,8 +213,8 @@ router.get('/breakdown', async (req, res) => {
   if (req.user.role === 'teknisi' && techId !== req.user.id) return res.status(403).json({ error: 'Hanya bisa melihat rincian milik sendiri.' });
   const { start, end } = monthRange(req.query.month);
 
-  const [tech] = await pool.query('SELECT id, name, jabatan FROM users WHERE id=?', [techId]);
-  if (!tech[0]) return res.status(404).json({ error: 'Teknisi tidak ditemukan' });
+  const [tech] = await pool.query('SELECT id, name, jabatan, unit_id FROM users WHERE id=?', [techId]);
+  if (!tech[0] || !rowInUnit(tech[0], req.unitId)) return res.status(404).json({ error: 'Teknisi tidak ditemukan' });
   const m = await metricsFor(techId, start, end);
 
   const [done] = await pool.query("SELECT id, device_name, resolved_at, duration_min, priority FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<? ORDER BY resolved_at DESC", [techId, start, end]);

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilterShared } from '../middleware/unitScope.js';
 import { queueWaRaw } from '../jobs/waQueue.js';
 import { env } from '../config/env.js';
 import { normalizeWaNumber } from '../utils/phone.js';
@@ -8,8 +9,11 @@ import { normalizeWaNumber } from '../utils/phone.js';
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM wa_log ORDER BY created_at DESC LIMIT 200');
+// wa_log = tabel global: baris ber-unit NULL (mis. pesan sistem) tetap terlihat semua unit.
+// unitScope hanya dipasang di daftar log; endpoint kirim/test tidak butuh scoping unit.
+router.get('/', unitScope, async (req, res) => {
+  const uf = unitFilterShared(req.unitId, 'unit_id');
+  const [rows] = await pool.query(`SELECT * FROM wa_log WHERE 1=1${uf.clause} ORDER BY created_at DESC LIMIT 200`, uf.params);
   res.json({ waLog: rows });
 });
 

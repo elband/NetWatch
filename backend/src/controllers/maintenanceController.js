@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
+import { unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
 // =============================================================================
 // maintenanceController — jendela maintenance terjadwal.
@@ -16,9 +17,10 @@ fs.mkdirSync(MW_PHOTO_DIR, { recursive: true });
 
 export async function listMaintenanceWindows(req, res) {
   const scope = req.query.scope || 'all';
-  let where = '';
-  if (scope === 'active') where = 'WHERE NOW() BETWEEN mw.starts_at AND mw.ends_at';
-  else if (scope === 'upcoming') where = 'WHERE mw.ends_at >= NOW()';
+  const uf = unitFilter(req.unitId, 'mw.unit_id');
+  let where = `WHERE 1=1${uf.clause}`;
+  if (scope === 'active') where += ' AND NOW() BETWEEN mw.starts_at AND mw.ends_at';
+  else if (scope === 'upcoming') where += ' AND mw.ends_at >= NOW()';
   const [rows] = await pool.query(
     `SELECT mw.*, d.name AS device_name, l.name AS location_name, u.name AS created_by_name,
             ud.name AS done_by_name,
@@ -30,13 +32,17 @@ export async function listMaintenanceWindows(req, res) {
        LEFT JOIN users u ON u.id = mw.created_by
        LEFT JOIN users ud ON ud.id = mw.done_by
        ${where}
-      ORDER BY mw.starts_at DESC`
+      ORDER BY mw.starts_at DESC`,
+    uf.params
   );
   res.json({ windows: rows });
 }
 
 // Daftar foto dokumentasi sebuah jendela maintenance.
 export async function listWindowPhotos(req, res) {
+  // Scope foto lewat jendela induknya (tabel foto tidak ber-unit).
+  const [[mw]] = await pool.query('SELECT id, unit_id FROM maintenance_windows WHERE id = ?', [req.params.id]);
+  if (!mw || !rowInUnit(mw, req.unitId)) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan.' });
   const [photos] = await pool.query(
     `SELECT p.id, p.url, p.created_at, u.name AS uploaded_by_name
        FROM maintenance_window_photos p
@@ -49,8 +55,8 @@ export async function listWindowPhotos(req, res) {
 
 // Unggah satu/banyak foto dokumentasi untuk sebuah jendela maintenance.
 export async function addWindowPhotos(req, res) {
-  const [[mw]] = await pool.query('SELECT id FROM maintenance_windows WHERE id = ?', [req.params.id]);
-  if (!mw) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan.' });
+  const [[mw]] = await pool.query('SELECT id, unit_id FROM maintenance_windows WHERE id = ?', [req.params.id]);
+  if (!mw || !rowInUnit(mw, req.unitId)) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan.' });
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'Tidak ada foto yang diunggah.' });
   for (const f of files) {
@@ -70,8 +76,12 @@ export async function addWindowPhotos(req, res) {
 
 // Hapus satu foto dokumentasi (+ berkas di disk).
 export async function removeWindowPhoto(req, res) {
-  const [[ph]] = await pool.query('SELECT url FROM maintenance_window_photos WHERE id = ?', [req.params.photoId]);
-  if (!ph) return res.status(404).json({ error: 'Foto tidak ditemukan.' });
+  const [[ph]] = await pool.query(
+    `SELECT p.url, mw.unit_id FROM maintenance_window_photos p
+       JOIN maintenance_windows mw ON mw.id = p.window_id WHERE p.id = ?`,
+    [req.params.photoId]
+  );
+  if (!ph || !rowInUnit(ph, req.unitId)) return res.status(404).json({ error: 'Foto tidak ditemukan.' });
   await pool.query('DELETE FROM maintenance_window_photos WHERE id = ?', [req.params.photoId]);
   try { fs.unlinkSync(path.join(MW_PHOTO_DIR, path.basename(ph.url))); } catch { /* berkas mungkin sudah tiada */ }
   res.json({ ok: true });
@@ -80,8 +90,8 @@ export async function removeWindowPhoto(req, res) {
 // Selesaikan pekerjaan jendela maintenance — WAJIB minimal 1 foto dokumentasi.
 export async function completeMaintenanceWindow(req, res) {
   const id = Number(req.params.id);
-  const [[mw]] = await pool.query('SELECT id, status FROM maintenance_windows WHERE id = ?', [id]);
-  if (!mw) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan.' });
+  const [[mw]] = await pool.query('SELECT id, status, unit_id FROM maintenance_windows WHERE id = ?', [id]);
+  if (!mw || !rowInUnit(mw, req.unitId)) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan.' });
   const [[pc]] = await pool.query('SELECT COUNT(*) AS c FROM maintenance_window_photos WHERE window_id = ?', [id]);
   if (pc.c === 0) return res.status(400).json({ error: 'Unggah minimal 1 foto dokumentasi sebelum menyelesaikan pekerjaan.' });
   await pool.query(
@@ -100,10 +110,17 @@ export async function createMaintenanceWindow(req, res) {
   if (new Date(ends_at) <= new Date(starts_at)) {
     return res.status(400).json({ error: 'Waktu selesai harus setelah waktu mulai' });
   }
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
+  // Bila merujuk perangkat, pastikan perangkat itu berada pada unit yang sama.
+  if (device_id) {
+    const [[dev]] = await pool.query('SELECT id, unit_id FROM devices WHERE id = ?', [device_id]);
+    if (!dev || !rowInUnit(dev, unitId)) return res.status(400).json({ error: 'Perangkat tidak ditemukan pada unit ini.' });
+  }
   const [result] = await pool.query(
-    `INSERT INTO maintenance_windows (device_id, location_id, title, reason, starts_at, ends_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [device_id || null, location_id || null, title.trim(), reason?.trim() || null, starts_at, ends_at, req.user?.id || null]
+    `INSERT INTO maintenance_windows (unit_id, device_id, location_id, title, reason, starts_at, ends_at, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [unitId, device_id || null, location_id || null, title.trim(), reason?.trim() || null, starts_at, ends_at, req.user?.id || null]
   );
   const [rows] = await pool.query('SELECT * FROM maintenance_windows WHERE id = ?', [result.insertId]);
   res.status(201).json({ window: rows[0] });
@@ -112,7 +129,7 @@ export async function createMaintenanceWindow(req, res) {
 export async function updateMaintenanceWindow(req, res) {
   const id = Number(req.params.id);
   const [existing] = await pool.query('SELECT * FROM maintenance_windows WHERE id = ?', [id]);
-  if (!existing[0]) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan' });
+  if (!existing[0] || !rowInUnit(existing[0], req.unitId)) return res.status(404).json({ error: 'Jendela maintenance tidak ditemukan' });
   const { device_id, location_id, title, reason, starts_at, ends_at } = req.body;
   const next = {
     device_id: device_id === undefined ? existing[0].device_id : (device_id || null),
@@ -125,6 +142,11 @@ export async function updateMaintenanceWindow(req, res) {
   if (new Date(next.ends_at) <= new Date(next.starts_at)) {
     return res.status(400).json({ error: 'Waktu selesai harus setelah waktu mulai' });
   }
+  // Bila perangkat rujukan diganti, pastikan tetap se-unit dengan jendela ini.
+  if (device_id !== undefined && next.device_id) {
+    const [[dev]] = await pool.query('SELECT id, unit_id FROM devices WHERE id = ?', [next.device_id]);
+    if (!dev || !rowInUnit(dev, existing[0].unit_id ?? req.unitId)) return res.status(400).json({ error: 'Perangkat tidak ditemukan pada unit ini.' });
+  }
   await pool.query(
     `UPDATE maintenance_windows SET device_id=?, location_id=?, title=?, reason=?, starts_at=?, ends_at=? WHERE id=?`,
     [next.device_id, next.location_id, next.title, next.reason, next.starts_at, next.ends_at, id]
@@ -135,6 +157,7 @@ export async function updateMaintenanceWindow(req, res) {
 
 export async function deleteMaintenanceWindow(req, res) {
   const id = Number(req.params.id);
-  await pool.query('DELETE FROM maintenance_windows WHERE id = ?', [id]);
+  const uf = unitFilter(req.unitId);
+  await pool.query(`DELETE FROM maintenance_windows WHERE id = ?${uf.clause}`, [id, ...uf.params]);
   res.json({ ok: true });
 }

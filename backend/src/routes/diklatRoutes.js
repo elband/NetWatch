@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { jsonToBuffer } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
 import { escapeLike } from '../utils/sql.js';
@@ -14,6 +15,7 @@ import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,8 +54,8 @@ async function withDetail(rows) {
   return rows.map((r) => ({ ...r, nota: r.nota_dinas_id ? ndMap.get(r.nota_dinas_id) || null : null, history: hist.filter((h) => h.diklat_id === r.id) }));
 }
 
-async function logHistory(diklatId, user, status, note) {
-  await pool.query('INSERT INTO diklat_history (diklat_id, user_id, user_name, status, note) VALUES (?,?,?,?,?)', [diklatId, user?.id || null, user?.name || null, status, note || null]);
+async function logHistory(diklatId, user, status, note, unitId = null) {
+  await pool.query('INSERT INTO diklat_history (diklat_id, user_id, user_name, status, note, unit_id) VALUES (?,?,?,?,?,?)', [diklatId, user?.id || null, user?.name || null, status, note || null, unitId]);
 }
 async function notifyCoords(message) {
   const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
@@ -65,8 +67,9 @@ async function notifyCoords(message) {
 
 // ===== Dashboard statistik =====
 router.get('/stats', async (req, res) => {
+  const uf = unitFilter(req.unitId);
   const scope = isManager(req.user) ? '' : ' AND (created_by=? OR pegawai_id=?)';
-  const params = isManager(req.user) ? [] : [req.user.id, req.user.id];
+  const params = isManager(req.user) ? [...uf.params] : [...uf.params, req.user.id, req.user.id];
   const [[r]] = await pool.query(
     `SELECT COUNT(*) total,
             SUM(status IN ('diajukan','diverifikasi')) menunggu,
@@ -74,14 +77,15 @@ router.get('/stats', async (req, res) => {
             SUM(status='ditolak') ditolak,
             SUM(status='selesai') selesai,
             SUM(status='draft') draft
-       FROM pengajuan_diklat WHERE 1=1${scope}`, params);
+       FROM pengajuan_diklat WHERE 1=1${uf.clause}${scope}`, params);
   res.json({ stats: { total: r.total || 0, menunggu: Number(r.menunggu) || 0, disetujui: Number(r.disetujui) || 0, ditolak: Number(r.ditolak) || 0, selesai: Number(r.selesai) || 0, draft: Number(r.draft) || 0 } });
 });
 
 // ===== Daftar (filter tahun/status/pencarian) =====
 function buildList(req) {
-  let sql = 'SELECT * FROM pengajuan_diklat WHERE 1=1';
-  const params = [];
+  const uf = unitFilter(req.unitId);
+  let sql = `SELECT * FROM pengajuan_diklat WHERE 1=1${uf.clause}`;
+  const params = [...uf.params];
   if (!isManager(req.user)) { sql += ' AND (created_by=? OR pegawai_id=?)'; params.push(req.user.id, req.user.id); }
   if (/^\d{4}$/.test(req.query.year)) { sql += ' AND tahun=?'; params.push(Number(req.query.year)); }
   if (['draft', 'diajukan', 'diverifikasi', 'disetujui', 'ditolak', 'selesai'].includes(req.query.status)) { sql += ' AND status=?'; params.push(req.query.status); }
@@ -112,7 +116,7 @@ router.get('/export', requireRole('admin', 'koordinator'), async (req, res) => {
 // ===== Detail =====
 router.get('/:id', async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [Number(req.params.id)]);
-  if (!rows[0]) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
   if (!isManager(req.user) && rows[0].created_by !== req.user.id && rows[0].pegawai_id !== req.user.id) return res.status(403).json({ error: 'Tidak punya akses.' });
   res.json({ diklat: (await withDetail(rows))[0] });
 });
@@ -121,18 +125,23 @@ router.get('/:id', async (req, res) => {
 router.post('/', upload.single('file'), async (req, res) => {
   const b = req.body;
   if (!b.nama_diklat?.trim()) return res.status(400).json({ error: 'Nama diklat wajib diisi.' });
+  // unit_id pengajuan mengikuti unit PEGAWAI target; fallback unit efektif request.
+  const pegawaiId = Number(b.pegawai_id) || req.user.id;
+  const [[peg]] = await pool.query('SELECT unit_id FROM users WHERE id=?', [pegawaiId]);
+  const unitId = peg?.unit_id ?? insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const conn = await pool.getConnection();
   try {
     const { nomor, seq, tahun } = await nextNomorPengajuan(conn);
     const file = req.file ? `/uploads/diklat/${req.file.filename}` : null;
     const [r] = await conn.query(
-      `INSERT INTO pengajuan_diklat (nomor_pengajuan, seq, tahun, tanggal_pengajuan, pegawai_id, pegawai_nama, nip, jabatan, unit_kerja, nama_diklat, penyelenggara, lokasi, tanggal_mulai, tanggal_selesai, durasi, biaya, tujuan, keterangan, file_pendukung, status, created_by, creator_name)
-       VALUES (?,?,?,CURDATE(),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?)`,
-      [nomor, seq, tahun, b.pegawai_id || req.user.id, b.pegawai_nama || req.user.name, b.nip || null, b.jabatan || null, b.unit_kerja || null,
+      `INSERT INTO pengajuan_diklat (nomor_pengajuan, seq, tahun, tanggal_pengajuan, pegawai_id, pegawai_nama, nip, jabatan, unit_kerja, nama_diklat, penyelenggara, lokasi, tanggal_mulai, tanggal_selesai, durasi, biaya, tujuan, keterangan, file_pendukung, status, created_by, creator_name, unit_id)
+       VALUES (?,?,?,CURDATE(),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?,?)`,
+      [nomor, seq, tahun, pegawaiId, b.pegawai_nama || req.user.name, b.nip || null, b.jabatan || null, b.unit_kerja || null,
         b.nama_diklat.trim(), b.penyelenggara || null, b.lokasi || null, b.tanggal_mulai || null, b.tanggal_selesai || null, b.durasi || null,
-        Number(b.biaya) || 0, b.tujuan || null, b.keterangan || null, file, req.user.id, req.user.name]
+        Number(b.biaya) || 0, b.tujuan || null, b.keterangan || null, file, req.user.id, req.user.name, unitId]
     );
-    await logHistory(r.insertId, req.user, 'draft', 'Pengajuan dibuat');
+    await logHistory(r.insertId, req.user, 'draft', 'Pengajuan dibuat', unitId);
     const [rows] = await conn.query('SELECT * FROM pengajuan_diklat WHERE id=?', [r.insertId]);
     res.status(201).json({ diklat: (await withDetail(rows))[0] });
   } finally { conn.release(); }
@@ -143,7 +152,7 @@ router.put('/:id', upload.single('file'), async (req, res) => {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
   if (!isManager(req.user) && (d.created_by !== req.user.id || !['draft', 'diajukan'].includes(d.status))) return res.status(403).json({ error: 'Tidak bisa mengubah pengajuan ini.' });
   const b = req.body;
   const file = req.file ? `/uploads/diklat/${req.file.filename}` : null;
@@ -163,7 +172,7 @@ router.patch('/:id/status', async (req, res) => {
   const note = (req.body.note || '').slice(0, 255) || null;
   const [rows] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
   if (!FLOW[d.status]?.includes(next)) return res.status(400).json({ error: `Transisi ${d.status} → ${next} tidak valid.` });
   if (next === 'selesai' && !d.laporan_url) return res.status(400).json({ error: 'Unggah laporan hasil diklat terlebih dahulu sebelum menandai Selesai.' });
   // Hak akses: 'diajukan' oleh pengusul/manager; sisanya oleh koordinator/admin.
@@ -173,7 +182,7 @@ router.patch('/:id/status', async (req, res) => {
   const setApprove = next === 'disetujui' ? ', approved_by=?, approver_name=?, approved_at=NOW()' : '';
   const params = next === 'disetujui' ? [next, req.user.id, req.user.name, id] : [next, id];
   await pool.query(`UPDATE pengajuan_diklat SET status=?${setApprove} WHERE id=?`, params);
-  await logHistory(id, req.user, next, note);
+  await logHistory(id, req.user, next, note, d.unit_id ?? null);
   await audit(req.user, `diklat_${next}`, 'diklat', id, `${d.nomor_pengajuan} · ${d.nama_diklat}`);
   // Notifikasi
   if (next === 'diajukan') {
@@ -197,7 +206,7 @@ router.post('/:id/nota-dinas', requireRole('admin', 'koordinator'), async (req, 
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
   if (d.nota_dinas_id) { const [nd] = await pool.query('SELECT * FROM nota_dinas WHERE id=?', [d.nota_dinas_id]); if (nd[0]) return res.json({ ok: true, nota: nd[0], reused: true }); }
   const conn = await pool.getConnection();
   try {
@@ -208,9 +217,10 @@ router.post('/:id/nota-dinas', requireRole('admin', 'koordinator'), async (req, 
     const nomor = `${String(s.s).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`;
     const hal = `Permohonan Pelaksanaan Diklat ${d.nama_diklat} a.n. ${d.pegawai_nama}`;
     const body = `Dengan ini diajukan permohonan pelaksanaan diklat "${d.nama_diklat}" yang diselenggarakan oleh ${d.penyelenggara || '-'} di ${d.lokasi || '-'} pada ${d.tanggal_mulai || '-'} s/d ${d.tanggal_selesai || '-'} a.n. ${d.pegawai_nama} (${d.nip || '-'}), dan mohon persetujuannya guna proses lebih lanjut.`;
+    // unit_id nota dinas mengikuti unit pengajuan diklat.
     const [r] = await conn.query(
-      `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, body, tanggal, created_by, creator_name) VALUES ('Nota Dinas',?,?,?,?,?,?,CURDATE(),?,?)`,
-      [nomor, s.s, bulan, tahun, hal, body, req.user.id, req.user.name]
+      `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, body, tanggal, created_by, creator_name, unit_id) VALUES ('Nota Dinas',?,?,?,?,?,?,CURDATE(),?,?,?)`,
+      [nomor, s.s, bulan, tahun, hal, body, req.user.id, req.user.name, d.unit_id ?? insertUnitId(req)]
     );
     await conn.query('UPDATE pengajuan_diklat SET nomor_nota_dinas=?, nota_dinas_id=? WHERE id=?', [nomor, r.insertId, id]);
     const [nd] = await conn.query('SELECT * FROM nota_dinas WHERE id=?', [r.insertId]);
@@ -223,13 +233,13 @@ router.post('/:id/laporan', upload.single('laporan'), async (req, res) => {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
   if (!isManager(req.user) && d.created_by !== req.user.id && d.pegawai_id !== req.user.id) return res.status(403).json({ error: 'Tidak punya akses.' });
   if (!['disetujui', 'selesai'].includes(d.status)) return res.status(400).json({ error: 'Laporan hanya bisa diunggah setelah pengajuan disetujui.' });
   if (!req.file) return res.status(400).json({ error: 'File laporan wajib diunggah.' });
   const url = `/uploads/diklat/${req.file.filename}`;
   await pool.query('UPDATE pengajuan_diklat SET laporan_url=?, laporan_at=NOW() WHERE id=?', [url, id]);
-  await logHistory(id, req.user, d.status, 'Laporan hasil diklat diunggah');
+  await logHistory(id, req.user, d.status, 'Laporan hasil diklat diunggah', d.unit_id ?? null);
   await audit(req.user, 'diklat_laporan', 'diklat', id, d.nomor_pengajuan);
   await notifyCoords(`📄 *Laporan Diklat Diunggah*\n${d.pegawai_nama}: ${d.nama_diklat}\nNo. ${d.nomor_pengajuan}`);
   const [u] = await pool.query('SELECT * FROM pengajuan_diklat WHERE id=?', [id]);
@@ -239,9 +249,9 @@ router.post('/:id/laporan', upload.single('laporan'), async (req, res) => {
 // ===== Hapus =====
 router.delete('/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const [rows] = await pool.query('SELECT created_by, status, file_pendukung FROM pengajuan_diklat WHERE id=?', [id]);
+  const [rows] = await pool.query('SELECT created_by, status, file_pendukung, unit_id FROM pengajuan_diklat WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
   if (!isManager(req.user) && (d.created_by !== req.user.id || d.status !== 'draft')) return res.status(403).json({ error: 'Hanya draft milik sendiri yang bisa dihapus.' });
   await pool.query('DELETE FROM pengajuan_diklat WHERE id=?', [id]);
   if (d.file_pendukung) { try { fs.unlinkSync(path.join(DIR, path.basename(d.file_pendukung))); } catch { /* abaikan */ } }

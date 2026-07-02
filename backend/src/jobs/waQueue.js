@@ -8,16 +8,17 @@ export const waQueue = new Queue('wa-notifications', { connection: redisConnecti
 const JOB_OPTS = { attempts: 5, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } };
 
 export async function queueWaNotification({ type, toUserId, message, relatedIncidentId }) {
-  const [rows] = await pool.query('SELECT name, role, phone FROM users WHERE id = ?', [toUserId]);
+  const [rows] = await pool.query('SELECT name, role, phone, unit_id FROM users WHERE id = ?', [toUserId]);
   const user = rows[0];
   const toLabel = user ? `${user.name} (${user.role})` : `User #${toUserId}`;
   const phone = user?.phone || null;
 
   // Simpan nomor TER-MASK di DB; nomor asli hanya ada di payload job untuk pengiriman.
+  // unit_id log mengikuti unit penerima (filter Log WA per unit; NULL = global/super admin).
   const [result] = await pool.query(
-    `INSERT INTO wa_log (type, to_user_id, to_label, phone, message, status, related_incident_id)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
-    [type, toUserId, toLabel, maskPhone(phone), message, relatedIncidentId || null]
+    `INSERT INTO wa_log (type, to_user_id, to_label, phone, message, status, related_incident_id, unit_id)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    [type, toUserId, toLabel, maskPhone(phone), message, relatedIncidentId || null, user?.unit_id ?? null]
   );
   const waLogId = result.insertId;
 

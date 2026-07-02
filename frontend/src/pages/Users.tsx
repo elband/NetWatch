@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { hasRole } from '../utils/roles';
 import { confirmDialog, alertDialog } from '../components/dialog';
-import type { Role, User } from '../types';
+import type { Role, Unit, User } from '../types';
 
 const ROLE_COLOR: Record<Role, string> = { admin: '#ef4444', koordinator: '#00d4aa', teknisi: '#0ea5e9', viewer: '#a78bfa' };
 const ALL_PERMS = [
@@ -11,20 +12,30 @@ const ALL_PERMS = [
 ];
 
 const ALL_ROLES: Role[] = ['admin', 'koordinator', 'teknisi', 'viewer'];
-const emptyForm = { name: '', username: '', email: '', pin: '', phone: '', nip: '', roles: ['teknisi'] as Role[], jabatan: '', perms: [] as string[] };
+const emptyForm = { name: '', username: '', email: '', pin: '', phone: '', nip: '', roles: ['teknisi'] as Role[], jabatan: '', perms: [] as string[], unit_id: '' as string };
 
 export default function Users() {
   const { user: me } = useAuth();
+  const isAdmin = hasRole(me, 'admin'); // Super Admin: lintas unit; koordinator hanya unitnya
   const [users, setUsers] = useState<User[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [err, setErr] = useState('');
+  // Koordinator tidak boleh memberi peran admin (Super Admin) — pilihan disembunyikan.
+  const selectableRoles = isAdmin ? ALL_ROLES : ALL_ROLES.filter((r) => r !== 'admin');
 
   function load() {
     api.get('/users').then((res) => setUsers(res.data.users));
+    api.get('/units').then((res) => setUnits(res.data.units || [])).catch(() => {});
   }
   useEffect(load, []);
+  const unitLabel = (id?: number | null) => {
+    if (id == null) return '🌐 Lintas Unit';
+    const u = units.find((x) => x.id === id);
+    return u ? `${u.icon || '🏢'} ${u.code}` : `Unit #${id}`;
+  };
 
   function openCreate() {
     setEditId(null);
@@ -35,7 +46,7 @@ export default function Users() {
   function openEdit(u: User) {
     setEditId(u.id);
     setErr('');
-    setForm({ name: u.name, username: u.username, email: u.email, pin: '', phone: u.phone || '', nip: u.nip || '', roles: u.roles?.length ? u.roles : [u.role], jabatan: u.jabatan || '', perms: Array.isArray(u.perms) ? u.perms : [] });
+    setForm({ name: u.name, username: u.username, email: u.email, pin: '', phone: u.phone || '', nip: u.nip || '', roles: u.roles?.length ? u.roles : [u.role], jabatan: u.jabatan || '', perms: Array.isArray(u.perms) ? u.perms : [], unit_id: u.unit_id != null ? String(u.unit_id) : '' });
     setOpen(true);
   }
 
@@ -99,6 +110,7 @@ export default function Users() {
                 {(u.roles?.length ? u.roles : [u.role]).map((r) => (
                   <span key={r} className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: `${ROLE_COLOR[r]}22`, color: ROLE_COLOR[r] }}>{r}</span>
                 ))}
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">{unitLabel(u.unit_id)}</span>
                 {!u.active && <span className="text-[10px] text-danger ml-1">● Nonaktif</span>}
               </div>
               <div className="text-[11px] text-text2">
@@ -135,10 +147,16 @@ export default function Users() {
               <input className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="No. WhatsApp" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
               <input className="col-span-2 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="NIP (dipakai untuk tanda tangan surat)" value={form.nip} onChange={(e) => setForm({ ...form, nip: e.target.value })} />
               <input className="col-span-2 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" placeholder="Jabatan" value={form.jabatan} onChange={(e) => setForm({ ...form, jabatan: e.target.value })} />
+              {isAdmin && (
+                <select className="col-span-2 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.unit_id} onChange={(e) => setForm({ ...form, unit_id: e.target.value })}>
+                  <option value="">🌐 Lintas Unit (khusus Super Admin)</option>
+                  {units.map((un) => <option key={un.id} value={un.id}>{un.icon || '🏢'} {un.code} — {un.name}</option>)}
+                </select>
+              )}
             </div>
             <div className="text-[11px] font-semibold text-text2 mt-3.5 mb-2">PERAN <span className="font-normal">(bisa lebih dari satu · peran pertama = utama)</span></div>
             <div className="grid grid-cols-2 gap-2">
-              {ALL_ROLES.map((r) => (
+              {selectableRoles.map((r) => (
                 <label key={r} className={`flex items-center gap-2 rounded-md p-2 text-[11px] cursor-pointer border ${form.roles.includes(r) ? 'border-accent/50 bg-accent/10' : 'border-border bg-surface2'}`}>
                   <input type="checkbox" checked={form.roles.includes(r)} onChange={() => toggleRole(r)} />
                   <span className="capitalize">{r}</span>

@@ -1,5 +1,15 @@
 export type Role = 'admin' | 'koordinator' | 'teknisi' | 'viewer';
 
+// Unit kerja (multi-unit): ELB / AAB / WPS. Role admin = Super Admin lintas unit (unit_id null).
+export interface Unit {
+  id: number;
+  code: string;
+  name: string;
+  description?: string | null;
+  icon?: string | null;
+  active?: number | boolean;
+}
+
 export interface User {
   id: number;
   name: string;
@@ -13,6 +23,7 @@ export interface User {
   emoji: string;
   avatar_url?: string | null;
   active: boolean;
+  unit_id?: number | null;
   perms: string[];
   has_pin?: boolean;
 }

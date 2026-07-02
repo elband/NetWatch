@@ -32,6 +32,7 @@ function toPublicUser(u) {
     emoji: u.emoji,
     avatar_url: u.avatar_url ?? null,
     active: !!u.active,
+    unit_id: u.unit_id ?? null, // NULL = super admin lintas unit
     perms,
   };
 }

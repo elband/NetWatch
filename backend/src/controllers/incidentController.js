@@ -8,6 +8,7 @@ import { remindOnDutyTechs } from '../services/coordWatcher.js';
 import { isNotifyEnabledForUser, notifyKasiIfEnabled } from '../services/notifyPrefs.js';
 import { nextIncidentId } from '../utils/incidentId.js';
 import { buildLaporanData } from '../routes/laporanRoutes.js';
+import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
 // Alur tindakan insiden berbasis pilihan/cabang (solusi perbaikan peralatan):
 // - Mulai: "Coba SSH" (bila ber-IP) atau "Langsung Kunjungan".
@@ -33,14 +34,27 @@ const takeLink = (id) => `${env.appUrl}/my-incidents?focus=${id}&action=take`;
 // (atau yang sudah ditugaskan langsung, bila insiden sudah punya tech_id).
 const remindLink = (id) => `${env.appUrl}/incidents?focus=${id}&action=remind`;
 
+// Unit insiden untuk filter notifikasi per unit. Baris insiden sudah tersimpan
+// saat fungsi-fungsi notifikasi dipanggil, jadi aman fallback lookup by id.
+async function incidentUnitId(conn, incident) {
+  if (incident && incident.unit_id !== undefined) return incident.unit_id ?? null;
+  const [[row]] = await conn.query('SELECT unit_id FROM incidents WHERE id = ? LIMIT 1', [incident.id]);
+  return row?.unit_id ?? null;
+}
+
 // Kirim WA ke koordinator (pakai coord_id bila ada, jika tidak broadcast ke
-// semua koordinator aktif).
+// koordinator aktif se-unit dengan insiden).
 async function notifyCoordinators(conn, incident, message, type = 'alert') {
   let targetIds = [];
   if (incident.coord_id) {
     targetIds = [incident.coord_id];
   } else {
-    const [coords] = await conn.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+    const unitId = await incidentUnitId(conn, incident);
+    const [coords] = await conn.query(
+      "SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))" +
+        (unitId ? ' AND (unit_id IS NULL OR unit_id = ?)' : ''),
+      unitId ? [unitId] : []
+    );
     targetIds = coords.map((c) => c.id);
   }
   for (const uid of targetIds) {
@@ -53,7 +67,7 @@ async function notifyCoordinators(conn, incident, message, type = 'alert') {
 
 async function notifyCoordinatorsDone(conn, incident, duration) {
   await notifyCoordinators(conn, incident, `✅ PERALATAN NORMAL KEMBALI\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nDurasi: ${duration} menit`, 'done');
-  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_done', title: `Insiden selesai: ${incident.device_name}`, message: `${incident.id} ditangani dalam ${duration} menit`, refId: incident.id, refType: 'incident', link: `/incidents?focus=${incident.id}` });
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_done', title: `Insiden selesai: ${incident.device_name}`, message: `${incident.id} ditangani dalam ${duration} menit`, refId: incident.id, refType: 'incident', link: `/incidents?focus=${incident.id}` }, { unitId: await incidentUnitId(conn, incident) });
 }
 
 // Notifikasi saat insiden ditutup OTOMATIS oleh sistem (perangkat pulih & stabil).
@@ -65,9 +79,9 @@ export async function notifyAutoResolved(conn, incident, info = {}) {
   const recovTxt = recoveredAt ? new Date(recoveredAt).toLocaleString('id-ID') : '-';
   const msg = `🤖✅ AUTO-RESOLVED (oleh SISTEM)\n${incident.id} | ${incident.device_name}\nMasalah: ${incident.issue}\nPerangkat kembali ONLINE & stabil${stableMin ? ` ≥ ${stableMin} mnt` : ''} tanpa flapping.\nWaktu pulih: ${recovTxt}\nTotal downtime: ${durTxt}`;
 
-  // Koordinator (pengingat) + lonceng in-app koordinator & admin.
+  // Koordinator (pengingat) + lonceng in-app koordinator & admin (se-unit).
   await notifyCoordinators(conn, incident, msg, 'done');
-  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_auto_resolved', title: `Auto-resolved: ${incident.device_name}`, message: `${incident.id} ditutup otomatis oleh sistem (downtime ${durTxt})`, refId: incident.id, refType: 'incident', link: `/incidents?focus=${incident.id}` });
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_auto_resolved', title: `Auto-resolved: ${incident.device_name}`, message: `${incident.id} ditutup otomatis oleh sistem (downtime ${durTxt})`, refId: incident.id, refType: 'incident', link: `/incidents?focus=${incident.id}` }, { unitId: await incidentUnitId(conn, incident) });
 
   // Teknisi penanggung jawab + kolaborator (bila tiket sudah diambil/dibagikan).
   const techIds = new Set();
@@ -87,7 +101,13 @@ export async function notifyAutoResolved(conn, incident, info = {}) {
 // Snapshot teknisi on-duty saat insiden masuk + kirim notifikasi ke mereka.
 // Mengembalikan jumlah teknisi yang diberi notifikasi.
 export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue, coordId = null }) {
-  const onDutyIds = await getOnDutyTechIds(conn);
+  let onDutyIds = await getOnDutyTechIds(conn);
+  // Multi-unit: hanya teknisi on-duty se-unit dengan insiden yang di-snapshot & dinotifikasi.
+  const unitId = await incidentUnitId(conn, { id });
+  if (unitId && onDutyIds.length) {
+    const [inUnit] = await conn.query('SELECT id FROM users WHERE id IN (?) AND unit_id = ?', [onDutyIds, unitId]);
+    onDutyIds = inUnit.map((r) => r.id);
+  }
   for (const uid of onDutyIds) {
     await conn.query('INSERT IGNORE INTO incident_duty (incident_id, user_id) VALUES (?, ?)', [id, uid]);
   }
@@ -109,8 +129,8 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
   // saat tiket muncul. Kini semua path (auto/manual-pool/lapor publik) yang
   // melewati fungsi ini mengirim WA ke koordinator juga.
   await notifyCoordinators(conn, { id, coord_id: coordId }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
-  // Koordinator & admin: tiket helpdesk baru masuk.
-  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: `/incidents?focus=${id}` });
+  // Koordinator & admin (se-unit): tiket helpdesk baru masuk.
+  await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: `/incidents?focus=${id}` }, { unitId });
   return onDutyIds.length;
 }
 
@@ -152,7 +172,7 @@ async function attachNotes(incidents) {
 export async function getIncident(req, res) {
   const id = req.params.id;
   const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   res.json({ incident: (await attachNotes(rows))[0] });
 }
 
@@ -163,6 +183,8 @@ export async function listIncidents(req, res) {
   if (status) { sql += ' AND status = ?'; params.push(status); }
   if (techId) { sql += ' AND tech_id = ?'; params.push(Number(techId)); }
   if (unassigned === '1' || unassigned === 'true') { sql += " AND tech_id IS NULL AND status != 'selesai'"; }
+  const uf = unitFilter(req.unitId);
+  sql += uf.clause; params.push(...uf.params);
   sql += ' ORDER BY created_at DESC';
   const [rows] = await pool.query(sql, params);
   res.json({ incidents: await attachNotes(rows) });
@@ -174,18 +196,21 @@ export async function incidentQueue(req, res) {
   const conn = await pool.getConnection();
   try {
     const duty = await getDutyStatus(conn, req.user.id);
+    const uf = unitFilter(req.unitId);
+    const ufi = unitFilter(req.unitId, 'i.unit_id');
     const [poolRows] = await conn.query(
-      "SELECT * FROM incidents WHERE tech_id IS NULL AND status != 'selesai' ORDER BY FIELD(priority,'kritis','tinggi','sedang'), created_at ASC"
+      `SELECT * FROM incidents WHERE tech_id IS NULL AND status != 'selesai'${uf.clause} ORDER BY FIELD(priority,'kritis','tinggi','sedang'), created_at ASC`,
+      uf.params
     );
     const [mineRows] = await conn.query(
-      'SELECT * FROM incidents WHERE tech_id = ? ORDER BY created_at DESC',
-      [req.user.id]
+      `SELECT * FROM incidents WHERE tech_id = ?${uf.clause} ORDER BY created_at DESC`,
+      [req.user.id, ...uf.params]
     );
     // Insiden yang saya diajak (kolaborasi, read-only) — bukan milik saya.
     const [collabRows] = await conn.query(
       `SELECT i.* FROM incidents i JOIN incident_collaborators c ON c.incident_id = i.id
-        WHERE c.user_id = ? AND (i.tech_id IS NULL OR i.tech_id <> ?) ORDER BY i.created_at DESC`,
-      [req.user.id, req.user.id]
+        WHERE c.user_id = ? AND (i.tech_id IS NULL OR i.tech_id <> ?)${ufi.clause} ORDER BY i.created_at DESC`,
+      [req.user.id, req.user.id, ...ufi.params]
     );
     res.json({
       duty,
@@ -198,9 +223,10 @@ export async function incidentQueue(req, res) {
   }
 }
 
-// Daftar teknisi aktif (untuk pemilih "Ajak Teknisi").
+// Daftar teknisi aktif (untuk pemilih "Ajak Teknisi") — dibatasi se-unit.
 export async function listTeknisi(req, res) {
-  const [rows] = await pool.query("SELECT id, name, emoji FROM users WHERE active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"')) ORDER BY name");
+  const uf = unitFilterShared(req.unitId);
+  const [rows] = await pool.query(`SELECT id, name, emoji FROM users WHERE active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"'))${uf.clause} ORDER BY name`, uf.params);
   res.json({ teknisi: rows });
 }
 
@@ -211,7 +237,7 @@ export async function inviteCollaborators(req, res) {
   const techIds = Array.isArray(req.body.techIds) ? req.body.techIds.map(Number).filter(Boolean) : [];
   const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
   const incident = rows[0];
-  if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  if (!incident || !rowInUnit(incident, req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   const roles = req.user.roles?.length ? req.user.roles : [req.user.role];
   const isManager = roles.some((r) => r === 'admin' || r === 'koordinator');
   if (incident.tech_id !== req.user.id && !isManager) return res.status(403).json({ error: 'Hanya teknisi pemilik job (atau koordinator/admin) yang bisa mengajak teknisi lain.' });
@@ -250,7 +276,8 @@ export async function takeIncident(req, res) {
   try {
     const [rows] = await conn.query('SELECT * FROM incidents WHERE id = ?', [id]);
     const incident = rows[0];
-    if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+    // Pagar antar unit: teknisi hanya boleh mengklaim insiden dari pool unitnya sendiri.
+    if (!incident || !rowInUnit(incident, req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
     if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai' });
     if (incident.tech_id) return res.status(409).json({ error: 'Insiden sudah diambil teknisi lain' });
 
@@ -287,8 +314,8 @@ export async function addIncidentNote(req, res) {
   const source = req.body.source === 'ssh' ? 'ssh' : null;
   if (!note) return res.status(400).json({ error: 'Catatan tidak boleh kosong.' });
 
-  const [rows] = await pool.query('SELECT id, step FROM incidents WHERE id = ?', [id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  const [rows] = await pool.query('SELECT id, step, unit_id FROM incidents WHERE id = ?', [id]);
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
 
   const prefix = source === 'ssh' ? '💻 Catatan SSH' : '📝 Catatan';
   await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [
@@ -303,18 +330,19 @@ export async function remindIncident(req, res) {
   const id = req.params.id;
   const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
   const incident = rows[0];
-  if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  if (!incident || !rowInUnit(incident, req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   if (incident.tech_id) return res.status(400).json({ error: 'Insiden sudah diambil teknisi.' });
   if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai.' });
 
   const techId = Number(req.body.techId) || null;
   const note = String(req.body.note || '').trim();
 
-  // Perintah penanganan ke SATU teknisi tertentu yang dipilih koordinator.
+  // Perintah penanganan ke SATU teknisi tertentu yang dipilih koordinator (harus se-unit).
   if (techId) {
+    const ufTech = unitFilterShared(req.unitId);
     const [[tech]] = await pool.query(
-      "SELECT id, name FROM users WHERE id = ? AND active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"'))",
-      [techId]
+      `SELECT id, name FROM users WHERE id = ? AND active = 1 AND (role = 'teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"'))${ufTech.clause}`,
+      [techId, ...ufTech.params]
     );
     if (!tech) return res.status(400).json({ error: 'Teknisi tidak ditemukan / bukan teknisi aktif.' });
     const mins = Math.max(1, Math.floor((Date.now() - new Date(incident.created_at).getTime()) / 60000));
@@ -354,15 +382,24 @@ export async function createIncident(req, res) {
   const { deviceId, deviceName, ip, issue, priority, techId, coordId, source, locationId } = req.body;
   const conn = await pool.getConnection();
   try {
+    // Unit insiden: bila dibuat dari perangkat, ikuti unit perangkat tsb;
+    // selain itu pakai unit efektif request (admin "Semua Unit" wajib memilih).
+    let unitId = insertUnitId(req);
+    if (deviceId) {
+      const [dRows] = await conn.query('SELECT unit_id FROM devices WHERE id = ?', [deviceId]);
+      if (dRows[0] && !rowInUnit(dRows[0], req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+      if (dRows[0]?.unit_id != null) unitId = dRows[0].unit_id;
+    }
+    if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
     const id = await nextIncidentId(conn);
     const assigned = techId || null;
     // Model pool: tanpa penugasan langsung, insiden masuk ke pool (aktif) dan
     // dikirim ke semua teknisi on-duty. Jika koordinator menugaskan langsung,
     // insiden langsung jadi milik teknisi tsb.
     await conn.query(
-      `INSERT INTO incidents (id, device_id, device_name, ip, location_id, issue, priority, tech_id, coord_id, status, step, source, taken_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ${assigned ? 'NOW()' : 'NULL'})`,
-      [id, deviceId || null, deviceName, ip || null, locationId || null, issue, priority || 'sedang', assigned, coordId || null, assigned ? 'proses' : 'aktif', source || 'manual']
+      `INSERT INTO incidents (id, device_id, device_name, ip, location_id, issue, priority, tech_id, coord_id, status, step, source, unit_id, taken_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ${assigned ? 'NOW()' : 'NULL'})`,
+      [id, deviceId || null, deviceName, ip || null, locationId || null, issue, priority || 'sedang', assigned, coordId || null, assigned ? 'proses' : 'aktif', source || 'manual', unitId]
     );
     await conn.query(`INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)`, [id, 'Insiden dibuat.']);
 
@@ -408,7 +445,7 @@ export async function advanceStep(req, res) {
   try {
     const [rows] = await conn.query('SELECT * FROM incidents WHERE id = ?', [id]);
     const incident = rows[0];
-    if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+    if (!incident || !rowInUnit(incident, req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
     if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai.' });
     if ((action === 'ssh_fail' || action === 'ssh_ok') && !hasValidIp(incident.ip)) {
       return res.status(400).json({ error: 'Tindakan SSH hanya untuk perangkat yang punya IP valid.' });
@@ -461,8 +498,8 @@ export async function advanceStep(req, res) {
 export async function setAwaitingPart(req, res) {
   const id = req.params.id;
   const value = req.body.value ? 1 : 0;
-  const [rows] = await pool.query('SELECT id, step FROM incidents WHERE id = ?', [id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  const [rows] = await pool.query('SELECT id, step, unit_id FROM incidents WHERE id = ?', [id]);
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   await pool.query('UPDATE incidents SET awaiting_part = ? WHERE id = ?', [value, id]);
   await pool.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [
     id, rows[0].step || 0,
@@ -474,6 +511,9 @@ export async function setAwaitingPart(req, res) {
 
 export async function getIncidentReport(req, res) {
   const id = req.params.id;
+  // Scope via insiden induk: laporan milik insiden unit lain tidak boleh terbaca.
+  const [incRows] = await pool.query('SELECT id, unit_id FROM incidents WHERE id = ?', [id]);
+  if (incRows[0] && !rowInUnit(incRows[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   const [rows] = await pool.query('SELECT * FROM incident_reports WHERE incident_id = ?', [id]);
   res.json({ report: rows[0] || null });
 }
@@ -484,8 +524,8 @@ export async function saveIncidentReport(req, res) {
   if (!kerusakan?.trim() || !perbaikan?.trim()) {
     return res.status(400).json({ error: 'Deskripsi kerusakan dan tindakan perbaikan wajib diisi' });
   }
-  const [incRows] = await pool.query('SELECT id, step FROM incidents WHERE id = ?', [id]);
-  if (!incRows[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  const [incRows] = await pool.query('SELECT id, step, unit_id FROM incidents WHERE id = ?', [id]);
+  if (!incRows[0] || !rowInUnit(incRows[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
 
   const validHasil = ['berhasil', 'sebagian', 'gagal'];
   const hasilVal = validHasil.includes(hasil) ? hasil : 'berhasil';
@@ -515,6 +555,9 @@ export async function saveIncidentReport(req, res) {
 // (HMAC) yang bisa diverifikasi publik via QR.
 export async function signIncidentReport(req, res) {
   const id = req.params.id;
+  // Scope via insiden induk sebelum menyentuh laporan/TTE.
+  const [incRows] = await pool.query('SELECT id, unit_id FROM incidents WHERE id = ?', [id]);
+  if (!incRows[0] || !rowInUnit(incRows[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   const [rows] = await pool.query('SELECT * FROM incident_reports WHERE incident_id = ?', [id]);
   const report = rows[0];
   if (!report) return res.status(404).json({ error: 'Laporan belum dibuat — tidak bisa disahkan.' });
@@ -578,9 +621,9 @@ async function ensureNotaDinasSurat(incidentId, user) {
   const tanggal = now.toISOString().slice(0, 10);
 
   const [r] = await pool.query(
-    `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, incident_id, hal, tanggal, created_by, creator_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ['LKP', nomor, seq, bulan, tahun, incidentId, hal, tanggal, user.id, user.name]
+    `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, incident_id, hal, tanggal, created_by, creator_name, unit_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ['LKP', nomor, seq, bulan, tahun, incidentId, hal, tanggal, user.id, user.name, incident.unit_id ?? null]
   );
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [r.insertId]);
   return { nota: rows[0], reused: false };
@@ -589,8 +632,8 @@ async function ensureNotaDinasSurat(incidentId, user) {
 // Buat (atau ambil) Nota Dinas pengantar untuk laporan kerusakan sebuah insiden.
 export async function createNotaDinas(req, res) {
   const id = req.params.id;
-  const [incCheck] = await pool.query('SELECT id FROM incidents WHERE id = ?', [id]);
-  if (!incCheck[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  const [incCheck] = await pool.query('SELECT id, unit_id FROM incidents WHERE id = ?', [id]);
+  if (!incCheck[0] || !rowInUnit(incCheck[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
 
   const result = await ensureNotaDinasSurat(id, req.user);
   if (!result) return res.status(500).json({ error: 'Gagal membuat nota dinas' });
@@ -793,7 +836,7 @@ export async function resolveIncident(req, res) {
   const { durationMin } = req.body;
   const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
   const incident = rows[0];
-  if (!incident) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  if (!incident || !rowInUnit(incident, req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai.' });
   // Wajib dibuktikan dengan dokumentasi: minimal 1 foto bukti pada kronologi.
   const [[doc]] = await pool.query('SELECT COUNT(*) c FROM incident_notes WHERE incident_id = ? AND doc_url IS NOT NULL', [id]);
@@ -830,7 +873,7 @@ export async function resolveIncident(req, res) {
 export async function deleteIncident(req, res) {
   const id = req.params.id;
   const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
   await pool.query('DELETE FROM incidents WHERE id = ?', [id]);
   res.json({ ok: true });
 }

@@ -7,6 +7,7 @@ import { aoaToBuffer, bufferToAoa, xlsxDateToYmd } from '../utils/xlsx.js';
 import exifr from 'exifr';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { getDutyStatus, dateKey } from '../config/shifts.js';
 import { withInspectionPhoto, INSPECTION_DIR } from '../middleware/upload.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
@@ -14,6 +15,7 @@ import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 const SLOTS = ['09', '12', '15'];
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -123,7 +125,10 @@ async function canInspect(user) {
 // ===================== INSPEKSI HARIAN =====================
 router.get('/inspections', async (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : dateKey(new Date());
-  const [devices] = await pool.query('SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason, always_on FROM devices WHERE inspect_required=1 ORDER BY name');
+  // Scoping unit lewat daftar perangkat: inspeksi/poweron dipetakan per device_id,
+  // sehingga baris milik unit lain otomatis tak ikut tampil.
+  const ufd = unitFilter(req.unitId, 'unit_id');
+  const [devices] = await pool.query(`SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason, always_on FROM devices WHERE inspect_required=1${ufd.clause} ORDER BY name`, ufd.params);
   const [insp] = await pool.query('SELECT * FROM equipment_inspections WHERE inspect_date = ?', [date]);
   const byDevice = {};
   for (const r of insp) (byDevice[r.device_id] ||= {})[r.slot] = r;
@@ -170,10 +175,14 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   // Foto dokumentasi WAJIB.
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi inspeksi wajib diunggah.' });
 
-  // Ambil koordinat perangkat (untuk cek GPS proximity).
-  const [devRows] = await pool.query('SELECT name, lat, lng FROM devices WHERE id = ?', [deviceId]);
+  // Ambil koordinat perangkat (untuk cek GPS proximity) + unit_id (scoping).
+  const [devRows] = await pool.query('SELECT name, lat, lng, unit_id FROM devices WHERE id = ?', [deviceId]);
   const device = devRows[0];
-  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+
+  // Unit baris inspeksi mengikuti unit perangkatnya.
+  const rowUnitId = device.unit_id ?? insertUnitId(req);
+  if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
 
   // Anti-foto-palsu: hash + kesegaran waktu tangkap + proximity GPS.
   const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
@@ -197,12 +206,12 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   const photoUrl = `/uploads/inspections/${filename}`;
 
   await pool.query(
-    `INSERT INTO equipment_inspections (device_id, inspect_date, slot, status, note, photo_url, photo_hash, verified, distance_m, inspected_by, inspector_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO equipment_inspections (device_id, inspect_date, slot, status, note, photo_url, photo_hash, verified, distance_m, inspected_by, inspector_name, unit_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE status=VALUES(status), note=VALUES(note),
        photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash), verified=VALUES(verified),
-       distance_m=VALUES(distance_m), inspected_by=VALUES(inspected_by), inspector_name=VALUES(inspector_name)`,
-    [deviceId, date, String(slot), st, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name]
+       distance_m=VALUES(distance_m), inspected_by=VALUES(inspected_by), inspector_name=VALUES(inspector_name), unit_id=VALUES(unit_id)`,
+    [deviceId, date, String(slot), st, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name, rowUnitId]
   );
 
   // Notifikasi otomatis ke koordinator bahwa perangkat sudah diinspeksi.
@@ -239,10 +248,14 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
 
-  const [devRows] = await pool.query('SELECT name, lat, lng, always_on FROM devices WHERE id = ?', [deviceId]);
+  const [devRows] = await pool.query('SELECT name, lat, lng, always_on, unit_id FROM devices WHERE id = ?', [deviceId]);
   const device = devRows[0];
-  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
   if (device.always_on) return res.status(400).json({ error: 'Perangkat ini ditandai selalu aktif (24 jam) — tidak untuk dihidupkan/dimatikan.' });
+
+  // Unit baris mengikuti unit perangkatnya.
+  const rowUnitId = device.unit_id ?? insertUnitId(req);
+  if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
 
   const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
 
@@ -263,11 +276,11 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const photoUrl = `/uploads/inspections/${filename}`;
 
   await pool.query(
-    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name)
-     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name, unit_id)
+     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
-       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name)`,
-    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name]
+       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
+    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name, rowUnitId]
   );
 
   // Menghidupkan peralatan = mulai monitoring: aktifkan pantauan otomatis & bersihkan
@@ -308,9 +321,13 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
 
-  const [[device]] = await pool.query('SELECT id, name, lat, lng, always_on FROM devices WHERE id=?', [deviceId]);
-  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  const [[device]] = await pool.query('SELECT id, name, lat, lng, always_on, unit_id FROM devices WHERE id=?', [deviceId]);
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
   if (device.always_on) return res.status(400).json({ error: 'Perangkat ini ditandai selalu aktif (24 jam) — tidak untuk dihidupkan/dimatikan.' });
+
+  // Unit baris mengikuti unit perangkatnya.
+  const rowUnitId = device.unit_id ?? insertUnitId(req);
+  if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
 
   const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
 
@@ -331,11 +348,11 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const photoUrl = `/uploads/inspections/${filename}`;
 
   await pool.query(
-    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name)
-     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name, unit_id)
+     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
-       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name)`,
-    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name]
+       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
+    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name, rowUnitId]
   );
 
   await pool.query(
@@ -368,6 +385,8 @@ router.get('/maintenance', async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month)
     ? req.query.month
     : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  // Filter unit lewat unit perangkat (JOIN devices sudah ada) — sumber unit paling andal.
+  const uf = unitFilter(req.unitId, 'd.unit_id');
   const [rows] = await pool.query(
     `SELECT m.*, d.name AS device_name, d.ip AS device_ip, d.type AS device_type,
             ub.name AS done_by_name,
@@ -375,9 +394,9 @@ router.get('/maintenance', async (req, res) => {
        FROM equipment_maintenance m
        JOIN devices d ON d.id = m.device_id
        LEFT JOIN users ub ON ub.id = m.done_by
-      WHERE m.plan_month = ?
+      WHERE m.plan_month = ?${uf.clause}
       ORDER BY m.scheduled_date ASC, d.name ASC`,
-    [month]
+    [month, ...uf.params]
   );
   res.json({ month, maintenance: rows });
 });
@@ -387,12 +406,17 @@ router.post('/maintenance', requireRole('admin', 'koordinator'), maintUpload.sin
   if (!deviceId || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate || '') || !task?.trim()) {
     return res.status(400).json({ error: 'Perangkat, tanggal (YYYY-MM-DD), dan tugas wajib diisi.' });
   }
+  // Perangkat harus ada & berada di unit request; unit baris mengikuti unit perangkat.
+  const [[dev]] = await pool.query('SELECT unit_id FROM devices WHERE id = ?', [deviceId]);
+  if (!dev || !rowInUnit(dev, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  const rowUnitId = dev.unit_id ?? insertUnitId(req);
+  if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const month = scheduledDate.slice(0, 7);
   const docUrl = req.file ? `/uploads/maintenance/${req.file.filename}` : null;
   const [r] = await pool.query(
-    `INSERT INTO equipment_maintenance (device_id, plan_month, scheduled_date, task, note, doc_url, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [deviceId, month, scheduledDate, task.trim(), note?.trim() || null, docUrl, req.user.id]
+    `INSERT INTO equipment_maintenance (device_id, plan_month, scheduled_date, task, note, doc_url, created_by, unit_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [deviceId, month, scheduledDate, task.trim(), note?.trim() || null, docUrl, req.user.id, rowUnitId]
   );
   res.status(201).json({ id: r.insertId, doc_url: docUrl });
 });
@@ -404,11 +428,12 @@ router.put('/maintenance/:id', maintUpload.single('doc'), async (req, res) => {
   const valid = ['rencana', 'selesai', 'batal'];
   if (!valid.includes(status)) return res.status(400).json({ error: 'Status tidak valid.' });
   const [rows] = await pool.query(
-    'SELECT m.*, d.name AS device_name FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id=?',
+    'SELECT m.*, d.name AS device_name, d.unit_id AS device_unit_id FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id=?',
     [req.params.id]
   );
   const m = rows[0];
-  if (!m) return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
+  // Fallback ke unit perangkat bila unit_id baris lama masih kosong (data legacy).
+  if (!m || !rowInUnit({ unit_id: m.unit_id ?? m.device_unit_id }, req.unitId)) return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
   const docUrl = req.file ? `/uploads/maintenance/${req.file.filename}` : null;
 
   if (status === 'selesai') {
@@ -441,6 +466,14 @@ router.put('/maintenance/:id', maintUpload.single('doc'), async (req, res) => {
 // ── Dokumentasi foto maintenance (banyak foto per rencana) ──
 // Daftar foto sebuah maintenance.
 router.get('/maintenance/:id/photos', async (req, res) => {
+  // Scope via induk: maintenance harus berada di unit request (fallback unit perangkat).
+  const [[parent]] = await pool.query(
+    'SELECT m.unit_id, d.unit_id AS device_unit_id FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id = ?',
+    [req.params.id]
+  );
+  if (!parent || !rowInUnit({ unit_id: parent.unit_id ?? parent.device_unit_id }, req.unitId)) {
+    return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
+  }
   const [photos] = await pool.query(
     `SELECT p.id, p.url, p.caption, p.created_at, u.name AS uploaded_by_name
        FROM equipment_maintenance_photos p
@@ -453,8 +486,12 @@ router.get('/maintenance/:id/photos', async (req, res) => {
 
 // Unggah satu/banyak foto sekaligus untuk sebuah maintenance.
 router.post('/maintenance/:id/photos', maintUpload.array('photos', 20), async (req, res) => {
-  const [[m]] = await pool.query('SELECT id FROM equipment_maintenance WHERE id = ?', [req.params.id]);
-  if (!m) return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
+  // Scope via induk (fallback unit perangkat untuk baris legacy).
+  const [[m]] = await pool.query(
+    'SELECT m.id, m.unit_id, d.unit_id AS device_unit_id FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id = ?',
+    [req.params.id]
+  );
+  if (!m || !rowInUnit({ unit_id: m.unit_id ?? m.device_unit_id }, req.unitId)) return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'Tidak ada foto yang diunggah.' });
   for (const f of files) {
@@ -474,21 +511,38 @@ router.post('/maintenance/:id/photos', maintUpload.array('photos', 20), async (r
 
 // Hapus satu foto dokumentasi (+ berkas di disk).
 router.delete('/maintenance/photos/:photoId', async (req, res) => {
-  const [[ph]] = await pool.query('SELECT url FROM equipment_maintenance_photos WHERE id = ?', [req.params.photoId]);
-  if (!ph) return res.status(404).json({ error: 'Foto tidak ditemukan.' });
+  // Scope via induk maintenance (fallback unit perangkat).
+  const [[ph]] = await pool.query(
+    `SELECT p.url, m.unit_id, d.unit_id AS device_unit_id
+       FROM equipment_maintenance_photos p
+       JOIN equipment_maintenance m ON m.id = p.maintenance_id
+       JOIN devices d ON d.id = m.device_id
+      WHERE p.id = ?`,
+    [req.params.photoId]
+  );
+  if (!ph || !rowInUnit({ unit_id: ph.unit_id ?? ph.device_unit_id }, req.unitId)) return res.status(404).json({ error: 'Foto tidak ditemukan.' });
   await pool.query('DELETE FROM equipment_maintenance_photos WHERE id = ?', [req.params.photoId]);
   try { fs.unlinkSync(path.join(MAINT_DIR, path.basename(ph.url))); } catch { /* berkas mungkin sudah tiada */ }
   res.json({ ok: true });
 });
 
 router.delete('/maintenance/:id', requireRole('admin', 'koordinator'), async (req, res) => {
+  // Cegah hapus lintas unit (fallback unit perangkat untuk baris legacy).
+  const [[m]] = await pool.query(
+    'SELECT m.unit_id, d.unit_id AS device_unit_id FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id = ?',
+    [req.params.id]
+  );
+  if (m && !rowInUnit({ unit_id: m.unit_id ?? m.device_unit_id }, req.unitId)) {
+    return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
+  }
   await pool.query('DELETE FROM equipment_maintenance WHERE id = ?', [req.params.id]);
   res.json({ ok: true });
 });
 
 // ----- Template Excel (download) -----
 router.get('/maintenance/template', requireRole('admin', 'koordinator'), async (req, res) => {
-  const [devices] = await pool.query('SELECT name, ip FROM devices ORDER BY name LIMIT 3');
+  const uf = unitFilter(req.unitId, 'unit_id');
+  const [devices] = await pool.query(`SELECT name, ip FROM devices WHERE 1=1${uf.clause} ORDER BY name LIMIT 3`, uf.params);
   const header = ['nama_perangkat', 'tanggal (YYYY-MM-DD)', 'tugas', 'catatan'];
   const example = devices.map((d) => [d.name, `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-15`, 'Pembersihan & cek kondisi', '']);
   const aoa = [header, ...(example.length ? example : [['SW-Core-01', '2026-06-15', 'Pembersihan & cek kondisi', '']])];
@@ -509,9 +563,11 @@ router.post('/maintenance/import', requireRole('admin', 'koordinator'), upload.s
   }
   if (!rows || rows.length < 2) return res.status(400).json({ error: 'File kosong atau tanpa data.' });
 
-  const [devices] = await pool.query('SELECT id, name, ip FROM devices');
-  const byName = new Map(devices.map((d) => [String(d.name).toLowerCase().trim(), d.id]));
-  const byIp = new Map(devices.map((d) => [String(d.ip).toLowerCase().trim(), d.id]));
+  // Hanya perangkat dalam unit request yang bisa dirujuk saat impor.
+  const ufi = unitFilter(req.unitId, 'unit_id');
+  const [devices] = await pool.query(`SELECT id, name, ip, unit_id FROM devices WHERE 1=1${ufi.clause}`, ufi.params);
+  const byName = new Map(devices.map((d) => [String(d.name).toLowerCase().trim(), d]));
+  const byIp = new Map(devices.map((d) => [String(d.ip).toLowerCase().trim(), d]));
 
   let inserted = 0;
   const errors = [];
@@ -520,7 +576,8 @@ router.post('/maintenance/import', requireRole('admin', 'koordinator'), upload.s
     if (!row || row.every((c) => c === '' || c == null)) continue;
     const [devCell, dateCell, taskCell, noteCell] = row;
     const key = String(devCell ?? '').toLowerCase().trim();
-    const deviceId = byName.get(key) || byIp.get(key);
+    const dev = byName.get(key) || byIp.get(key);
+    const deviceId = dev?.id;
     let dateStr = '';
     if (dateCell instanceof Date) dateStr = xlsxDateToYmd(dateCell);
     else if (typeof dateCell === 'number') dateStr = xlsxDateToYmd(new Date(Math.round((dateCell - 25569) * 86400 * 1000)));
@@ -530,10 +587,14 @@ router.post('/maintenance/import', requireRole('admin', 'koordinator'), upload.s
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { errors.push(`Baris ${i + 1}: tanggal "${dateCell}" tidak valid (pakai YYYY-MM-DD)`); continue; }
     if (!String(taskCell ?? '').trim()) { errors.push(`Baris ${i + 1}: tugas kosong`); continue; }
 
+    // Unit baris mengikuti unit perangkatnya (fallback unit efektif request).
+    const rowUnitId = dev.unit_id ?? insertUnitId(req);
+    if (rowUnitId == null) { errors.push(`Baris ${i + 1}: perangkat "${devCell}" belum punya unit — pilih unit terlebih dahulu`); continue; }
+
     await pool.query(
-      `INSERT INTO equipment_maintenance (device_id, plan_month, scheduled_date, task, note, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [deviceId, dateStr.slice(0, 7), dateStr, String(taskCell).trim(), String(noteCell ?? '').trim() || null, req.user.id]
+      `INSERT INTO equipment_maintenance (device_id, plan_month, scheduled_date, task, note, created_by, unit_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, dateStr.slice(0, 7), dateStr, String(taskCell).trim(), String(noteCell ?? '').trim() || null, req.user.id, rowUnitId]
     );
     inserted++;
   }

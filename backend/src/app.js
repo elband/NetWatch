@@ -37,6 +37,7 @@ import notificationPrefsRoutes from './routes/notificationPrefsRoutes.js';
 import slaRoutes from './routes/slaRoutes.js';
 import maintenanceRoutes from './routes/maintenanceRoutes.js';
 import skpRoutes from './routes/skpRoutes.js';
+import unitRoutes from './routes/unitRoutes.js';
 
 // Membangun & mengembalikan instance Express (tanpa listen/socket/worker) agar
 // bisa dipakai ulang oleh server.js (produksi) maupun test (supertest).
@@ -99,6 +100,7 @@ export function createApp() {
   app.get('/api/surat/pelaksana-sign/:token', getPelaksanaSignDoc);
   app.post('/api/surat/pelaksana-sign/:token', submitPelaksanaSign);
   app.use('/api/auth', authRoutes);
+  app.use('/api/units', unitRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/devices', deviceRoutes);
   app.use('/api/incidents', incidentRoutes);

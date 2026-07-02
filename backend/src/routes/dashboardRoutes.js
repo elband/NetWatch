@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
+import { unitScope, unitFilter } from '../middleware/unitScope.js';
 import { SLA_MINUTES, COORD_SLA_MINUTES, COORD_BREACH_MINUTES } from '../config/shifts.js';
 
 const router = Router();
-router.use(requireAuth);
+router.use(requireAuth, unitScope);
 
 // Deret harian per metrik performa koordinator (untuk sparkline).
 router.get('/coordinator-sparkline', async (req, res) => {
@@ -17,11 +18,13 @@ router.get('/coordinator-sparkline', async (req, res) => {
   const zeros = () => Array.from({ length: days }, () => 0);
   const out = { totalIn: zeros(), taken: zeros(), takenOnTime: zeros(), breaches: zeros(), reminders: zeros(), avgClaim: zeros() };
 
-  const [d1] = await pool.query('SELECT DAY(created_at) d, COUNT(*) c FROM incidents WHERE created_at>=? AND created_at<? GROUP BY DAY(created_at)', [start, end]);
+  const uf = unitFilter(req.unitId);
+  const ufn = unitFilter(req.unitId, 'i.unit_id'); // incident_notes di-scope via induknya (incidents)
+  const [d1] = await pool.query(`SELECT DAY(created_at) d, COUNT(*) c FROM incidents WHERE created_at>=? AND created_at<?${uf.clause} GROUP BY DAY(created_at)`, [start, end, ...uf.params]);
   for (const r of d1) out.totalIn[r.d - 1] = r.c;
-  const [d2] = await pool.query('SELECT DAY(taken_at) d, COUNT(*) c, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)>?) lt, AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at)) ac FROM incidents WHERE taken_at IS NOT NULL AND taken_at>=? AND taken_at<? GROUP BY DAY(taken_at)', [COORD_BREACH_MINUTES, COORD_BREACH_MINUTES, start, end]);
+  const [d2] = await pool.query(`SELECT DAY(taken_at) d, COUNT(*) c, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)>?) lt, AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at)) ac FROM incidents WHERE taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${uf.clause} GROUP BY DAY(taken_at)`, [COORD_BREACH_MINUTES, COORD_BREACH_MINUTES, start, end, ...uf.params]);
   for (const r of d2) { out.taken[r.d - 1] = r.c; out.takenOnTime[r.d - 1] = Number(r.ot) || 0; out.breaches[r.d - 1] = Number(r.lt) || 0; out.avgClaim[r.d - 1] = Math.round(r.ac || 0); }
-  const [d3] = await pool.query('SELECT DAY(created_at) d, COUNT(*) c FROM incident_notes WHERE created_at>=? AND created_at<? AND note LIKE ? GROUP BY DAY(created_at)', [start, end, `%Pengingat manual dikirim oleh ${req.user.name}%`]);
+  const [d3] = await pool.query(`SELECT DAY(n.created_at) d, COUNT(*) c FROM incident_notes n JOIN incidents i ON i.id = n.incident_id WHERE n.created_at>=? AND n.created_at<? AND n.note LIKE ?${ufn.clause} GROUP BY DAY(n.created_at)`, [start, end, `%Pengingat manual dikirim oleh ${req.user.name}%`, ...ufn.params]);
   for (const r of d3) out.reminders[r.d - 1] = r.c;
 
   res.json({ month, days, spark: out });
@@ -42,11 +45,14 @@ router.get('/coordinator', async (req, res) => {
   const end = `${nextY}-${String(nextM).padStart(2, '0')}-01`;
 
   // Semua insiden aktif (belum selesai), prioritas tinggi dulu lalu terlama.
+  const uf = unitFilter(req.unitId);
+  const ufi = unitFilter(req.unitId, 'i.unit_id');
   const [active] = await pool.query(
     `SELECT i.*, u.name AS tech_name FROM incidents i
        LEFT JOIN users u ON u.id = i.tech_id
-      WHERE i.status != 'selesai'
-      ORDER BY FIELD(i.priority,'kritis','tinggi','sedang'), i.created_at ASC`
+      WHERE i.status != 'selesai'${ufi.clause}
+      ORDER BY FIELD(i.priority,'kritis','tinggi','sedang'), i.created_at ASC`,
+    ufi.params
   );
 
   const overMin = (inc) => Math.floor((Date.now() - new Date(inc.created_at).getTime()) / 60000);
@@ -55,14 +61,15 @@ router.get('/coordinator', async (req, res) => {
   const inProgress = active.filter((i) => i.tech_id);
 
   const [doneTodayRows] = await pool.query(
-    "SELECT COUNT(*) c FROM incidents WHERE status='selesai' AND DATE(resolved_at) = CURDATE()"
+    `SELECT COUNT(*) c FROM incidents WHERE status='selesai' AND DATE(resolved_at) = CURDATE()${uf.clause}`,
+    uf.params
   );
 
   // Performa koordinator bulan ini: berapa insiden masuk, berapa diambil <=10m,
   // berapa telat/tak diambil dalam 10m (pelanggaran), rata-rata waktu ambil.
   const [monthRows] = await pool.query(
-    'SELECT created_at, taken_at FROM incidents WHERE created_at >= ? AND created_at < ?',
-    [start, end]
+    `SELECT created_at, taken_at FROM incidents WHERE created_at >= ? AND created_at < ?${uf.clause}`,
+    [start, end, ...uf.params]
   );
   // "Telat diambil" pada penilaian koordinator memakai ambang 30 menit.
   let totalIn = monthRows.length, takenOnTime = 0, breaches = 0, claimSum = 0, claimN = 0;
@@ -81,8 +88,9 @@ router.get('/coordinator', async (req, res) => {
 
   // "Mengingatkan": jumlah pengingat manual yang dikirim koordinator ini.
   const [remRows] = await pool.query(
-    'SELECT COUNT(*) c FROM incident_notes WHERE created_at >= ? AND created_at < ? AND note LIKE ?',
-    [start, end, `%Pengingat manual dikirim oleh ${req.user.name}%`]
+    `SELECT COUNT(*) c FROM incident_notes n JOIN incidents i ON i.id = n.incident_id
+      WHERE n.created_at >= ? AND n.created_at < ? AND n.note LIKE ?${ufi.clause}`,
+    [start, end, `%Pengingat manual dikirim oleh ${req.user.name}%`, ...ufi.params]
   );
   const reminders = remRows[0].c;
 
@@ -128,15 +136,16 @@ router.get('/monthly', async (req, res) => {
   const slaTrend = zeros();       // % tepat SLA per hari
   const mttrTrend = zeros();      // rata-rata durasi (menit) per hari
 
+  const uf = unitFilter(req.unitId);
   const [inRows] = await pool.query(
-    'SELECT DAY(created_at) d, COUNT(*) c FROM incidents WHERE created_at >= ? AND created_at < ? GROUP BY DAY(created_at)',
-    [start, end]
+    `SELECT DAY(created_at) d, COUNT(*) c FROM incidents WHERE created_at >= ? AND created_at < ?${uf.clause} GROUP BY DAY(created_at)`,
+    [start, end, ...uf.params]
   );
   for (const r of inRows) ticketsIn[r.d - 1] = r.c;
 
   const [doneRows] = await pool.query(
-    "SELECT DAY(resolved_at) d, COUNT(*) c, AVG(duration_min) avg FROM incidents WHERE status='selesai' AND resolved_at >= ? AND resolved_at < ? GROUP BY DAY(resolved_at)",
-    [start, end]
+    `SELECT DAY(resolved_at) d, COUNT(*) c, AVG(duration_min) avg FROM incidents WHERE status='selesai' AND resolved_at >= ? AND resolved_at < ?${uf.clause} GROUP BY DAY(resolved_at)`,
+    [start, end, ...uf.params]
   );
   for (const r of doneRows) {
     ticketsDone[r.d - 1] = r.c;
@@ -147,9 +156,9 @@ router.get('/monthly', async (req, res) => {
     `SELECT DAY(taken_at) d,
             SUM(TIMESTAMPDIFF(MINUTE, created_at, taken_at) <= ?) onTime,
             COUNT(*) tot
-       FROM incidents WHERE taken_at IS NOT NULL AND taken_at >= ? AND taken_at < ?
+       FROM incidents WHERE taken_at IS NOT NULL AND taken_at >= ? AND taken_at < ?${uf.clause}
       GROUP BY DAY(taken_at)`,
-    [SLA_MINUTES, start, end]
+    [SLA_MINUTES, start, end, ...uf.params]
   );
   for (const r of slaRows) slaTrend[r.d - 1] = r.tot ? Math.round((r.onTime / r.tot) * 100) : 0;
 

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaRaw } from '../jobs/waQueue.js';
 import { buildLaporanData } from './laporanRoutes.js';
 import { createNotification } from '../services/notify.js';
@@ -15,6 +16,7 @@ import { sendToSiKeren, isSiKerenConfigured } from '../services/siKerenService.j
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope); // scoping multi-unit — endpoint publik (by token) diekspor terpisah, tidak lewat router ini
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
@@ -42,7 +44,8 @@ async function withLampiran(rows) {
   return [...byId.values()];
 }
 
-async function nextNomor(conn, jenis = 'Nota Dinas') {
+// Penomoran surat PER UNIT: nomor urut (seq) dihitung terpisah untuk tiap unit.
+async function nextNomor(conn, jenis = 'Nota Dinas', unitId) {
   const [sRows] = await conn.query("SELECT setting_value FROM settings WHERE setting_key = 'lkp'");
   let lkp = {};
   try { const v = sRows[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { /* default */ }
@@ -50,17 +53,17 @@ async function nextNomor(conn, jenis = 'Nota Dinas') {
   const now = new Date();
   const bulan = now.getMonth() + 1, tahun = now.getFullYear();
   if (jenis === 'Surat Pernyataan') {
-    const [seqRows] = await conn.query("SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE tahun=? AND jenis='Surat Pernyataan'", [tahun]);
+    const [seqRows] = await conn.query("SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE tahun=? AND jenis='Surat Pernyataan' AND unit_id = ?", [tahun, unitId]);
     const seq = seqRows[0].s;
     return { nomor: `SPL/${String(seq).padStart(3, '0')}/TEKOPS/APTP-${tahun}`, seq, bulan, tahun };
   }
   if (jenis === 'Permintaan Barang') {
     // Nomor urut dikosongkan (titik-titik) agar diisi manual saat dokumen dicetak.
-    const [seqRows] = await conn.query("SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE tahun=? AND jenis='Permintaan Barang'", [tahun]);
+    const [seqRows] = await conn.query("SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE tahun=? AND jenis='Permintaan Barang' AND unit_id = ?", [tahun, unitId]);
     const seq = seqRows[0].s;
     return { nomor: `PL.108/..................../APTP/${tahun}`, seq, bulan, tahun };
   }
-  const [seqRows] = await conn.query('SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE bulan = ? AND tahun = ?', [bulan, tahun]);
+  const [seqRows] = await conn.query('SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE bulan = ? AND tahun = ? AND unit_id = ?', [bulan, tahun, unitId]);
   const seq = seqRows[0].s;
   return { nomor: `${String(seq).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`, seq, bulan, tahun };
 }
@@ -70,6 +73,8 @@ router.get('/', requireRole('koordinator', 'admin'), async (req, res) => {
   // Ambil nama pembuat TERKINI dari akun (created_by); fallback ke snapshot bila akun terhapus.
   let sql = 'SELECT n.*, u.name AS creator_current FROM nota_dinas n LEFT JOIN users u ON u.id = n.created_by WHERE 1=1';
   const params = [];
+  const uf = unitFilter(req.unitId, 'n.unit_id');
+  sql += uf.clause; params.push(...uf.params);
   if (req.query.signed === '1') sql += ' AND n.sign_token IS NOT NULL';
   sql += ' ORDER BY n.created_at DESC';
   const [rows] = await pool.query(sql, params);
@@ -81,20 +86,22 @@ router.get('/', requireRole('koordinator', 'admin'), async (req, res) => {
 router.post('/', requireRole('koordinator', 'admin'), upload.array('files', 10), async (req, res) => {
   const { jenis, hal, tujuan, body, report_month, incident_id: rawIncId } = req.body;
   if (!hal?.trim()) return res.status(400).json({ error: 'Hal/perihal surat wajib diisi.' });
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const incId = rawIncId?.trim() || null;
   if (incId) {
-    const [ch] = await pool.query('SELECT id FROM incidents WHERE id = ?', [incId]);
-    if (!ch[0]) return res.status(400).json({ error: `Insiden ${incId} tidak ditemukan.` });
+    const [ch] = await pool.query('SELECT id, unit_id FROM incidents WHERE id = ?', [incId]);
+    if (!ch[0] || !rowInUnit(ch[0], req.unitId)) return res.status(400).json({ error: `Insiden ${incId} tidak ditemukan.` });
   }
   const conn = await pool.getConnection();
   try {
-    const { nomor, seq, bulan, tahun } = await nextNomor(conn, (jenis || 'Nota Dinas').trim());
+    const { nomor, seq, bulan, tahun } = await nextNomor(conn, (jenis || 'Nota Dinas').trim(), unitId);
     const tanggal = new Date().toISOString().slice(0, 10);
     const rm = /^\d{4}-\d{2}$/.test(report_month || '') ? report_month : null;
     const [r] = await conn.query(
-      `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, tujuan, body, tanggal, created_by, creator_name, report_month, incident_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [(jenis || 'Nota Dinas').trim(), nomor, seq, bulan, tahun, hal.trim(), tujuan?.trim() || null, body?.trim() || null, tanggal, req.user.id, req.user.name, rm, incId]
+      `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, tujuan, body, tanggal, created_by, creator_name, report_month, incident_id, unit_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [(jenis || 'Nota Dinas').trim(), nomor, seq, bulan, tahun, hal.trim(), tujuan?.trim() || null, body?.trim() || null, tanggal, req.user.id, req.user.name, rm, incId, unitId]
     );
     for (const f of req.files || []) {
       await conn.query('INSERT INTO surat_lampiran (surat_id, file_url, filename, mimetype) VALUES (?, ?, ?, ?)',
@@ -112,11 +119,11 @@ router.patch('/:id/incident', requireRole('koordinator', 'admin'), async (req, r
   const id = Number(req.params.id);
   const incId = String(req.body.incident_id || '').trim() || null;
   if (incId) {
-    const [ch] = await pool.query('SELECT id FROM incidents WHERE id = ?', [incId]);
-    if (!ch[0]) return res.status(404).json({ error: `Insiden ${incId} tidak ditemukan.` });
+    const [ch] = await pool.query('SELECT id, unit_id FROM incidents WHERE id = ?', [incId]);
+    if (!ch[0] || !rowInUnit(ch[0], req.unitId)) return res.status(404).json({ error: `Insiden ${incId} tidak ditemukan.` });
   }
-  const [s] = await pool.query('SELECT id FROM nota_dinas WHERE id = ?', [id]);
-  if (!s[0]) return res.status(404).json({ error: 'Surat tidak ditemukan.' });
+  const [s] = await pool.query('SELECT id, unit_id FROM nota_dinas WHERE id = ?', [id]);
+  if (!s[0] || !rowInUnit(s[0], req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan.' });
   await pool.query('UPDATE nota_dinas SET incident_id = ? WHERE id = ?', [incId, id]);
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
   res.json({ surat: (await withLampiran(rows))[0] });
@@ -125,8 +132,8 @@ router.patch('/:id/incident', requireRole('koordinator', 'admin'), async (req, r
 // Tambah lampiran bukti dukung ke surat yang sudah ada.
 router.post('/:id/lampiran', requireRole('koordinator', 'admin'), upload.array('files', 10), async (req, res) => {
   const id = Number(req.params.id);
-  const [s] = await pool.query('SELECT id FROM nota_dinas WHERE id = ?', [id]);
-  if (!s[0]) return res.status(404).json({ error: 'Surat tidak ditemukan' });
+  const [s] = await pool.query('SELECT id, unit_id FROM nota_dinas WHERE id = ?', [id]);
+  if (!s[0] || !rowInUnit(s[0], req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan' });
   if (!req.files?.length) return res.status(400).json({ error: 'Tidak ada file diunggah.' });
   for (const f of req.files) {
     await pool.query('INSERT INTO surat_lampiran (surat_id, file_url, filename, mimetype) VALUES (?, ?, ?, ?)',
@@ -138,6 +145,9 @@ router.post('/:id/lampiran', requireRole('koordinator', 'admin'), upload.array('
 
 // Hapus satu lampiran.
 router.delete('/:id/lampiran/:lampId', requireRole('koordinator', 'admin'), async (req, res) => {
+  // Scope via induk: lampiran hanya boleh dihapus bila suratnya milik unit aktif.
+  const [s] = await pool.query('SELECT id, unit_id FROM nota_dinas WHERE id = ?', [Number(req.params.id)]);
+  if (!s[0] || !rowInUnit(s[0], req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan' });
   await pool.query('DELETE FROM surat_lampiran WHERE id = ? AND surat_id = ?', [Number(req.params.lampId), Number(req.params.id)]);
   res.json({ ok: true });
 });
@@ -188,6 +198,8 @@ router.delete('/kop', requireRole('koordinator', 'admin'), async (req, res) => {
 // Hapus surat keluar (beserta lampiran & berkasnya).
 router.delete('/:id', requireRole('koordinator', 'admin'), async (req, res) => {
   const id = Number(req.params.id);
+  const [s] = await pool.query('SELECT id, unit_id FROM nota_dinas WHERE id = ?', [id]);
+  if (!s[0] || !rowInUnit(s[0], req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan' });
   const [lamp] = await pool.query('SELECT file_url FROM surat_lampiran WHERE surat_id = ?', [id]);
   const [del] = await pool.query('DELETE FROM nota_dinas WHERE id = ?', [id]); // surat_lampiran terhapus via ON DELETE CASCADE
   if (!del.affectedRows) return res.status(404).json({ error: 'Surat tidak ditemukan' });
@@ -200,7 +212,7 @@ router.post('/:id/sign', requireRole('koordinator', 'admin'), async (req, res) =
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
   const s = rows[0];
-  if (!s) return res.status(404).json({ error: 'Surat tidak ditemukan' });
+  if (!s || !rowInUnit(s, req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan' });
   if (s.sign_token) return res.status(400).json({ error: 'Surat sudah disahkan (TTE).' });
   const name = (req.body.signerName || req.user.name || '').trim();
   const nip = (req.body.signerNip || '').trim() || null;
@@ -224,7 +236,7 @@ router.post('/:id/kirim-sikeren', requireRole('koordinator', 'admin'), async (re
   if (!isSiKerenConfigured()) return res.status(400).json({ error: 'Integrasi SiKeren belum dikonfigurasi di server (SIKEREN_BASE_URL & SIKEREN_API_KEY).' });
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [Number(req.params.id)]);
   const s = rows[0];
-  if (!s) return res.status(404).json({ error: 'Surat tidak ditemukan' });
+  if (!s || !rowInUnit(s, req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan' });
   try {
     const r = await pushSuratSiKeren(s);
     const [u] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [s.id]);
@@ -276,7 +288,7 @@ router.post('/:id/request-kasi', requireRole('koordinator', 'admin'), async (req
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
   const s = rows[0];
-  if (!s) return res.status(404).json({ error: 'Surat tidak ditemukan' });
+  if (!s || !rowInUnit(s, req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan' });
   const lkp = await getLkp();
   const phone = String(req.body.phone || lkp.kasie_phone || '').trim();
   if (!phone) return res.status(400).json({ error: 'Nomor WA Kepala Seksi belum diatur. Isi di Pengaturan (kasie_phone) atau kirim nomornya.' });
@@ -292,9 +304,10 @@ router.post('/:id/request-kasi', requireRole('koordinator', 'admin'), async (req
   res.json({ surat: (await withLampiran(u))[0], link, phone, waQueued });
 });
 
-// Daftar pegawai aktif untuk picker SPL.
+// Daftar pegawai aktif untuk picker SPL (dibatasi ke unit aktif).
 router.get('/users', async (req, res) => {
-  const [rows] = await pool.query('SELECT id, name, nip, emoji, pangkat, jabatan, phone FROM users WHERE active = 1 ORDER BY name');
+  const uf = unitFilter(req.unitId);
+  const [rows] = await pool.query(`SELECT id, name, nip, emoji, pangkat, jabatan, phone FROM users WHERE active = 1${uf.clause} ORDER BY name`, uf.params);
   res.json({ users: rows });
 });
 
@@ -303,7 +316,7 @@ router.post('/:id/notify-pelaksana', requireRole('koordinator', 'admin'), async 
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
   const s = rows[0];
-  if (!s) return res.status(404).json({ error: 'Surat tidak ditemukan.' });
+  if (!s || !rowInUnit(s, req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan.' });
   if (s.jenis !== 'Surat Pernyataan') return res.status(400).json({ error: 'Bukan Surat Pernyataan Lembur.' });
   let body = {};
   try { body = JSON.parse(s.body || '{}'); } catch {}
@@ -354,7 +367,8 @@ export async function getTtdDoc(req, res) {
     if (mm) rm = `${mm[2]}-${String(BLN.indexOf(mm[1].toLowerCase()) + 1).padStart(2, '0')}`;
   }
   let laporan = null;
-  if (rm) { try { laporan = await buildLaporanData(rm); } catch { laporan = null; } }
+  // Data laporan mengikuti unit pemilik surat (bukan scoping requester — akses token tetap publik).
+  if (rm) { try { laporan = await buildLaporanData(rm, s.unit_id ?? null); } catch { laporan = null; } }
   res.json({
     valid: true,
     doc: {

@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { unitFilter } from '../middleware/unitScope.js';
 
 // =============================================================================
 // slaController — laporan SLA / uptime per perangkat.
@@ -16,9 +17,11 @@ export async function getSlaReport(req, res) {
   const from = req.query.from || isoDate(fromDefault);
   const loc = (req.query.loc || '').trim();
 
+  const uf = unitFilter(req.unitId, 'd.unit_id');
   const params = [from, to];
   let locFilter = '';
   if (loc) { locFilter = ' AND d.loc = ?'; params.push(loc); }
+  params.push(...uf.params);
 
   // Agregasi uptime per perangkat dari rollup harian.
   const [rows] = await pool.query(
@@ -34,7 +37,7 @@ export async function getSlaReport(req, res) {
        FROM devices d
        LEFT JOIN device_uptime_daily u
          ON u.device_id = d.id AND u.day BETWEEN ? AND ?
-      WHERE 1=1${locFilter}
+      WHERE 1=1${locFilter}${uf.clause}
       GROUP BY d.id
       ORDER BY d.name ASC`,
     params
@@ -44,6 +47,7 @@ export async function getSlaReport(req, res) {
   const incParams = [from, to];
   let incLoc = '';
   if (loc) { incLoc = ' AND d.loc = ?'; incParams.push(loc); }
+  incParams.push(...uf.params);
   const [incRows] = await pool.query(
     `SELECT i.device_id,
             COUNT(*) AS incidents,
@@ -53,7 +57,7 @@ export async function getSlaReport(req, res) {
        FROM incidents i
        JOIN devices d ON d.id = i.device_id
       WHERE i.device_id IS NOT NULL
-        AND DATE(i.created_at) BETWEEN ? AND ?${incLoc}
+        AND DATE(i.created_at) BETWEEN ? AND ?${incLoc}${uf.clause}
       GROUP BY i.device_id`,
     incParams
   );

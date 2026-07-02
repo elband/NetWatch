@@ -109,14 +109,15 @@ export default function App() {
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/pelaporan-qr" element={<PelaporanQR />} />
             <Route path="/skp" element={<Skp />} />
+            {/* Koordinator = admin unitnya: kelola user & master data (ter-scope unit di backend). */}
+            <Route path="/users" element={<Users />} />
+            <Route path="/master" element={<MasterData />} />
           </Route>
 
-          {/* Admin saja */}
+          {/* Admin saja (pengaturan global sistem) */}
           <Route element={<ProtectedRoute roles={['admin']} />}>
-            <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/notification-settings" element={<NotificationSettings />} />
-            <Route path="/master" element={<MasterData />} />
           </Route>
         </Route>
       </Route>

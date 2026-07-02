@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { getIncident, listIncidents, createIncident, advanceStep, resolveIncident, getIncidentReport, saveIncidentReport, signIncidentReport, createNotaDinas, incidentQueue, dutyStatus, takeIncident, setAwaitingPart, remindIncident, addIncidentNote, listTeknisi, inviteCollaborators, deleteIncident } from '../controllers/incidentController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope } from '../middleware/unitScope.js';
 import { withIncidentDoc } from '../middleware/upload.js';
 import { validateBody } from '../middleware/validate.js';
 import { createIncidentSchema } from '../schemas/index.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 router.get('/', listIncidents);
 router.get('/queue', incidentQueue);
 router.get('/duty-status', dutyStatus);

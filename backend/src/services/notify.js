@@ -47,18 +47,26 @@ export async function createNotification({ userId, title, message = null, type, 
 }
 
 // Ambil id user aktif berdasarkan peran (cek kolom role ATAU array roles).
-export async function userIdsByRole(...roles) {
-  if (!roles.length) return [];
-  const cond = roles.map(() => '(role = ? OR JSON_CONTAINS(roles, ?))').join(' OR ');
+// opts.unitId: batasi ke satu unit — user lintas unit (unit_id NULL, super admin) tetap ikut.
+export async function userIdsByRole(roles, opts = {}) {
+  const list = Array.isArray(roles) ? roles : [roles];
+  if (!list.length) return [];
+  const cond = list.map(() => '(role = ? OR JSON_CONTAINS(roles, ?))').join(' OR ');
   const params = [];
-  for (const role of roles) { params.push(role, JSON.stringify(role)); }
-  const [rows] = await pool.query(`SELECT id FROM users WHERE active = 1 AND (${cond})`, params);
+  for (const role of list) { params.push(role, JSON.stringify(role)); }
+  let sql = `SELECT id FROM users WHERE active = 1 AND (${cond})`;
+  if (opts.unitId != null) {
+    sql += ' AND (unit_id IS NULL OR unit_id = ?)';
+    params.push(opts.unitId);
+  }
+  const [rows] = await pool.query(sql, params);
   return rows.map((x) => x.id);
 }
 
 // Kirim notifikasi yang sama ke semua user dengan peran tertentu.
-export async function notifyRoles(roles, payload) {
-  const ids = await userIdsByRole(...(Array.isArray(roles) ? roles : [roles]));
+// opts.unitId: hanya ke user unit tsb (+ super admin lintas unit).
+export async function notifyRoles(roles, payload, opts = {}) {
+  const ids = await userIdsByRole(roles, opts);
   return notifyUsers(ids, payload);
 }
 

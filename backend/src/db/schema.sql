@@ -1,6 +1,20 @@
 CREATE DATABASE IF NOT EXISTS netwatch_erp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE netwatch_erp;
 
+-- Unit kerja (multi-unit): Elektronika Bandara, Alat-Alat Besar, Water & Pump System.
+-- Semua data operasional ber-unit_id (ditambahkan via migrate.js). unit_id NULL pada
+-- users = super admin lintas unit; pada tabel master (locations/device_types/documents) = global.
+CREATE TABLE IF NOT EXISTS units (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(20) NOT NULL UNIQUE,
+  name VARCHAR(120) NOT NULL,
+  description VARCHAR(255) DEFAULT NULL,
+  icon VARCHAR(10) DEFAULT '🏢',
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(120) NOT NULL,

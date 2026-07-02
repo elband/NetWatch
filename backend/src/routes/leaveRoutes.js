@@ -5,12 +5,14 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(__dirname, '..', '..', 'uploads', 'leave');
@@ -29,9 +31,10 @@ router.post('/', upload.single('doc'), async (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(endDate || '')) return res.status(400).json({ error: 'Tanggal mulai & selesai wajib (YYYY-MM-DD).' });
   if (endDate < startDate) return res.status(400).json({ error: 'Tanggal selesai sebelum tanggal mulai.' });
   const docUrl = req.file ? `/uploads/leave/${req.file.filename}` : null;
+  // unit_id pengajuan = unit milik user sendiri.
   const [r] = await pool.query(
-    'INSERT INTO leave_requests (user_id, type, start_date, end_date, reason, doc_url) VALUES (?,?,?,?,?,?)',
-    [req.user.id, type, startDate, endDate, reason?.trim() || null, docUrl]
+    'INSERT INTO leave_requests (user_id, type, start_date, end_date, reason, doc_url, unit_id) VALUES (?,?,?,?,?,?,?)',
+    [req.user.id, type, startDate, endDate, reason?.trim() || null, docUrl, req.user.unit_id ?? insertUnitId(req)]
   );
   await audit(req.user, 'leave_request', 'leave', r.insertId, `${type} ${startDate}..${endDate}`);
   // Beri tahu koordinator.
@@ -51,8 +54,9 @@ router.get('/me', async (req, res) => {
 
 // Daftar pengajuan (koordinator/admin). ?status=menunggu untuk yang perlu ditinjau.
 router.get('/', requireRole('admin', 'koordinator'), async (req, res) => {
-  let sql = 'SELECT l.*, u.name, u.jabatan FROM leave_requests l JOIN users u ON u.id=l.user_id WHERE 1=1';
-  const params = [];
+  const uf = unitFilter(req.unitId, 'l.unit_id');
+  let sql = `SELECT l.*, u.name, u.jabatan FROM leave_requests l JOIN users u ON u.id=l.user_id WHERE 1=1${uf.clause}`;
+  const params = [...uf.params];
   if (['menunggu', 'disetujui', 'ditolak'].includes(req.query.status)) { sql += ' AND l.status=?'; params.push(req.query.status); }
   if (/^\d{4}-\d{2}$/.test(req.query.month)) { sql += " AND (DATE_FORMAT(l.start_date,'%Y-%m')=? OR DATE_FORMAT(l.end_date,'%Y-%m')=?)"; params.push(req.query.month, req.query.month); }
   sql += ' ORDER BY l.created_at DESC LIMIT 200';
@@ -64,8 +68,8 @@ router.get('/', requireRole('admin', 'koordinator'), async (req, res) => {
 router.patch('/:id', requireRole('admin', 'koordinator'), async (req, res) => {
   const status = req.body.status;
   if (!['disetujui', 'ditolak'].includes(status)) return res.status(400).json({ error: 'Status tidak valid.' });
-  const [[lv]] = await pool.query('SELECT l.*, u.name FROM leave_requests l JOIN users u ON u.id=l.user_id WHERE l.id=?', [Number(req.params.id)]);
-  if (!lv) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+  const [[lv]] = await pool.query('SELECT l.*, u.name, u.unit_id AS user_unit_id FROM leave_requests l JOIN users u ON u.id=l.user_id WHERE l.id=?', [Number(req.params.id)]);
+  if (!lv || !rowInUnit(lv, req.unitId)) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
   await pool.query('UPDATE leave_requests SET status=?, approved_by=?, approver_name=?, approved_at=NOW(), coord_note=? WHERE id=?',
     [status, req.user.id, req.user.name, req.body.note?.trim() || null, Number(req.params.id)]);
   // Dinas Luar / Cuti yang DISETUJUI → otomatis isi jadwal (DL / C) pada rentang tanggalnya.
@@ -74,9 +78,10 @@ router.patch('/:id', requireRole('admin', 'koordinator'), async (req, res) => {
     const st = shiftByType[lv.type];
     let cur = new Date(`${String(lv.start_date).slice(0, 10)}T00:00:00Z`);
     const last = new Date(`${String(lv.end_date).slice(0, 10)}T00:00:00Z`);
+    const shiftUnit = lv.user_unit_id ?? lv.unit_id ?? null; // unit shift = unit user target
     while (cur <= last) {
       const ds = cur.toISOString().slice(0, 10);
-      await pool.query('INSERT INTO shifts (user_id, shift_date, shift_type) VALUES (?,?,?) ON DUPLICATE KEY UPDATE shift_type=VALUES(shift_type)', [lv.user_id, ds, st]);
+      await pool.query('INSERT INTO shifts (user_id, shift_date, shift_type, unit_id) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE shift_type=VALUES(shift_type), unit_id=VALUES(unit_id)', [lv.user_id, ds, st, shiftUnit]);
       cur = new Date(cur.getTime() + 86400000);
     }
   }

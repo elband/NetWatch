@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaNotification, queueWaRaw } from '../jobs/waQueue.js';
 import { escapeLike } from '../utils/sql.js';
 import { notifyRoles } from '../services/notify.js';
@@ -39,12 +40,20 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
       const [rm] = await conn.query('SELECT * FROM rooms WHERE kode=? AND active=1', [b.room_code]);
       if (rm[0]) { roomId = rm[0].id; gedung = rm[0].gedung || gedung; ruang = `${rm[0].nama}${rm[0].lantai ? ` · ${rm[0].lantai}` : ''}${rm[0].area ? ` · ${rm[0].area}` : ''}`; }
     }
+    // Multi-unit: unit tujuan dari form (harus unit aktif); kosong/invalid
+    // default ke unit ELB (id 1) agar QR/link lama tetap berfungsi.
+    let unitId = 1;
+    const reqUnit = Number(b.unit_id);
+    if (Number.isInteger(reqUnit) && reqUnit > 0) {
+      const [un] = await conn.query('SELECT id FROM units WHERE id=? AND active=1', [reqUnit]);
+      if (un[0]) unitId = un[0].id;
+    }
     const id = await nextReportId(conn);
     await conn.query(
-      `INSERT INTO public_reports (id, nama, nip, unit, hp, judul, jenis, merk, inv, gedung, ruang, room_id, room_code, urgensi, detail, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'menunggu')`,
+      `INSERT INTO public_reports (id, nama, nip, unit, hp, judul, jenis, merk, inv, gedung, ruang, room_id, room_code, urgensi, detail, status, unit_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'menunggu', ?)`,
       [id, b.nama?.trim() || 'Pelapor Umum', b.nip || null, b.unit?.trim() || (ruang ? `Pengguna ${ruang}` : 'Umum'), b.hp || '-', b.judul.trim(), b.jenis,
-        b.merk || null, b.inv || null, gedung, ruang, roomId, b.room_code || null, ['kritis', 'tinggi', 'sedang', 'rendah'].includes(b.urgensi) ? b.urgensi : 'sedang', b.detail]
+        b.merk || null, b.inv || null, gedung, ruang, roomId, b.room_code || null, ['kritis', 'tinggi', 'sedang', 'rendah'].includes(b.urgensi) ? b.urgensi : 'sedang', b.detail, unitId]
     );
     for (const f of req.files || []) await conn.query('INSERT INTO report_attachments (report_id, file_url, mimetype) VALUES (?,?,?)', [id, `/uploads/reports/${f.filename}`, f.mimetype]);
     // Tiket otomatis → insiden ke pool + notifikasi on-duty.
@@ -52,7 +61,7 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
     const deviceName = `${b.jenis}${ruang ? ` - ${ruang}` : ''}`;
     const issue = `${b.judul.trim()} (Laporan QR ${id})`;
     const prio = b.urgensi === 'kritis' ? 'kritis' : b.urgensi === 'tinggi' ? 'tinggi' : 'sedang';
-    await conn.query(`INSERT INTO incidents (id, device_name, ip, issue, priority, tech_id, status, step, source, public_report_id) VALUES (?,?,?,?,?,NULL,'aktif',0,'public_report',?)`, [incId, deviceName, 'N/A (Laporan QR)', issue, prio, id]);
+    await conn.query(`INSERT INTO incidents (id, device_name, ip, issue, priority, tech_id, status, step, source, public_report_id, unit_id) VALUES (?,?,?,?,?,NULL,'aktif',0,'public_report',?,?)`, [incId, deviceName, 'N/A (Laporan QR)', issue, prio, id, unitId]);
     await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?,0,?)', [incId, `Laporan fasilitas via QR (${b.room_code || '-'}): ${b.detail}`]);
     await conn.query('UPDATE public_reports SET incident_id=? WHERE id=?', [incId, id]);
     try { await snapshotAndNotifyOnDuty(conn, { id: incId, priority: prio, deviceName, issue }); } catch { /* abaikan */ }
@@ -85,14 +94,18 @@ router.get('/track/:id', async (req, res) => {
 });
 
 router.use(requireAuth);
+router.use(unitScope);
 
 router.get('/', requireRole('admin', 'koordinator'), async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM public_reports ORDER BY created_at DESC');
+  const uf = unitFilter(req.unitId);
+  const [rows] = await pool.query(`SELECT * FROM public_reports WHERE 1=1${uf.clause} ORDER BY created_at DESC`, uf.params);
   res.json({ reports: rows });
 });
 
 router.put('/:id', requireRole('admin', 'koordinator'), async (req, res) => {
   const { status, techNote } = req.body;
+  const [chk] = await pool.query('SELECT id, unit_id FROM public_reports WHERE id = ?', [req.params.id]);
+  if (!chk[0] || !rowInUnit(chk[0], req.unitId)) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
   await pool.query('UPDATE public_reports SET status = COALESCE(?, status), tech_note = COALESCE(?, tech_note) WHERE id = ?', [
     status || null, techNote ?? null, req.params.id,
   ]);
@@ -106,7 +119,7 @@ router.post('/:id/assign-incident', requireRole('admin', 'koordinator'), async (
   const { techId } = req.body;
   const [rows] = await pool.query('SELECT * FROM public_reports WHERE id = ?', [req.params.id]);
   const report = rows[0];
-  if (!report) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
+  if (!report || !rowInUnit(report, req.unitId)) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
 
   const assigned = techId || null;
   const priority = report.urgensi === 'rendah' ? 'sedang' : report.urgensi;
@@ -120,10 +133,13 @@ router.post('/:id/assign-incident', requireRole('admin', 'koordinator'), async (
       locationId = locRows[0]?.id || null;
     }
     const incId = await nextIncidentId(conn);
+    // Unit insiden mengikuti unit laporan publik; laporan lama tanpa unit
+    // memakai unit efektif request sebagai cadangan.
+    const incUnit = report.unit_id ?? insertUnitId(req);
     await conn.query(
-      `INSERT INTO incidents (id, device_name, ip, location_id, issue, priority, tech_id, status, step, source, public_report_id, taken_at)
-       VALUES (?, ?, 'N/A (Laporan Publik)', ?, ?, ?, ?, ?, 0, 'public_report', ?, ${assigned ? 'NOW()' : 'NULL'})`,
-      [incId, deviceName, locationId, report.judul, priority, assigned, assigned ? 'proses' : 'aktif', report.id]
+      `INSERT INTO incidents (id, device_name, ip, location_id, issue, priority, tech_id, status, step, source, public_report_id, unit_id, taken_at)
+       VALUES (?, ?, 'N/A (Laporan Publik)', ?, ?, ?, ?, ?, 0, 'public_report', ?, ?, ${assigned ? 'NOW()' : 'NULL'})`,
+      [incId, deviceName, locationId, report.judul, priority, assigned, assigned ? 'proses' : 'aktif', report.id, incUnit]
     );
     await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
       incId, `Dibuat dari laporan publik ${report.id} oleh ${report.nama} (${report.unit}).`,
@@ -159,15 +175,17 @@ const DEMO_REPORTS = [
 ];
 
 router.post('/seed-demo', requireRole('admin'), async (req, res) => {
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const conn = await pool.getConnection();
   try {
     let created = 0;
     for (const r of DEMO_REPORTS) {
       const id = await nextReportId(conn);
       await conn.query(
-        `INSERT INTO public_reports (id, nama, nip, unit, hp, judul, jenis, merk, inv, gedung, ruang, urgensi, detail, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'menunggu')`,
-        [id, r.nama, r.nip, r.unit, r.hp, r.judul, r.jenis, r.merk, r.inv, r.gedung, r.ruang, r.urgensi, r.detail]
+        `INSERT INTO public_reports (id, nama, nip, unit, hp, judul, jenis, merk, inv, gedung, ruang, urgensi, detail, status, unit_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'menunggu', ?)`,
+        [id, r.nama, r.nip, r.unit, r.hp, r.judul, r.jenis, r.merk, r.inv, r.gedung, r.ruang, r.urgensi, r.detail, unitId]
       );
       created++;
     }
@@ -178,7 +196,8 @@ router.post('/seed-demo', requireRole('admin'), async (req, res) => {
 });
 
 router.delete('/', requireRole('admin'), async (req, res) => {
-  const [result] = await pool.query('DELETE FROM public_reports');
+  const uf = unitFilter(req.unitId);
+  const [result] = await pool.query(`DELETE FROM public_reports WHERE 1=1${uf.clause}`, uf.params);
   res.json({ deleted: result.affectedRows });
 });
 

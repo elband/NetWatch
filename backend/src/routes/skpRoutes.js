@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { audit } from '../services/audit.js';
 import { DATA_SOURCES, buildSnapshot } from '../services/skpDataSources.js';
 
@@ -68,7 +69,8 @@ async function fetchFull(skp, bulanParam) {
     bulan,
     months,
     bulanInfo: bi || { bulan, status: 'draft', tanggal_pengajuan: null },
-    laporanBulanan: await signedLaporanBulanan(bulan),
+    // Laporan bulanan pendukung mengikuti unit pemilik SKP (bukan unit requester).
+    laporanBulanan: await signedLaporanBulanan(bulan, skp.unit_id ?? null),
     rhk: rhks.map((r) => ({ ...r, indikator: indFull.filter((i) => i.rhk_id === r.id) })),
   };
 }
@@ -80,13 +82,14 @@ function publicBuktiView(b) {
 
 // Dokumen Laporan Bulanan ber-TTE LENGKAP (Koordinator + Kepala Seksi) untuk satu bulan.
 // Dipakai sebagai dokumen resmi pendukung di halaman publik SKP/bukti. Unduh PDF via verify-tte.
-async function signedLaporanBulanan(bulan) {
+async function signedLaporanBulanan(bulan, unitId = null) {
   if (!isMonth(bulan)) return null;
+  const uf = unitFilter(unitId);
   const [rows] = await pool.query(
     `SELECT nomor, hal, sign_token, signer_name, signed_at, kasi_sign_token, kasi_signer_name, kasi_signed_at
        FROM nota_dinas
-      WHERE report_month=? AND sign_token IS NOT NULL AND kasi_status='disetujui' AND kasi_sign_token IS NOT NULL
-      ORDER BY signed_at DESC, created_at DESC LIMIT 1`, [bulan]);
+      WHERE report_month=? AND sign_token IS NOT NULL AND kasi_status='disetujui' AND kasi_sign_token IS NOT NULL${uf.clause}
+      ORDER BY signed_at DESC, created_at DESC LIMIT 1`, [bulan, ...uf.params]);
   const s = rows[0];
   if (!s) return null;
   return {
@@ -138,19 +141,21 @@ router.get('/bukti/public/:token', async (req, res) => {
 
 // =================== TERPROTEKSI (admin/koordinator) ===================
 router.use(requireAuth);
+router.use(unitScope); // scoping multi-unit — route publik di atas tidak terpengaruh
 router.use(requireRole('admin', 'koordinator'));
 
-async function getOwned(skpId, user) {
+async function getOwned(skpId, user, unitId) {
   const [rows] = await pool.query('SELECT * FROM skp WHERE id=?', [Number(skpId)]);
   const skp = rows[0];
   if (!skp) return { error: 404 };
+  if (!rowInUnit(skp, unitId)) return { error: 404 }; // beda unit = seolah tidak ada
   if (skp.created_by !== user.id && !isAdmin(user)) return { error: 403 };
   return { skp };
 }
-async function ownedByChild(table, childId, user) {
+async function ownedByChild(table, childId, user, unitId) {
   const [rows] = await pool.query(`SELECT skp_id FROM ${table} WHERE id=?`, [Number(childId)]);
   if (!rows[0]) return { error: 404 };
-  return getOwned(rows[0].skp_id, user);
+  return getOwned(rows[0].skp_id, user, unitId);
 }
 const reply = async (res, skp, bulan, status = 200) => res.status(status).json({ skp: await fetchFull(skp, bulan) });
 
@@ -158,9 +163,11 @@ router.get('/data-sources', (req, res) => res.json({ sources: DATA_SOURCES }));
 
 // Daftar SKP milik sendiri (admin: semua).
 router.get('/', async (req, res) => {
-  let sql = 'SELECT s.*, (SELECT COUNT(*) FROM skp_rhk r WHERE r.skp_id=s.id) AS jml_rhk, (SELECT COUNT(*) FROM skp_bukti b WHERE b.skp_id=s.id) AS jml_bukti FROM skp s';
+  let sql = 'SELECT s.*, (SELECT COUNT(*) FROM skp_rhk r WHERE r.skp_id=s.id) AS jml_rhk, (SELECT COUNT(*) FROM skp_bukti b WHERE b.skp_id=s.id) AS jml_bukti FROM skp s WHERE 1=1';
   const params = [];
-  if (!isAdmin(req.user)) { sql += ' WHERE s.created_by=?'; params.push(req.user.id); }
+  const uf = unitFilter(req.unitId, 's.unit_id');
+  sql += uf.clause; params.push(...uf.params);
+  if (!isAdmin(req.user)) { sql += ' AND s.created_by=?'; params.push(req.user.id); }
   sql += ' ORDER BY s.tahun DESC, s.id DESC';
   const [rows] = await pool.query(sql, params);
   res.json({ skp: rows });
@@ -170,14 +177,16 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const b = req.body;
   if (!b.periode?.trim()) return res.status(400).json({ error: 'Periode wajib diisi.' });
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const tahun = Number(b.tahun) || new Date().getFullYear();
   const [r] = await pool.query(
     `INSERT INTO skp (periode, tahun, pendekatan, pegawai_id, pegawai_nama, pegawai_nip, pegawai_jabatan, pegawai_unit,
-       penilai_nama, penilai_nip, penilai_jabatan, public_token, created_by, creator_name)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       penilai_nama, penilai_nip, penilai_jabatan, public_token, created_by, creator_name, unit_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [b.periode.trim(), tahun, b.pendekatan || 'Kuantitatif', b.pegawai_id || req.user.id,
       b.pegawai_nama || req.user.name, b.pegawai_nip || null, b.pegawai_jabatan || null, b.pegawai_unit || 'Unit Elektronika Bandara',
-      b.penilai_nama || null, b.penilai_nip || null, b.penilai_jabatan || null, genToken(), req.user.id, req.user.name]
+      b.penilai_nama || null, b.penilai_nip || null, b.penilai_jabatan || null, genToken(), req.user.id, req.user.name, unitId]
   );
   await audit(req.user, 'skp_create', 'skp', r.insertId, `${b.periode} ${tahun}`);
   const [rows] = await pool.query('SELECT * FROM skp WHERE id=?', [r.insertId]);
@@ -186,14 +195,14 @@ router.post('/', async (req, res) => {
 
 // Detail SKP untuk bulan tertentu (?bulan=YYYY-MM).
 router.get('/:id', async (req, res) => {
-  const { skp, error } = await getOwned(req.params.id, req.user);
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
   if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
   await reply(res, skp, req.query.bulan);
 });
 
 // Ubah identitas header SKP (tahunan).
 router.put('/:id', async (req, res) => {
-  const { skp, error } = await getOwned(req.params.id, req.user);
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
   if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
   const b = req.body;
   await pool.query(
@@ -209,7 +218,7 @@ router.put('/:id', async (req, res) => {
 
 // Status penilaian PER BULAN (draft → diajukan → dinilai). 'diajukan' isi tanggal bila kosong.
 router.patch('/:id/bulan-status', async (req, res) => {
-  const { skp, error } = await getOwned(req.params.id, req.user);
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
   if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
   const bulan = pickBulan(req);
   const next = req.body.status;
@@ -226,7 +235,7 @@ router.patch('/:id/bulan-status', async (req, res) => {
 });
 
 router.post('/:id/reshare', async (req, res) => {
-  const { skp, error } = await getOwned(req.params.id, req.user);
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
   if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
   const token = genToken();
   await pool.query('UPDATE skp SET public_token=? WHERE id=?', [token, skp.id]);
@@ -234,7 +243,7 @@ router.post('/:id/reshare', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const { skp, error } = await getOwned(req.params.id, req.user);
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
   if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
   const [files] = await pool.query('SELECT file_url FROM skp_bukti WHERE skp_id=? AND file_url IS NOT NULL', [skp.id]);
   await pool.query('DELETE FROM skp WHERE id=?', [skp.id]); // cascade RHK/indikator/realisasi/bukti/bulan
@@ -245,7 +254,7 @@ router.delete('/:id', async (req, res) => {
 
 // ===== RHK (rencana tahunan) =====
 router.post('/:id/rhk', async (req, res) => {
-  const { skp, error } = await getOwned(req.params.id, req.user);
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
   if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
   if (!req.body.rhk?.trim()) return res.status(400).json({ error: 'Teks RHK wajib diisi.' });
   const klas = KLASIFIKASI.includes(req.body.klasifikasi) ? req.body.klasifikasi : 'utama';
@@ -254,7 +263,7 @@ router.post('/:id/rhk', async (req, res) => {
   await reply(res, skp, pickBulan(req), 201);
 });
 router.put('/rhk/:rhkId', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user);
+  const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   const b = req.body;
   await pool.query('UPDATE skp_rhk SET rhk=COALESCE(?,rhk), klasifikasi=COALESCE(?,klasifikasi), urutan=COALESCE(?,urutan) WHERE id=?',
@@ -262,7 +271,7 @@ router.put('/rhk/:rhkId', async (req, res) => {
   await reply(res, skp, pickBulan(req));
 });
 router.delete('/rhk/:rhkId', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user);
+  const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   await pool.query('DELETE FROM skp_rhk WHERE id=?', [Number(req.params.rhkId)]);
   await reply(res, skp, pickBulan(req));
@@ -270,7 +279,7 @@ router.delete('/rhk/:rhkId', async (req, res) => {
 
 // ===== Indikator (rencana tahunan: aspek/indikator/target/renaksi) =====
 router.post('/rhk/:rhkId/indikator', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user);
+  const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   if (!req.body.indikator?.trim()) return res.status(400).json({ error: 'Teks indikator wajib diisi.' });
   const aspek = ASPEK.includes(req.body.aspek) ? req.body.aspek : 'Kuantitas';
@@ -282,7 +291,7 @@ router.post('/rhk/:rhkId/indikator', async (req, res) => {
   await reply(res, skp, pickBulan(req), 201);
 });
 router.put('/indikator/:indId', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user);
+  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   const b = req.body;
   await pool.query(
@@ -292,7 +301,7 @@ router.put('/indikator/:indId', async (req, res) => {
   await reply(res, skp, pickBulan(req));
 });
 router.delete('/indikator/:indId', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user);
+  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   await pool.query('DELETE FROM skp_indikator WHERE id=?', [Number(req.params.indId)]);
   await reply(res, skp, pickBulan(req));
@@ -300,7 +309,7 @@ router.delete('/indikator/:indId', async (req, res) => {
 
 // ===== Realisasi & feedback PER BULAN (upsert) =====
 router.put('/indikator/:indId/realisasi', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user);
+  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   const bulan = pickBulan(req);
   if (!isMonth(bulan)) return res.status(400).json({ error: 'Bulan tidak valid.' });
@@ -314,7 +323,7 @@ router.put('/indikator/:indId/realisasi', async (req, res) => {
 
 // ===== Bukti Dukung PER BULAN (tautan / berkas) =====
 router.post('/indikator/:indId/bukti', upload.single('file'), async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user);
+  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   if (!req.body.deskripsi?.trim()) return res.status(400).json({ error: 'Deskripsi bukti wajib diisi.' });
   const bulan = pickBulan(req);
@@ -328,7 +337,7 @@ router.post('/indikator/:indId/bukti', upload.single('file'), async (req, res) =
 });
 // Bukti tipe 'data': snapshot beku dari sumber data aplikasi NetWatch. Bulan bukti = periode snapshot.
 router.post('/indikator/:indId/bukti-data', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user);
+  const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   const source = req.body.source;
   const srcDef = DATA_SOURCES.find((s) => s.key === source);
@@ -352,7 +361,7 @@ router.post('/indikator/:indId/bukti-data', async (req, res) => {
 });
 
 router.put('/bukti/:buktiId', upload.single('file'), async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_bukti', req.params.buktiId, req.user);
+  const { skp, error } = await ownedByChild('skp_bukti', req.params.buktiId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   const [cur] = await pool.query('SELECT file_url, bulan FROM skp_bukti WHERE id=?', [Number(req.params.buktiId)]);
   const fileUrl = req.file ? `/uploads/skp/${req.file.filename}` : cur[0]?.file_url || null;
@@ -363,7 +372,7 @@ router.put('/bukti/:buktiId', upload.single('file'), async (req, res) => {
   await reply(res, skp, cur[0]?.bulan);
 });
 router.delete('/bukti/:buktiId', async (req, res) => {
-  const { skp, error } = await ownedByChild('skp_bukti', req.params.buktiId, req.user);
+  const { skp, error } = await ownedByChild('skp_bukti', req.params.buktiId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   const [cur] = await pool.query('SELECT file_url, bulan FROM skp_bukti WHERE id=?', [Number(req.params.buktiId)]);
   await pool.query('DELETE FROM skp_bukti WHERE id=?', [Number(req.params.buktiId)]);

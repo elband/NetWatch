@@ -195,6 +195,42 @@ async function migrate() {
     }
   }
 
+  // ── Multi-unit (Fase 1): seed unit + kolom unit_id + backfill data lama ke ELB ──
+  const UNITS = [
+    ['ELB', 'Elektronika Bandara', 'Fasilitas elektronika & jaringan bandara', '🖥️'],
+    ['AAB', 'Alat-Alat Besar', 'Kendaraan & alat berat bandara', '🚜'],
+    ['WPS', 'Water & Pump System', 'Pompa, reservoir & jaringan air bandara', '💧'],
+  ];
+  for (const [code, name, description, icon] of UNITS) {
+    await conn.query('INSERT IGNORE INTO units (code, name, description, icon) VALUES (?,?,?,?)', [code, name, description, icon]);
+  }
+  const [[elb]] = await conn.query("SELECT id FROM units WHERE code = 'ELB' LIMIT 1");
+
+  // Tabel operasional: wajib ber-unit (backfill ke ELB).
+  // Tabel master global (locations, device_types, documents, wa_log): unit_id NULL = milik bersama, TANPA backfill.
+  const UNIT_SCOPED = [
+    'users', 'devices', 'incidents', 'shifts', 'attendance', 'absence_reviews', 'leave_requests',
+    'maintenance_windows', 'public_reports', 'pengajuan_diklat', 'diklat_history',
+    'kegiatan_non_rutin', 'nota_dinas', 'activities', 'equipment_inspections',
+    'equipment_maintenance', 'equipment_poweron', 'skp', 'assets', 'services', 'rooms',
+  ];
+  const UNIT_GLOBAL = ['locations', 'device_types', 'documents', 'wa_log'];
+  for (const table of [...UNIT_SCOPED, ...UNIT_GLOBAL]) {
+    await addColumnIfMissing(conn, env.db.database, table, 'unit_id', 'INT DEFAULT NULL');
+    await addIndexIfMissing(conn, env.db.database, table, `idx_${table}_unit`, '(unit_id)');
+  }
+  for (const table of UNIT_SCOPED) {
+    if (table === 'users') {
+      // Super admin (role admin) tetap NULL = lintas unit; sisanya masuk ELB.
+      await conn.query(
+        "UPDATE users SET unit_id = ? WHERE unit_id IS NULL AND role <> 'admin' AND NOT JSON_CONTAINS(COALESCE(roles, JSON_ARRAY()), JSON_QUOTE('admin'))",
+        [elb.id]
+      );
+    } else {
+      await conn.query(`UPDATE \`${table}\` SET unit_id = ? WHERE unit_id IS NULL`, [elb.id]);
+    }
+  }
+
   // ── Index untuk performa query (dashboard, laporan bulanan, filter status) ──
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_created_at', '(created_at)');
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_status', '(status)');

@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter } from '../middleware/unitScope.js';
 import { SLA_MINUTES, COORD_BREACH_MINUTES } from '../config/shifts.js';
 import { metricsFor } from './performaRoutes.js';
 import { buildLogbook } from './logbookRoutes.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope); // scoping multi-unit
 
 const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -16,7 +18,8 @@ const OPS_HOURS_PER_DAY = 15;
 
 // Laporan Bulanan format resmi (Kemenhub) — semua seksi dihimpun dari data unit.
 // Dipakai oleh route ber-auth /bulanan & oleh halaman TTD publik (Kepala Seksi).
-export async function buildLaporanData(monthIn) {
+// unitId: batasi data ke satu unit (null = semua unit, mode Super Admin).
+export async function buildLaporanData(monthIn, unitId = null) {
   const month = /^\d{4}-\d{2}$/.test(monthIn)
     ? monthIn
     : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -36,32 +39,37 @@ export async function buildLaporanData(monthIn) {
   const dmy = (d) => { if (!d) return '-'; const t = new Date(d); return `${pad2(t.getDate())}-${pad2(t.getMonth() + 1)}-${t.getFullYear()}`; };
   const jam = (d) => { if (!d) return '-'; const t = new Date(d); return `${pad2(t.getHours())}:${pad2(t.getMinutes())}`; };
 
+  // Filter unit — klausa kosong bila unitId null (semua unit).
+  const uf = unitFilter(unitId); // kolom polos `unit_id`
+
   // ===== I. Data Personil Teknisi =====
   const [personil] = await pool.query(
     // Urutan: koordinator dulu, OJT paling bawah, sisanya per nama.
-    "SELECT name, nip, jabatan, pangkat, ttl FROM users WHERE active=1 AND (role='teknisi' OR role='koordinator' OR JSON_CONTAINS(roles,'\"teknisi\"') OR JSON_CONTAINS(roles,'\"koordinator\"')) ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"')) DESC, (jabatan LIKE '%OJT%') ASC, name"
+    `SELECT name, nip, jabatan, pangkat, ttl FROM users WHERE active=1 AND (role='teknisi' OR role='koordinator' OR JSON_CONTAINS(roles,'"teknisi"') OR JSON_CONTAINS(roles,'"koordinator"'))${uf.clause} ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"')) DESC, (jabatan LIKE '%OJT%') ASC, name`,
+    uf.params
   );
 
   // ===== II. Daftar / Inventaris Peralatan =====
-  const [inventaris] = await pool.query('SELECT id, name, type, merk, serial, tahun, loc, status, category, ip FROM devices ORDER BY category, name');
+  const [inventaris] = await pool.query(`SELECT id, name, type, merk, serial, tahun, loc, status, category, ip FROM devices WHERE 1=1${uf.clause} ORDER BY category, name`, uf.params);
   const kondisi = (s) => (s === 'online' ? 'Baik' : s === 'warning' ? 'Perlu Perhatian' : 'Tidak Aktif/Rusak');
   // Perangkat tanpa IP tidak bisa dipantau via ping, sehingga status 'offline' dari
   // monitoring TIDAK bermakna (selalu offline). Untuk perangkat ini, kondisi rusak
   // hanya ditentukan oleh insiden/laporan yang tercatat untuk perangkat tsb — bukan
   // status ping. Perangkat ber-IP tetap memakai status pemantauan seperti biasa.
-  const [openIncRows] = await pool.query("SELECT DISTINCT device_id FROM incidents WHERE device_id IS NOT NULL AND status<>'selesai'");
+  const [openIncRows] = await pool.query(`SELECT DISTINCT device_id FROM incidents WHERE device_id IS NOT NULL AND status<>'selesai'${uf.clause}`, uf.params);
   const openIncSet = new Set(openIncRows.map((r) => r.device_id));
   const hasIp = (dev) => !!(dev.ip && String(dev.ip).trim() && String(dev.ip).trim().toUpperCase() !== 'N/A');
   const devKondisi = (dev) => (hasIp(dev) ? kondisi(dev.status) : (openIncSet.has(dev.id) ? 'Tidak Aktif/Rusak' : 'Baik'));
 
   // ===== III. Jadwal Dinas — bulan ini & bulan berikutnya =====
+  const ufShift = unitFilter(unitId, 's.unit_id');
   const buildJadwal = async (rangeStart, rangeEnd, days, label) => {
     const [rows] = await pool.query(
       // Urutan baris jadwal mengikuti Data Personil: koordinator dulu, OJT paling bawah, lalu per nama.
       `SELECT s.user_id, u.name, DAY(s.shift_date) d, s.shift_type FROM shifts s JOIN users u ON u.id=s.user_id
-        WHERE s.shift_date>=? AND s.shift_date<?
+        WHERE s.shift_date>=? AND s.shift_date<?${ufShift.clause}
         ORDER BY (u.role='koordinator' OR JSON_CONTAINS(u.roles,'"koordinator"')) DESC, (u.jabatan LIKE '%OJT%') ASC, u.name`,
-      [rangeStart, rangeEnd]
+      [rangeStart, rangeEnd, ...ufShift.params]
     );
     const map = new Map();
     for (const r of rows) {
@@ -75,24 +83,29 @@ export async function buildLaporanData(monthIn) {
   const jadwal = await buildJadwal(`${nextMonthKey}-01`, nextEnd, nextDays, nextMonthName);
 
   // ===== IV. Laporan Kegiatan dalam 1 Bulan (log harian) =====
+  const ufE = unitFilter(unitId, 'e.unit_id');
+  const ufI = unitFilter(unitId, 'i.unit_id');
+  const ufA = unitFilter(unitId, 'a.unit_id');
+  const ufM = unitFilter(unitId, 'm.unit_id');
   const [insp] = await pool.query(
-    'SELECT e.inspect_date, e.slot, e.status, e.inspector_name, d.name dev FROM equipment_inspections e LEFT JOIN devices d ON d.id=e.device_id WHERE e.inspect_date>=? AND e.inspect_date<? ORDER BY e.inspect_date, e.slot',
-    [start, end]
+    `SELECT e.inspect_date, e.slot, e.status, e.inspector_name, d.name dev FROM equipment_inspections e LEFT JOIN devices d ON d.id=e.device_id WHERE e.inspect_date>=? AND e.inspect_date<?${ufE.clause} ORDER BY e.inspect_date, e.slot`,
+    [start, end, ...ufE.params]
   );
   const [incDay] = await pool.query(
-    "SELECT i.created_at, i.resolved_at, i.device_name, i.issue, i.status, u.name tech, r.hasil FROM incidents i LEFT JOIN users u ON u.id=i.tech_id LEFT JOIN incident_reports r ON r.incident_id=i.id WHERE (i.created_at>=? AND i.created_at<?) OR (i.resolved_at>=? AND i.resolved_at<?) ORDER BY i.created_at",
-    [start, end, start, end]
+    // Kurung ekstra: kondisi OR asli dibungkus agar filter unit berlaku ke seluruh baris.
+    `SELECT i.created_at, i.resolved_at, i.device_name, i.issue, i.status, u.name tech, r.hasil FROM incidents i LEFT JOIN users u ON u.id=i.tech_id LEFT JOIN incident_reports r ON r.incident_id=i.id WHERE ((i.created_at>=? AND i.created_at<?) OR (i.resolved_at>=? AND i.resolved_at<?))${ufI.clause} ORDER BY i.created_at`,
+    [start, end, start, end, ...ufI.params]
   );
   const [actDay] = await pool.query(
-    'SELECT a.activity_date, a.type, a.title, a.start_time, u.name FROM activities a JOIN users u ON u.id=a.user_id WHERE a.activity_date>=? AND a.activity_date<? ORDER BY a.activity_date',
-    [start, end]
+    `SELECT a.activity_date, a.type, a.title, a.start_time, u.name FROM activities a JOIN users u ON u.id=a.user_id WHERE a.activity_date>=? AND a.activity_date<?${ufA.clause} ORDER BY a.activity_date`,
+    [start, end, ...ufA.params]
   );
   const [maintDay] = await pool.query(
     `SELECT m.scheduled_date, m.done_at, m.task, m.status, d.name dev, ub.name done_by, cb.name created_by
        FROM equipment_maintenance m LEFT JOIN devices d ON d.id=m.device_id
        LEFT JOIN users ub ON ub.id=m.done_by LEFT JOIN users cb ON cb.id=m.created_by
-      WHERE m.plan_month=? OR (m.done_at>=? AND m.done_at<?) ORDER BY m.scheduled_date`,
-    [month, start, end]
+      WHERE (m.plan_month=? OR (m.done_at>=? AND m.done_at<?))${ufM.clause} ORDER BY m.scheduled_date`,
+    [month, start, end, ...ufM.params]
   );
   const hariMap = new Map(); // key: YYYY-MM-DD
   const ensureDay = (dateStr) => {
@@ -133,12 +146,13 @@ export async function buildLaporanData(monthIn) {
   // ===== Dokumentasi Kegiatan (foto yang diunggah ke sistem) =====
   const DOC_LIMIT = 60;
   const [docInsp] = await pool.query(
-    'SELECT e.inspect_date d, e.slot, e.photo_url url, dv.name dev, e.inspector_name oleh FROM equipment_inspections e LEFT JOIN devices dv ON dv.id=e.device_id WHERE e.photo_url IS NOT NULL AND e.inspect_date>=? AND e.inspect_date<? ORDER BY e.inspect_date, e.slot',
-    [start, end]
+    `SELECT e.inspect_date d, e.slot, e.photo_url url, dv.name dev, e.inspector_name oleh FROM equipment_inspections e LEFT JOIN devices dv ON dv.id=e.device_id WHERE e.photo_url IS NOT NULL AND e.inspect_date>=? AND e.inspect_date<?${ufE.clause} ORDER BY e.inspect_date, e.slot`,
+    [start, end, ...ufE.params]
   );
   const [docNote] = await pool.query(
-    'SELECT n.created_at d, n.doc_url url, n.note, i.device_name dev FROM incident_notes n JOIN incidents i ON i.id=n.incident_id WHERE n.doc_url IS NOT NULL AND n.created_at>=? AND n.created_at<? ORDER BY n.created_at',
-    [start, end]
+    // incident_notes tidak ber-unit — scope via induk incidents (i.unit_id).
+    `SELECT n.created_at d, n.doc_url url, n.note, i.device_name dev FROM incident_notes n JOIN incidents i ON i.id=n.incident_id WHERE n.doc_url IS NOT NULL AND n.created_at>=? AND n.created_at<?${ufI.clause} ORDER BY n.created_at`,
+    [start, end, ...ufI.params]
   );
   const dokumentasiAll = [
     ...docNote.map((r) => ({ url: r.url, tanggal: dmy(r.d), jenis: 'Tindakan/Perbaikan', peralatan: r.dev, ket: (r.note || '').slice(0, 80), oleh: '' })),
@@ -150,15 +164,15 @@ export async function buildLaporanData(monthIn) {
   // ===== V. Laporan Unjuk Hasil / Performance (peralatan × hari) =====
   // 'x' = operasi terputus (ada insiden offline hari itu), kosong = normal.
   const [incPerDev] = await pool.query(
-    "SELECT device_id, device_name, DAY(created_at) d FROM incidents WHERE created_at>=? AND created_at<? AND device_id IS NOT NULL",
-    [start, end]
+    `SELECT device_id, device_name, DAY(created_at) d FROM incidents WHERE created_at>=? AND created_at<? AND device_id IS NOT NULL${uf.clause}`,
+    [start, end, ...uf.params]
   );
   const downMap = new Map(); // device_id -> Set(day)
   for (const r of incPerDev) {
     if (!downMap.has(r.device_id)) downMap.set(r.device_id, new Set());
     downMap.get(r.device_id).add(r.d);
   }
-  const [devList] = await pool.query('SELECT id, name, status, ip FROM devices ORDER BY category, name');
+  const [devList] = await pool.query(`SELECT id, name, status, ip FROM devices WHERE 1=1${uf.clause} ORDER BY category, name`, uf.params);
   const unjukHasil = {
     days: daysInMonth,
     rows: devList.map((dev, i) => {
@@ -172,11 +186,12 @@ export async function buildLaporanData(monthIn) {
 
   // ===== VI. Evaluasi Kinerja Fasilitas (uptime %) =====
   const terjadwalJam = daysInMonth * OPS_HOURS_PER_DAY;
+  const ufD = unitFilter(unitId, 'd.unit_id');
   const [evalRows] = await pool.query(
     `SELECT d.id, d.name, COUNT(i.id) gagal, COALESCE(SUM(i.duration_min),0) downMin
        FROM devices d LEFT JOIN incidents i ON i.device_id=d.id AND i.status='selesai' AND i.resolved_at>=? AND i.resolved_at<?
-      WHERE d.category IS NOT NULL GROUP BY d.id, d.name ORDER BY d.name`,
-    [start, end]
+      WHERE d.category IS NOT NULL${ufD.clause} GROUP BY d.id, d.name ORDER BY d.name`,
+    [start, end, ...ufD.params]
   );
   // Uptime TERUKUR dari monitoring (device_uptime_daily) — akurat berbasis sampel
   // ping, mengecualikan waktu maintenance terjadwal. Null bila belum ada data
@@ -219,8 +234,8 @@ export async function buildLaporanData(monthIn) {
     `SELECT i.id, i.device_name, i.issue, i.created_at, i.resolved_at, i.duration_min, i.status, i.priority,
             l.name lokasi, r.kerusakan, r.perbaikan, r.penyebab, r.sparepart, r.hasil
        FROM incidents i LEFT JOIN locations l ON l.id=i.location_id LEFT JOIN incident_reports r ON r.incident_id=i.id
-      WHERE (i.created_at>=? AND i.created_at<?) OR (i.resolved_at>=? AND i.resolved_at<?) ORDER BY i.created_at`,
-    [start, end, start, end]
+      WHERE ((i.created_at>=? AND i.created_at<?) OR (i.resolved_at>=? AND i.resolved_at<?))${ufI.clause} ORDER BY i.created_at`,
+    [start, end, start, end, ...ufI.params]
   );
   const perbaikanRows = perbaikan.map((r, i) => ({
     no: i + 1, tanggal: dmy(r.created_at), peralatan: r.device_name, lokasi: r.lokasi || '-',
@@ -237,8 +252,8 @@ export async function buildLaporanData(monthIn) {
     `SELECT i.id, i.device_name, i.issue, i.created_at, i.resolved_at, i.priority,
             l.name lokasi, r.kerusakan, r.penyebab, r.perbaikan, r.sparepart, r.hasil, r.reporter_name, r.signer_name, r.signer_nip
        FROM incidents i LEFT JOIN locations l ON l.id=i.location_id JOIN incident_reports r ON r.incident_id=i.id
-      WHERE i.resolved_at>=? AND i.resolved_at<? ORDER BY i.resolved_at`,
-    [start, end]
+      WHERE i.resolved_at>=? AND i.resolved_at<?${ufI.clause} ORDER BY i.resolved_at`,
+    [start, end, ...ufI.params]
   );
   const lkp = lkpItems.map((r) => ({
     incidentId: r.id, tanggal: dmy(r.created_at), lokasi: r.lokasi || '-', peralatan: r.device_name,
@@ -249,18 +264,18 @@ export async function buildLaporanData(monthIn) {
   }));
 
   // ===== Rekap & performa (lampiran) =====
-  const [[inRow]] = await pool.query('SELECT COUNT(*) c FROM incidents WHERE created_at>=? AND created_at<?', [start, end]);
-  const [[doneRow]] = await pool.query("SELECT COUNT(*) c, AVG(duration_min) mttr FROM incidents WHERE status='selesai' AND resolved_at>=? AND resolved_at<?", [start, end]);
-  const [[slaRow]] = await pool.query('SELECT SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, COUNT(*) tot FROM incidents WHERE taken_at IS NOT NULL AND taken_at>=? AND taken_at<?', [SLA_MINUTES, start, end]);
-  const [[esc]] = await pool.query('SELECT COUNT(*) c FROM incidents WHERE coord_alerted=1 AND created_at>=? AND created_at<?', [start, end]);
+  const [[inRow]] = await pool.query(`SELECT COUNT(*) c FROM incidents WHERE created_at>=? AND created_at<?${uf.clause}`, [start, end, ...uf.params]);
+  const [[doneRow]] = await pool.query(`SELECT COUNT(*) c, AVG(duration_min) mttr FROM incidents WHERE status='selesai' AND resolved_at>=? AND resolved_at<?${uf.clause}`, [start, end, ...uf.params]);
+  const [[slaRow]] = await pool.query(`SELECT SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, COUNT(*) tot FROM incidents WHERE taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${uf.clause}`, [SLA_MINUTES, start, end, ...uf.params]);
+  const [[esc]] = await pool.query(`SELECT COUNT(*) c FROM incidents WHERE coord_alerted=1 AND created_at>=? AND created_at<?${uf.clause}`, [start, end, ...uf.params]);
   const recap = { tiketIn: inRow.c, tiketDone: doneRow.c, mttr: Math.round(doneRow.mttr || 0), slaPct: slaRow.tot ? Math.round((Number(slaRow.ot) / slaRow.tot) * 100) : 100, escalations: esc.c, measuredUptimePct };
 
-  const [techs] = await pool.query("SELECT id, name, jabatan FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'\"teknisi\"')) ORDER BY name");
+  const [techs] = await pool.query(`SELECT id, name, jabatan FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'"teknisi"'))${uf.clause} ORDER BY name`, uf.params);
   const performaTeknisi = [];
   for (const t of techs) {
     // Skor identik dengan dashboard performa (mesin penilaian tunggal: base 30 + bobot baru, penalti VPN −50%).
     const m = await metricsFor(t.id, start, end);
-    const [[ins]] = await pool.query('SELECT COUNT(*) total, COALESCE(SUM(verified),0) v FROM equipment_inspections WHERE inspected_by=? AND inspect_date>=? AND inspect_date<?', [t.id, start, end]);
+    const [[ins]] = await pool.query(`SELECT COUNT(*) total, COALESCE(SUM(verified),0) v FROM equipment_inspections WHERE inspected_by=? AND inspect_date>=? AND inspect_date<?${uf.clause}`, [t.id, start, end, ...uf.params]);
     performaTeknisi.push({
       name: t.name, jabatan: t.jabatan,
       done: m.done, onTime: m.onTime, taken: m.taken, kritisDone: m.kritisDone,
@@ -270,13 +285,13 @@ export async function buildLaporanData(monthIn) {
   }
   performaTeknisi.sort((a, b) => b.score - a.score);
 
-  const [coords] = await pool.query("SELECT id, name, jabatan FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"')) ORDER BY name");
+  const [coords] = await pool.query(`SELECT id, name, jabatan FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"'))${uf.clause} ORDER BY name`, uf.params);
   const performaKoordinator = [];
   for (const c of coords) {
-    const [[ap]] = await pool.query("SELECT COUNT(*) c FROM activities WHERE approved_by=? AND status!='menunggu' AND approved_at>=? AND approved_at<?", [c.id, start, end]);
+    const [[ap]] = await pool.query(`SELECT COUNT(*) c FROM activities WHERE approved_by=? AND status!='menunggu' AND approved_at>=? AND approved_at<?${uf.clause}`, [c.id, start, end, ...uf.params]);
     const [[rp]] = await pool.query('SELECT COUNT(*) c FROM incident_reports WHERE signed_by=? AND signed_at>=? AND signed_at<?', [c.id, start, end]);
-    const [[sc]] = await pool.query('SELECT COUNT(*) c FROM nota_dinas WHERE created_by=? AND created_at>=? AND created_at<?', [c.id, start, end]);
-    const [[ss]] = await pool.query('SELECT COUNT(*) c FROM nota_dinas WHERE signed_by=? AND signed_at>=? AND signed_at<?', [c.id, start, end]);
+    const [[sc]] = await pool.query(`SELECT COUNT(*) c FROM nota_dinas WHERE created_by=? AND created_at>=? AND created_at<?${uf.clause}`, [c.id, start, end, ...uf.params]);
+    const [[ss]] = await pool.query(`SELECT COUNT(*) c FROM nota_dinas WHERE signed_by=? AND signed_at>=? AND signed_at<?${uf.clause}`, [c.id, start, end, ...uf.params]);
     const approvals = ap.c, reportsSigned = rp.c, suratCreated = sc.c, suratSigned = ss.c;
     const score = Math.max(0, Math.min(100, 50 + approvals * 2 + reportsSigned * 3 + suratCreated + suratSigned * 2 - recap.escalations * 3));
     performaKoordinator.push({ name: c.name, jabatan: c.jabatan, approvals, reportsSigned, suratCreated, suratSigned, escalations: recap.escalations, score });
@@ -284,7 +299,7 @@ export async function buildLaporanData(monthIn) {
   performaKoordinator.sort((a, b) => b.score - a.score);
 
   // Logbook peralatan: rekap bulanan per perangkat (uptime/latency + inspeksi/on-off/maint/insiden).
-  const lb = await buildLogbook(month);
+  const lb = await buildLogbook(month, undefined, unitId);
   const logbook = lb.devices.map((d, i) => ({
     no: i + 1, peralatan: d.name, ip: d.ip,
     uptimePct: d.recap.metrik ? d.recap.metrik.up_pct : null,
@@ -306,7 +321,7 @@ export async function buildLaporanData(monthIn) {
 }
 
 router.get('/bulanan', requireRole('koordinator', 'admin'), async (req, res) => {
-  res.json(await buildLaporanData(req.query.month));
+  res.json(await buildLaporanData(req.query.month, req.unitId));
 });
 
 export default router;

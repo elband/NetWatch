@@ -5,12 +5,16 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilterShared, rowInUnit } from '../middleware/unitScope.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
+// Scoping multi-unit. Dokumen bersifat global-capable: unit_id NULL = dokumen
+// bersama (terlihat semua unit) — karena itu list memakai unitFilterShared.
+router.use(unitScope);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(__dirname, '..', '..', 'uploads', 'documents');
@@ -37,7 +41,8 @@ async function notifyCoords(message) {
 
 // ===== Kategori =====
 router.get('/categories', async (req, res) => {
-  const [rows] = await pool.query('SELECT c.*, (SELECT COUNT(*) FROM documents d WHERE d.kategori=c.name) AS jumlah FROM document_categories c ORDER BY sort_order, name');
+  const uf = unitFilterShared(req.unitId, 'd.unit_id');
+  const [rows] = await pool.query(`SELECT c.*, (SELECT COUNT(*) FROM documents d WHERE d.kategori=c.name${uf.clause}) AS jumlah FROM document_categories c ORDER BY sort_order, name`, uf.params);
   res.json({ categories: rows });
 });
 router.post('/categories', requireRole('admin'), async (req, res) => {
@@ -52,6 +57,8 @@ router.delete('/categories/:id', requireRole('admin'), async (req, res) => {
 
 // ===== Dashboard statistik =====
 router.get('/stats', async (req, res) => {
+  const uf = unitFilterShared(req.unitId); // kolom polos unit_id
+  const ufd = unitFilterShared(req.unitId, 'd.unit_id');
   const [[s]] = await pool.query(
     `SELECT COUNT(*) total,
             SUM(kategori='SOP') sop,
@@ -59,14 +66,14 @@ router.get('/stats', async (req, res) => {
             SUM(kategori='Materi Diklat') materi,
             SUM(status IN ('draft','review')) belum_review,
             SUM(status='kadaluarsa' OR (tanggal_review IS NOT NULL AND tanggal_review < CURDATE() AND status NOT IN ('arsip','kadaluarsa'))) kadaluarsa
-       FROM documents`);
-  const [terbaru] = await pool.query("SELECT id, judul, kategori, status, created_at FROM documents ORDER BY created_at DESC LIMIT 5");
-  const [terpopuler] = await pool.query("SELECT id, judul, kategori, views FROM documents ORDER BY views DESC, id DESC LIMIT 5");
-  const [kontributor] = await pool.query('SELECT creator_name name, COUNT(*) jumlah FROM documents WHERE creator_name IS NOT NULL GROUP BY creator_name ORDER BY jumlah DESC LIMIT 5');
+       FROM documents WHERE 1=1${uf.clause}`, uf.params);
+  const [terbaru] = await pool.query(`SELECT id, judul, kategori, status, created_at FROM documents WHERE 1=1${uf.clause} ORDER BY created_at DESC LIMIT 5`, uf.params);
+  const [terpopuler] = await pool.query(`SELECT id, judul, kategori, views FROM documents WHERE 1=1${uf.clause} ORDER BY views DESC, id DESC LIMIT 5`, uf.params);
+  const [kontributor] = await pool.query(`SELECT creator_name name, COUNT(*) jumlah FROM documents WHERE creator_name IS NOT NULL${uf.clause} GROUP BY creator_name ORDER BY jumlah DESC LIMIT 5`, uf.params);
   const [aktivitas] = await pool.query(
-    `SELECT v.created_at, v.user_name, d.judul FROM document_views v JOIN documents d ON d.id=v.document_id ORDER BY v.id DESC LIMIT 8`);
+    `SELECT v.created_at, v.user_name, d.judul FROM document_views v JOIN documents d ON d.id=v.document_id WHERE 1=1${ufd.clause} ORDER BY v.id DESC LIMIT 8`, ufd.params);
   const insight = [];
-  const expSoon = (await pool.query("SELECT COUNT(*) c FROM documents WHERE tanggal_review IS NOT NULL AND tanggal_review BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND status='aktif'"))[0][0].c;
+  const expSoon = (await pool.query(`SELECT COUNT(*) c FROM documents WHERE tanggal_review IS NOT NULL AND tanggal_review BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND status='aktif'${uf.clause}`, uf.params))[0][0].c;
   insight.push({ type: 'info', text: `${s.total || 0} dokumen total · ${s.sop || 0} SOP · ${s.kb || 0} Knowledge Base · ${s.materi || 0} Materi Diklat.` });
   if (Number(s.belum_review) > 0) insight.push({ type: 'warn', text: `${s.belum_review} dokumen menunggu review/persetujuan.` });
   if (Number(s.kadaluarsa) > 0) insight.push({ type: 'bad', text: `${s.kadaluarsa} dokumen kadaluarsa — perlu diperbarui.` });
@@ -82,6 +89,8 @@ router.get('/stats', async (req, res) => {
 router.get('/', async (req, res) => {
   let sql = 'SELECT * FROM documents WHERE 1=1';
   const params = [];
+  const uf = unitFilterShared(req.unitId);
+  sql += uf.clause; params.push(...uf.params);
   if (req.query.q) { const k = `%${req.query.q}%`; sql += ' AND (judul LIKE ? OR deskripsi LIKE ? OR tags LIKE ? OR nomor LIKE ? OR catatan_revisi LIKE ?)'; params.push(k, k, k, k, k); }
   if (req.query.kategori) { sql += ' AND kategori=?'; params.push(req.query.kategori); }
   if (STATUSES.includes(req.query.status)) { sql += ' AND status=?'; params.push(req.query.status); }
@@ -95,11 +104,13 @@ router.get('/', async (req, res) => {
 
 // Bookmark & riwayat milik sendiri.
 router.get('/favorites', async (req, res) => {
-  const [rows] = await pool.query('SELECT d.* FROM document_favorites f JOIN documents d ON d.id=f.document_id WHERE f.user_id=? ORDER BY f.id DESC', [req.user.id]);
+  const uf = unitFilterShared(req.unitId, 'd.unit_id');
+  const [rows] = await pool.query(`SELECT d.* FROM document_favorites f JOIN documents d ON d.id=f.document_id WHERE f.user_id=?${uf.clause} ORDER BY f.id DESC`, [req.user.id, ...uf.params]);
   res.json({ documents: rows });
 });
 router.get('/recent', async (req, res) => {
-  const [rows] = await pool.query('SELECT d.*, MAX(v.created_at) last_view FROM document_views v JOIN documents d ON d.id=v.document_id WHERE v.user_id=? GROUP BY d.id ORDER BY last_view DESC LIMIT 15', [req.user.id]);
+  const uf = unitFilterShared(req.unitId, 'd.unit_id');
+  const [rows] = await pool.query(`SELECT d.*, MAX(v.created_at) last_view FROM document_views v JOIN documents d ON d.id=v.document_id WHERE v.user_id=?${uf.clause} GROUP BY d.id ORDER BY last_view DESC LIMIT 15`, [req.user.id, ...uf.params]);
   res.json({ documents: rows });
 });
 
@@ -108,7 +119,8 @@ router.post('/assistant', async (req, res) => {
   const q = String(req.body.q || '').trim();
   if (!q) return res.json({ answer: 'Silakan ketik pertanyaan, mis. "Bagaimana prosedur restart FIDS?"', docs: [] });
   const terms = q.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter((t) => t.length > 2);
-  const [rows] = await pool.query("SELECT id, judul, kategori, deskripsi, tags, status FROM documents WHERE status IN ('aktif','disetujui') LIMIT 500");
+  const uf = unitFilterShared(req.unitId);
+  const [rows] = await pool.query(`SELECT id, judul, kategori, deskripsi, tags, status FROM documents WHERE status IN ('aktif','disetujui')${uf.clause} LIMIT 500`, uf.params);
   const scored = rows.map((d) => {
     const hay = `${d.judul} ${d.kategori} ${d.deskripsi || ''} ${d.tags || ''}`.toLowerCase();
     const score = terms.reduce((a, t) => a + (hay.includes(t) ? 1 : 0), 0);
@@ -126,7 +138,7 @@ router.get('/:id', async (req, res) => {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM documents WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
   await pool.query('UPDATE documents SET views=views+1 WHERE id=?', [id]);
   await pool.query('INSERT INTO document_views (document_id, user_id, user_name) VALUES (?,?,?)', [id, req.user.id, req.user.name]);
   const [versions] = await pool.query('SELECT * FROM document_versions WHERE document_id=? ORDER BY id DESC', [id]);
@@ -142,10 +154,11 @@ router.post('/', requireRole('admin', 'koordinator'), upload.single('file'), asy
   const fileUrl = req.file ? `/uploads/documents/${req.file.filename}` : null;
   const tags = splitTags(b.tags);
   const [r] = await pool.query(
-    `INSERT INTO documents (nomor, judul, kategori, sub_kategori, deskripsi, tags, versi, tanggal_berlaku, tanggal_review, pemilik, unit_kerja, status, file_url, file_name, video_url, link_ref, catatan_revisi, created_by, creator_name)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    // unit_id = unit aktif; NULL (admin mode "Semua Unit") = dokumen global milik bersama.
+    `INSERT INTO documents (nomor, judul, kategori, sub_kategori, deskripsi, tags, versi, tanggal_berlaku, tanggal_review, pemilik, unit_kerja, status, file_url, file_name, video_url, link_ref, catatan_revisi, created_by, creator_name, unit_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [b.nomor || null, b.judul.trim(), b.kategori.trim(), b.sub_kategori || null, b.deskripsi || null, tags.join(', '), b.versi || '1.0', b.tanggal_berlaku || null, b.tanggal_review || null,
-      b.pemilik || req.user.name, b.unit_kerja || 'Unit Elektronika Bandara', STATUSES.includes(b.status) ? b.status : 'draft', fileUrl, req.file?.originalname || null, b.video_url || null, b.link_ref || null, b.catatan_revisi || null, req.user.id, req.user.name]
+      b.pemilik || req.user.name, b.unit_kerja || 'Unit Elektronika Bandara', STATUSES.includes(b.status) ? b.status : 'draft', fileUrl, req.file?.originalname || null, b.video_url || null, b.link_ref || null, b.catatan_revisi || null, req.user.id, req.user.name, req.unitId ?? null]
   );
   await syncTags(r.insertId, tags);
   if (fileUrl) await pool.query('INSERT INTO document_versions (document_id, versi, file_url, catatan, created_by, creator_name) VALUES (?,?,?,?,?,?)', [r.insertId, b.versi || '1.0', fileUrl, 'Versi awal', req.user.id, req.user.name]);
@@ -160,7 +173,7 @@ router.put('/:id', requireRole('admin', 'koordinator'), upload.single('file'), a
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM documents WHERE id=?', [id]);
   const d = rows[0];
-  if (!d) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
+  if (!d || !rowInUnit(d, req.unitId)) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
   const b = req.body;
   const fileUrl = req.file ? `/uploads/documents/${req.file.filename}` : null;
   const versi = b.versi || d.versi;
@@ -182,8 +195,8 @@ router.patch('/:id/status', requireRole('admin', 'koordinator'), async (req, res
   const id = Number(req.params.id);
   const next = req.body.status;
   if (!STATUSES.includes(next)) return res.status(400).json({ error: 'Status tidak valid.' });
-  const [rows] = await pool.query('SELECT judul, created_by, status FROM documents WHERE id=?', [id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
+  const [rows] = await pool.query('SELECT judul, created_by, status, unit_id FROM documents WHERE id=?', [id]);
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
   const ap = ['disetujui', 'aktif'].includes(next) ? ', approved_by=?, approver_name=?, approved_at=NOW()' : '';
   const params = ap ? [next, req.user.id, req.user.name, id] : [next, id];
   await pool.query(`UPDATE documents SET status=?${ap} WHERE id=?`, params);
@@ -198,6 +211,9 @@ router.patch('/:id/status', requireRole('admin', 'koordinator'), async (req, res
 // ===== Komentar =====
 router.post('/:id/comment', async (req, res) => {
   if (!req.body.body?.trim()) return res.status(400).json({ error: 'Komentar kosong.' });
+  // Scope via induk documents.
+  const [[doc]] = await pool.query('SELECT id, unit_id FROM documents WHERE id=?', [Number(req.params.id)]);
+  if (!doc || !rowInUnit(doc, req.unitId)) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
   await pool.query('INSERT INTO document_comments (document_id, user_id, user_name, body) VALUES (?,?,?,?)', [Number(req.params.id), req.user.id, req.user.name, req.body.body.trim().slice(0, 1000)]);
   const [comments] = await pool.query('SELECT * FROM document_comments WHERE document_id=? ORDER BY id', [Number(req.params.id)]);
   res.json({ comments });
@@ -206,6 +222,9 @@ router.post('/:id/comment', async (req, res) => {
 // ===== Favorit (toggle) =====
 router.post('/:id/favorite', async (req, res) => {
   const id = Number(req.params.id);
+  // Scope via induk documents.
+  const [[doc]] = await pool.query('SELECT id, unit_id FROM documents WHERE id=?', [id]);
+  if (!doc || !rowInUnit(doc, req.unitId)) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
   const [[ex]] = await pool.query('SELECT id FROM document_favorites WHERE document_id=? AND user_id=?', [id, req.user.id]);
   if (ex) { await pool.query('DELETE FROM document_favorites WHERE id=?', [ex.id]); return res.json({ favorited: false }); }
   await pool.query('INSERT INTO document_favorites (document_id, user_id) VALUES (?,?)', [id, req.user.id]);
@@ -214,8 +233,8 @@ router.post('/:id/favorite', async (req, res) => {
 
 // ===== Hapus =====
 router.delete('/:id', requireRole('admin', 'koordinator'), async (req, res) => {
-  const [rows] = await pool.query('SELECT file_url, judul FROM documents WHERE id=?', [Number(req.params.id)]);
-  if (!rows[0]) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
+  const [rows] = await pool.query('SELECT file_url, judul, unit_id FROM documents WHERE id=?', [Number(req.params.id)]);
+  if (!rows[0] || !rowInUnit(rows[0], req.unitId)) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
   await pool.query('DELETE FROM documents WHERE id=?', [Number(req.params.id)]);
   if (rows[0].file_url) { try { fs.unlinkSync(path.join(DIR, path.basename(rows[0].file_url))); } catch { /* abaikan */ } }
   await audit(req.user, 'doc_delete', 'document', req.params.id, rows[0].judul);

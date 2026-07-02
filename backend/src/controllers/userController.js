@@ -2,9 +2,34 @@ import bcrypt from 'bcryptjs';
 import { pool } from '../db/pool.js';
 import { toPublicUser } from './authController.js';
 import { audit } from '../services/audit.js';
+import { isAdminUser, unitFilter } from '../middleware/unitScope.js';
 
 const EMOJI_MAP = { admin: '👑', koordinator: '👨‍💼', teknisi: '🔧', viewer: '👁️' };
 const VALID_ROLES = ['admin', 'koordinator', 'teknisi', 'viewer'];
+
+// True bila baris user (dari DB) memiliki peran admin/super admin.
+function rowIsAdmin(u) {
+  try {
+    const roles = typeof u.roles === 'string' ? JSON.parse(u.roles) : u.roles;
+    if (Array.isArray(roles) && roles.includes('admin')) return true;
+  } catch { /* fallback role tunggal */ }
+  return u.role === 'admin';
+}
+
+// Pagar koordinator (admin unit): hanya boleh menyentuh user unitnya sendiri,
+// dan tidak boleh menyentuh/memberi peran admin (super admin).
+// Return pesan error atau null bila boleh.
+function coordGuard(req, { targetRow = null, roleList = null } = {}) {
+  if (isAdminUser(req.user)) return null; // super admin bebas
+  if (targetRow) {
+    if (rowIsAdmin(targetRow)) return 'Tidak boleh mengubah akun Super Admin.';
+    if (targetRow.unit_id == null || Number(targetRow.unit_id) !== Number(req.user.unit_id)) {
+      return 'User tersebut bukan anggota unit Anda.';
+    }
+  }
+  if (roleList && roleList.includes('admin')) return 'Hanya Super Admin yang boleh memberi peran admin.';
+  return null;
+}
 
 // Normalisasi daftar peran: terima `roles` (array) atau `role` (string), buang
 // yang tak valid, urutkan berdasar prioritas, pastikan minimal 1.
@@ -31,15 +56,26 @@ function withHasPin(u) {
 }
 
 export async function listUsers(req, res) {
-  const [rows] = await pool.query('SELECT * FROM users ORDER BY id');
+  // Ter-scope unit: koordinator = unitnya; admin = semua atau unit terpilih (X-Unit-Id).
+  // Akun super admin (unit NULL) hanya terlihat oleh admin dalam mode "Semua Unit".
+  const uf = unitFilter(req.unitId);
+  const [rows] = await pool.query(`SELECT * FROM users WHERE 1=1 ${uf.clause} ORDER BY id`, uf.params);
   res.json({ users: rows.map(withHasPin) });
 }
 
 export async function createUser(req, res) {
-  const { name, username, email, password, pin, phone, nip, role, roles, jabatan, perms } = req.body;
+  const { name, username, email, password, pin, phone, nip, role, roles, jabatan, perms, unit_id } = req.body;
   const roleList = normalizeRoles(roles, role);
   if (!name || !username || !email || roleList.length === 0) {
     return res.status(400).json({ error: 'Nama, username, email, dan minimal 1 peran wajib diisi' });
+  }
+  const guardErr = coordGuard(req, { roleList });
+  if (guardErr) return res.status(403).json({ error: guardErr });
+  // Unit: koordinator selalu membuat user untuk unitnya sendiri; admin memilih via body.
+  // Peran non-admin wajib punya unit; unit NULL hanya untuk super admin.
+  const unitId = isAdminUser(req.user) ? (unit_id ? Number(unit_id) : null) : req.user.unit_id;
+  if (unitId == null && !roleList.includes('admin')) {
+    return res.status(400).json({ error: 'Pilih unit untuk user ini (hanya Super Admin yang boleh tanpa unit).' });
   }
   // PIN wajib saat membuat user (login hanya pakai PIN).
   if (!pin) return res.status(400).json({ error: 'PIN wajib diisi (4–6 digit) — dipakai untuk login.' });
@@ -51,9 +87,9 @@ export async function createUser(req, res) {
   const emoji = EMOJI_MAP[primary] || '👤';
   try {
     const [result] = await pool.query(
-      `INSERT INTO users (name, username, email, password_hash, pin_hash, phone, nip, role, roles, jabatan, emoji, active, perms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-      [name, username, email, hash, pinRes.hash, phone || null, nip || null, primary, JSON.stringify(roleList), jabatan || null, emoji, JSON.stringify(perms || [])]
+      `INSERT INTO users (name, username, email, password_hash, pin_hash, phone, nip, role, roles, jabatan, emoji, active, perms, unit_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      [name, username, email, hash, pinRes.hash, phone || null, nip || null, primary, JSON.stringify(roleList), jabatan || null, emoji, JSON.stringify(perms || []), unitId]
     );
     const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
     await audit(req.user, 'create_user', 'user', result.insertId, `Buat user ${username} (peran: ${roleList.join(',')})`);
@@ -66,9 +102,13 @@ export async function createUser(req, res) {
 
 export async function updateUser(req, res) {
   const id = Number(req.params.id);
-  const { name, username, email, password, pin, phone, nip, role, roles, jabatan, perms, active } = req.body;
+  const { name, username, email, password, pin, phone, nip, role, roles, jabatan, perms, active, unit_id } = req.body;
   const [existingRows] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
   if (!existingRows[0]) return res.status(404).json({ error: 'User tidak ditemukan' });
+
+  const preRoles = (roles !== undefined || role !== undefined) ? normalizeRoles(roles, role) : null;
+  const guardErr = coordGuard(req, { targetRow: existingRows[0], roleList: preRoles });
+  if (guardErr) return res.status(403).json({ error: guardErr });
 
   // Ubah PIN bila diisi (kosong = PIN tidak diubah).
   if (pin) {
@@ -99,18 +139,22 @@ export async function updateUser(req, res) {
     emoji,
     active: active === undefined ? existingRows[0].active : active ? 1 : 0,
     perms: JSON.stringify(perms ?? (typeof existingRows[0].perms === 'string' ? JSON.parse(existingRows[0].perms) : existingRows[0].perms)),
+    // Pindah unit hanya oleh Super Admin ('' = jadikan lintas unit/NULL); koordinator tidak bisa.
+    unit_id: isAdminUser(req.user) && unit_id !== undefined
+      ? (unit_id === null || unit_id === '' ? null : Number(unit_id))
+      : existingRows[0].unit_id,
   };
 
   if (password) {
     fields.password_hash = await bcrypt.hash(password, 10);
     await pool.query(
-      `UPDATE users SET name=?, username=?, email=?, phone=?, nip=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=?, password_hash=? WHERE id=?`,
-      [fields.name, fields.username, fields.email, fields.phone, fields.nip, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, fields.password_hash, id]
+      `UPDATE users SET name=?, username=?, email=?, phone=?, nip=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=?, unit_id=?, password_hash=? WHERE id=?`,
+      [fields.name, fields.username, fields.email, fields.phone, fields.nip, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, fields.unit_id, fields.password_hash, id]
     );
   } else {
     await pool.query(
-      `UPDATE users SET name=?, username=?, email=?, phone=?, nip=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=? WHERE id=?`,
-      [fields.name, fields.username, fields.email, fields.phone, fields.nip, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, id]
+      `UPDATE users SET name=?, username=?, email=?, phone=?, nip=?, role=?, roles=?, jabatan=?, emoji=?, active=?, perms=?, unit_id=? WHERE id=?`,
+      [fields.name, fields.username, fields.email, fields.phone, fields.nip, fields.role, fields.rolesJson, fields.jabatan, fields.emoji, fields.active, fields.perms, fields.unit_id, id]
     );
   }
 
@@ -122,8 +166,10 @@ export async function updateUser(req, res) {
 export async function deleteUser(req, res) {
   const id = Number(req.params.id);
   if (id === req.user.id) return res.status(400).json({ error: 'Tidak dapat menghapus akun Anda sendiri.' });
-  const [rows] = await pool.query('SELECT id, name, username FROM users WHERE id = ?', [id]);
+  const [rows] = await pool.query('SELECT id, name, username, role, roles, unit_id FROM users WHERE id = ?', [id]);
   if (!rows[0]) return res.status(404).json({ error: 'User tidak ditemukan' });
+  const guardErr = coordGuard(req, { targetRow: rows[0] });
+  if (guardErr) return res.status(403).json({ error: guardErr });
   try {
     await pool.query('DELETE FROM users WHERE id = ?', [id]);
   } catch {
@@ -137,6 +183,8 @@ export async function toggleUserActive(req, res) {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
   if (!rows[0]) return res.status(404).json({ error: 'User tidak ditemukan' });
+  const guardErr = coordGuard(req, { targetRow: rows[0] });
+  if (guardErr) return res.status(403).json({ error: guardErr });
   const newActive = rows[0].active ? 0 : 1;
   await pool.query('UPDATE users SET active = ? WHERE id = ?', [newActive, id]);
   const [updated] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);

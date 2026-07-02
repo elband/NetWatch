@@ -149,9 +149,9 @@ export async function checkAllDevices(io) {
           const id = await nextIncidentId(conn);
           const issue = 'Perangkat tidak merespons - deteksi otomatis';
           await conn.query(
-            `INSERT INTO incidents (id, device_id, device_name, ip, issue, priority, tech_id, status, step, source)
-             VALUES (?, ?, ?, ?, ?, 'kritis', NULL, 'aktif', 0, 'auto')`,
-            [id, device.id, device.name, device.ip, issue]
+            `INSERT INTO incidents (id, device_id, device_name, ip, issue, priority, tech_id, status, step, source, unit_id)
+             VALUES (?, ?, ?, ?, ?, 'kritis', NULL, 'aktif', 0, 'auto', ?)`,
+            [id, device.id, device.name, device.ip, issue, device.unit_id ?? null]
           );
           const sinceTxt = device.offline_since ? ` sejak ${new Date(device.offline_since).toLocaleString('id-ID')}` : '';
           const stabilMnt = Math.round(thresholds.autoDetectOfflineSec / 60);

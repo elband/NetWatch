@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../api/client';
+import { api, getActiveUnitId, setActiveUnitId } from '../api/client';
 import { hasRole, userRoles } from '../utils/roles';
 import { NAV_ITEMS, PAGE_TITLES, type NavEntry } from './NavConfig';
 import NotificationCenter from './NotificationCenter';
 import ThemeToggle from './ThemeToggle';
 import ImageLightbox from './ImageLightbox';
-import type { Role, User } from '../types';
+import type { Role, Unit, User } from '../types';
 
 const ROLE_COLOR: Record<string, string> = {
   admin: '#ef4444',
@@ -111,6 +111,7 @@ export default function AppLayout() {
             </span>
           </>
         )}
+        <UnitSwitcher user={user} />
         <ThemeToggle className="w-8 h-8 text-sm shrink-0" />
         <NotificationCenter />
         <span className="text-[11px] text-text2 font-mono hidden sm:inline"><HeaderClock /></span>
@@ -128,6 +129,42 @@ export default function AppLayout() {
 
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} onSaved={updateSession} />}
     </div>
+  );
+}
+
+// ===== Unit switcher (multi-unit) =====
+// Super Admin: dropdown pilih unit aktif (dikirim sbg header X-Unit-Id; reload agar
+// semua halaman refetch dengan scope baru). Role lain: badge unit miliknya saja.
+function UnitSwitcher({ user }: { user: User }) {
+  const isAdmin = hasRole(user, 'admin');
+  const [units, setUnits] = useState<Unit[]>([]);
+  useEffect(() => {
+    api.get('/units').then((r) => setUnits(r.data.units || [])).catch(() => {});
+  }, []);
+  if (!units.length) return null;
+
+  if (isAdmin) {
+    const active = getActiveUnitId();
+    return (
+      <select
+        value={active ?? ''}
+        onChange={(e) => { setActiveUnitId(e.target.value ? Number(e.target.value) : null); window.location.reload(); }}
+        title="Unit aktif (Super Admin)"
+        className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-[11px] font-semibold max-w-[150px] shrink-0"
+      >
+        <option value="">🌐 Semua Unit</option>
+        {units.filter((u) => u.active !== 0 && u.active !== false).map((u) => (
+          <option key={u.id} value={u.id}>{u.icon || '🏢'} {u.code} — {u.name}</option>
+        ))}
+      </select>
+    );
+  }
+  const mine = units.find((u) => u.id === user.unit_id);
+  if (!mine) return null;
+  return (
+    <span title={mine.name} className="hidden sm:inline-flex items-center gap-1 bg-accent/10 text-accent border border-accent/30 rounded-full px-2.5 py-1 text-[10px] font-bold shrink-0">
+      {mine.icon || '🏢'} {mine.code}
+    </span>
   );
 }
 

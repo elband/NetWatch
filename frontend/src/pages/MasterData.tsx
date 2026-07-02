@@ -1,22 +1,28 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { hasRole } from '../utils/roles';
 import LocationMap from '../components/LocationMap';
 import { confirmDialog, alertDialog } from '../components/dialog';
-import type { Asset, ServiceItem, LocationItem, User } from '../types';
+import type { Asset, ServiceItem, LocationItem, Unit, User } from '../types';
 
-type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe';
+type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'unit';
 interface DeviceTypeItem { id: number; name: string; icon: string | null; sort_order: number }
 
 export default function MasterData() {
+  const { user } = useAuth();
+  const isAdmin = hasRole(user, 'admin'); // tab Unit hanya untuk Super Admin
   const [tab, setTab] = useState<Tab>('aset');
+  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat']];
+  if (isAdmin) tabs.push(['unit', '🏢 Unit Kerja']);
   return (
     <div>
       <div className="mb-4">
         <div className="text-[17px] font-bold">🗂️ Master Data</div>
         <div className="text-[11px] text-text2 mt-0.5">Kelola inventaris aset, layanan kritis, dan lokasi/area gangguan</div>
       </div>
-      <div className="flex gap-2 mb-4">
-        {([['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat']] as [Tab, string][]).map(([t, label]) => (
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {tabs.map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className={`px-3.5 py-1.5 text-xs rounded-md border ${tab === t ? 'bg-accent text-bg border-accent font-semibold' : 'border-border text-text2 hover:text-white'}`}>{label}</button>
         ))}
       </div>
@@ -24,6 +30,7 @@ export default function MasterData() {
       {tab === 'layanan' && <ServicesTab />}
       {tab === 'lokasi' && <LocationsTab />}
       {tab === 'tipe' && <DeviceTypesTab />}
+      {tab === 'unit' && isAdmin && <UnitsTab />}
     </div>
   );
 }
@@ -248,6 +255,74 @@ function LocationsTab() {
             <div className="text-[9px] text-text2">insiden aktif</div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ===================== UNIT KERJA (Super Admin) =====================
+function UnitsTab() {
+  const [items, setItems] = useState<Unit[]>([]);
+  const empty = { code: '', name: '', description: '', icon: '🏢' };
+  const [form, setForm] = useState<any>(empty);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [err, setErr] = useState('');
+
+  function load() { api.get('/units').then((r) => setItems(r.data.units || [])); }
+  useEffect(load, []);
+
+  async function save() {
+    if (!form.code.trim() || !form.name.trim()) return setErr('Kode dan nama unit wajib diisi.');
+    setErr('');
+    try {
+      if (editId) await api.put(`/units/${editId}`, form);
+      else await api.post('/units', form);
+      setForm(empty); setEditId(null); load();
+    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan unit.'); }
+  }
+  async function toggleActive(u: Unit) {
+    try { await api.put(`/units/${u.id}`, { active: !(u.active !== 0 && u.active !== false) }); load(); }
+    catch (e: any) { alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mengubah status unit.', variant: 'danger' }); }
+  }
+  async function del(u: Unit) {
+    if (!(await confirmDialog({ title: `Hapus unit ${u.code}`, message: `${u.name}\n\nHanya bisa dihapus bila tidak ada user/data tertaut. Alternatif: nonaktifkan saja.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    try { await api.delete(`/units/${u.id}`); load(); }
+    catch (e: any) { alertDialog({ title: 'Tidak bisa dihapus', message: e?.response?.data?.error || 'Gagal menghapus unit.', variant: 'warning' }); }
+  }
+  function edit(u: Unit) { setEditId(u.id); setForm({ code: u.code, name: u.name, description: u.description || '', icon: u.icon || '🏢' }); }
+
+  return (
+    <div>
+      <div className="text-[11px] text-text2 mb-3">Setiap unit dipimpin koordinator (admin unitnya) dengan data terisolasi: perangkat, insiden, jadwal, laporan, dan surat per unit. Super Admin melihat semuanya lewat pemilih unit di header.</div>
+      <div className="bg-surface border border-border rounded-lg p-3.5 mb-4 flex gap-2 items-end flex-wrap">
+        <input className={`${inputCls} w-16`} placeholder="Icon" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} />
+        <input className={`${inputCls} w-24 uppercase`} placeholder="Kode *" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} />
+        <input className={inputCls} placeholder="Nama unit *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className={`${inputCls} min-w-[220px]`} placeholder="Deskripsi" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <button className={btnPrimary} onClick={save}>{editId ? '💾 Update' : '+ Tambah'}</button>
+        {editId && <button className={btnGhost} onClick={() => { setForm(empty); setEditId(null); }}>Batal</button>}
+      </div>
+      {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+        {items.map((u) => {
+          const aktif = u.active !== 0 && u.active !== false;
+          return (
+            <div key={u.id} className={`rounded-lg border p-3.5 ${aktif ? 'border-border bg-surface2' : 'border-warn/40 bg-warn/5 opacity-70'}`}>
+              <div className="flex items-start justify-between">
+                <div className="text-2xl">{u.icon || '🏢'}</div>
+                <div className="flex gap-1">
+                  <button className={btnGhost} onClick={() => edit(u)}>✏️</button>
+                  <button className={btnGhost} onClick={() => toggleActive(u)}>{aktif ? '⏸️' : '▶️'}</button>
+                  <button className={`${btnGhost} text-danger`} onClick={() => del(u)}>🗑️</button>
+                </div>
+              </div>
+              <div className="text-[12px] font-bold mt-1">{u.code} — {u.name}</div>
+              <div className="text-[10px] text-text2 mt-0.5">{u.description || '—'}</div>
+              {!aktif && <div className="text-[10px] text-warn font-semibold mt-1">⏸️ Nonaktif</div>}
+            </div>
+          );
+        })}
+        {items.length === 0 && <div className="col-span-full text-center text-text2 text-xs py-6">Belum ada unit.</div>}
       </div>
     </div>
   );

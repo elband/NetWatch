@@ -3,10 +3,12 @@ import multer from 'multer';
 import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 // Kode resmi selaras Laporan Bulanan: N = Dinas Kantor (disimpan sbg 'malam'), P = Pagi, S = Siang, L = Libur.
@@ -31,8 +33,9 @@ function monthRange(month) {
 
 router.get('/', async (req, res) => {
   const { from, to } = req.query;
-  let sql = 'SELECT s.*, u.name as user_name FROM shifts s JOIN users u ON u.id = s.user_id WHERE 1=1';
-  const params = [];
+  const uf = unitFilter(req.unitId, 's.unit_id');
+  let sql = `SELECT s.*, u.name as user_name FROM shifts s JOIN users u ON u.id = s.user_id WHERE 1=1${uf.clause}`;
+  const params = [...uf.params];
   if (from) { sql += ' AND s.shift_date >= ?'; params.push(from); }
   if (to) { sql += ' AND s.shift_date <= ?'; params.push(to); }
   sql += ' ORDER BY s.shift_date';
@@ -85,10 +88,15 @@ router.put('/:userId/:date', requireRole('admin', 'koordinator'), async (req, re
   if (!['pagi', 'siang', 'malam', 'libur', 'dinas_luar', 'cuti'].includes(shiftType)) {
     return res.status(400).json({ error: 'shiftType tidak valid' });
   }
+  // Unit shift mengikuti unit milik USER TARGET; teknisi di luar scope unit = tidak terlihat (404).
+  const [[target]] = await pool.query('SELECT id, unit_id FROM users WHERE id=?', [Number(userId)]);
+  if (!target || !rowInUnit(target, req.unitId)) return res.status(404).json({ error: 'Teknisi tidak ditemukan.' });
+  const unitId = target.unit_id ?? insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   await pool.query(
-    `INSERT INTO shifts (user_id, shift_date, shift_type) VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE shift_type = VALUES(shift_type)`,
-    [userId, date, shiftType]
+    `INSERT INTO shifts (user_id, shift_date, shift_type, unit_id) VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE shift_type = VALUES(shift_type), unit_id = VALUES(unit_id)`,
+    [userId, date, shiftType, unitId]
   );
   res.json({ ok: true });
 });
@@ -100,7 +108,8 @@ router.get('/template', requireRole('admin', 'koordinator'), async (req, res) =>
     : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
   const { start, end, dates } = monthRange(month);
 
-  const [techs] = await pool.query("SELECT id, username, name FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"')) ORDER BY name");
+  const ufU = unitFilter(req.unitId, 'unit_id');
+  const [techs] = await pool.query(`SELECT id, username, name FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles, '"teknisi"'))${ufU.clause} ORDER BY name`, ufU.params);
   const [shifts] = await pool.query('SELECT user_id, shift_date, shift_type FROM shifts WHERE shift_date >= ? AND shift_date < ?', [start, end]);
   const map = {};
   for (const s of shifts) (map[s.user_id] ||= {})[dateKey(s.shift_date)] = s.shift_type;
@@ -136,9 +145,12 @@ router.post('/import', requireRole('admin', 'koordinator'), upload.single('file'
   }
   if (dateCols.length === 0) return res.status(400).json({ error: 'Tidak ada kolom tanggal (format YYYY-MM-DD) pada header.' });
 
-  const [users] = await pool.query("SELECT id, username, name FROM users WHERE role='teknisi' OR JSON_CONTAINS(roles, '\"teknisi\"')");
-  const byUser = new Map(users.map((u) => [String(u.username).toLowerCase().trim(), u.id]));
-  const byName = new Map(users.map((u) => [String(u.name).toLowerCase().trim(), u.id]));
+  // Hanya teknisi dalam scope unit request yang bisa diimpor.
+  const ufU = unitFilter(req.unitId, 'unit_id');
+  const [users] = await pool.query(`SELECT id, username, name, unit_id FROM users WHERE (role='teknisi' OR JSON_CONTAINS(roles, '"teknisi"'))${ufU.clause}`, ufU.params);
+  const byUser = new Map(users.map((u) => [String(u.username).toLowerCase().trim(), u]));
+  const byName = new Map(users.map((u) => [String(u.name).toLowerCase().trim(), u]));
+  const fallbackUnit = insertUnitId(req); // dipakai bila user target belum punya unit
 
   let updated = 0;
   const errors = [];
@@ -147,8 +159,10 @@ router.post('/import', requireRole('admin', 'koordinator'), upload.single('file'
     if (!row || row.every((c) => c === '' || c == null)) continue;
     const key = String(row[0] ?? '').toLowerCase().trim();
     if (key.startsWith('#')) continue;
-    const uid = byUser.get(key) || byName.get(key);
-    if (!uid) { errors.push(`Baris ${i + 1}: teknisi "${row[0]}" tidak ditemukan`); continue; }
+    const tu = byUser.get(key) || byName.get(key);
+    if (!tu) { errors.push(`Baris ${i + 1}: teknisi "${row[0]}" tidak ditemukan`); continue; }
+    const unitId = tu.unit_id ?? fallbackUnit;
+    if (unitId == null) { errors.push(`Baris ${i + 1}: unit teknisi "${row[0]}" belum ditentukan — pilih unit terlebih dahulu`); continue; }
 
     for (const { c, date } of dateCols) {
       const raw = String(row[c] ?? '').toLowerCase().trim();
@@ -156,9 +170,9 @@ router.post('/import', requireRole('admin', 'koordinator'), upload.single('file'
       const shift = SHIFT_FROM[raw];
       if (!shift) { errors.push(`Baris ${i + 1} (${date}): nilai "${row[c]}" tidak dikenal (pakai N/P/S/L)`); continue; }
       await pool.query(
-        `INSERT INTO shifts (user_id, shift_date, shift_type) VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE shift_type = VALUES(shift_type)`,
-        [uid, date, shift]
+        `INSERT INTO shifts (user_id, shift_date, shift_type, unit_id) VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE shift_type = VALUES(shift_type), unit_id = VALUES(unit_id)`,
+        [tu.id, date, shift, unitId]
       );
       updated++;
     }

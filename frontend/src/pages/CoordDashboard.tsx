@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, getActiveUnitId, setActiveUnitId } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { hasRole } from '../utils/roles';
 import { getSocket } from '../api/socket';
 import { activityStatusBadge } from '../components/ActivityModal';
 import LocationMap from '../components/LocationMap';
@@ -147,6 +149,9 @@ export default function CoordDashboard() {
   return (
     <div className="space-y-4 nw-stagger">
       {toast && <div className="bg-accent2/10 border border-accent2/30 rounded-md px-3 py-2 text-[11px] text-accent2">🔔 {toast}</div>}
+
+      {/* Ringkasan lintas unit — hanya Super Admin dalam mode "Semua Unit" */}
+      <UnitSummaryStrip />
 
       {/* Persetujuan kegiatan teknisi — di atas */}
       <Panel title={`PERSETUJUAN KEGIATAN${activities.filter((a) => a.status === 'menunggu').length ? ` · ${activities.filter((a) => a.status === 'menunggu').length} menunggu` : ''}`}>
@@ -614,5 +619,63 @@ function Panel({ title, right, children }: { title: string; right?: ReactNode; c
       </div>
       {children}
     </div>
+  );
+}
+
+// ===== Ringkasan lintas unit (Super Admin, mode "Semua Unit") =====
+// Kartu per unit: perangkat up/down, insiden aktif & pool, personel. Klik kartu
+// = pindah unit aktif (setara memilih di unit switcher header).
+interface UnitSummary {
+  id: number; code: string; name: string; icon: string | null; active: number;
+  devices_total: number; devices_online: number; devices_offline: number;
+  incidents_active: number; incidents_pool: number; users_total: number;
+}
+function UnitSummaryStrip() {
+  const { user } = useAuth();
+  const isAdmin = hasRole(user, 'admin');
+  const allUnits = isAdmin && getActiveUnitId() == null;
+  const [rows, setRows] = useState<UnitSummary[]>([]);
+  useEffect(() => {
+    if (!allUnits) return;
+    const load = () => api.get('/units/summary').then((r) => setRows(r.data.summary || [])).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [allUnits]);
+  if (!allUnits || !rows.length) return null;
+  return (
+    <Panel title="RINGKASAN PER UNIT · SEMUA UNIT" right={<span className="text-[10px] text-text2">klik kartu untuk masuk ke unit</span>}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+        {rows.map((u) => (
+          <button
+            key={u.id}
+            onClick={() => { setActiveUnitId(u.id); window.location.reload(); }}
+            className={`text-left rounded-lg border p-3 hover:border-accent/60 transition-colors ${u.incidents_active > 0 ? 'border-warn/40 bg-warn/5' : 'border-border bg-surface2'} ${u.active ? '' : 'opacity-60'}`}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xl">{u.icon || '🏢'}</span>
+              <div className="min-w-0">
+                <div className="text-[12px] font-bold truncate">{u.code} — {u.name}</div>
+                <div className="text-[9px] text-text2">{u.users_total} personel{u.active ? '' : ' · nonaktif'}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 text-center">
+              <div className="rounded bg-success/10 py-1">
+                <div className="text-[13px] font-extrabold text-success">{u.devices_online}<span className="text-[9px] text-text2 font-normal">/{u.devices_total}</span></div>
+                <div className="text-[8px] text-text2 uppercase">Online</div>
+              </div>
+              <div className="rounded bg-danger/10 py-1">
+                <div className="text-[13px] font-extrabold text-danger">{u.devices_offline}</div>
+                <div className="text-[8px] text-text2 uppercase">Offline</div>
+              </div>
+              <div className="rounded bg-warn/10 py-1">
+                <div className="text-[13px] font-extrabold text-warn">{u.incidents_active}<span className="text-[9px] text-text2 font-normal">{u.incidents_pool ? ` (${u.incidents_pool} pool)` : ''}</span></div>
+                <div className="text-[8px] text-text2 uppercase">Insiden</div>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </Panel>
   );
 }

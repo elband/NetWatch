@@ -5,9 +5,10 @@ import { stampFiles } from '../utils/photoStamp';
 const KATEGORI =['Komputer', 'Printer', 'Internet', 'WiFi', 'CCTV', 'Access Control', 'FIDS', 'Telepon', 'Monitor Informasi', 'Server', 'Keamanan', 'Operasional', 'Umum', 'Lainnya'];
 const URG: Record<string, string> = { kritis: '🔴 Kritis', tinggi: '🟠 Tinggi', sedang: '🟡 Sedang', rendah: '🟢 Rendah' };
 const MAX_MB = 10;
-const emptyForm = { nama: '', hp: '', jenis: 'Komputer', judul: '', urgensi: 'sedang', detail: '', gedung: '', ruang: '' };
+const emptyForm = { nama: '', hp: '', jenis: 'Komputer', judul: '', urgensi: 'sedang', detail: '', gedung: '', ruang: '', unit_id: '' };
 
 interface Room { kode: string; nama: string; gedung: string | null; lantai: string | null; area: string | null }
+interface PublicUnit { id: number; code: string; name: string; icon: string | null }
 
 // Ikon garis (stroke) ringan — meniru gaya mockup tanpa dependensi tambahan.
 function Icon({ name, className = '', size = 18 }: { name: string; className?: string; size?: number }) {
@@ -53,11 +54,20 @@ export default function LaporPublik() {
   const [showTrack, setShowTrack] = useState(!!trackParam);
   const fileRef = useRef<HTMLInputElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
+  const [units, setUnits] = useState<PublicUnit[]>([]);
 
   useEffect(() => {
     if (!roomCode) return;
     api.get(`/rooms/public/${encodeURIComponent(roomCode)}`).then((r) => setRoom(r.data.room)).catch(() => setRoomErr('Kode ruangan tidak dikenali. Anda tetap dapat mengisi lokasi manual.'));
   }, [roomCode]);
+  // Multi-unit: pelapor memilih unit tujuan (default unit pertama = ELB).
+  useEffect(() => {
+    api.get('/units/public').then((r) => {
+      const list: PublicUnit[] = r.data.units || [];
+      setUnits(list);
+      if (list.length) setForm((f) => (f.unit_id ? f : { ...f, unit_id: String(list[0].id) }));
+    }).catch(() => {});
+  }, []);
   // Dari tautan WA: ?track=ID → langsung lacak.
   useEffect(() => { if (trackParam) doTrack(); /* eslint-disable-next-line */ }, []);
 
@@ -171,6 +181,17 @@ export default function LaporPublik() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Unit tujuan (multi-unit) */}
+                {units.length > 1 && (
+                  <div className={`${fieldBox} sm:col-span-2`}>
+                    <div className={iconBox}><Icon name="flag" /></div>
+                    <div className="min-w-0 flex-1"><div className={label}>Unit Tujuan Laporan</div>
+                      <select className={`${inp} appearance-none cursor-pointer`} value={form.unit_id} onChange={(e) => setForm({ ...form, unit_id: e.target.value })}>
+                        {units.map((u) => <option key={u.id} value={u.id} className="bg-[#15122b]">{u.icon || '🏢'} {u.name}</option>)}
+                      </select></div>
+                    <span className="text-slate-500"><Icon name="chevDown" size={16} /></span>
+                  </div>
+                )}
                 {/* Nama */}
                 <div className={fieldBox}>
                   <div className={iconBox}><Icon name="user" /></div>

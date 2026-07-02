@@ -1,10 +1,12 @@
 import { pool } from '../db/pool.js';
 import { snapshotAndNotifyOnDuty } from './incidentController.js';
 import { nextIncidentId } from '../utils/incidentId.js';
+import { unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
 export async function listDevices(req, res) {
   // under_maintenance = perangkat sedang dalam jendela maintenance aktif
   // (cocok per-device, per-lokasi via nama, atau site-wide bila kedua kolom NULL).
+  const uf = unitFilter(req.unitId, 'd.unit_id');
   const [rows] = await pool.query(
     `SELECT d.*, loc.name AS location_name, loc.lat AS location_lat, loc.lng AS location_lng, EXISTS(
         SELECT 1 FROM maintenance_windows mw
@@ -16,7 +18,9 @@ export async function listDevices(req, res) {
       ) AS under_maintenance
      FROM devices d
      LEFT JOIN locations loc ON loc.id = d.location_id
-     ORDER BY d.id`
+     WHERE 1=1${uf.clause}
+     ORDER BY d.id`,
+    uf.params
   );
   res.json({ devices: rows });
 }
@@ -28,13 +32,15 @@ export async function createDevice(req, res) {
   const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   if (!name || !ip || !type) return res.status(400).json({ error: 'Nama, IP, tipe wajib diisi' });
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const inspReq = inspect_required == null ? 1 : (inspect_required ? 1 : 0);
   const locId = location_id === '' || location_id == null ? null : Number(location_id);
   const [result] = await pool.query(
-    `INSERT INTO devices (name, ip, type, category, icon, loc, location_id, inspect_required, status, ssh_host, ssh_port, ssh_username, lat, lng,
+    `INSERT INTO devices (unit_id, name, ip, type, category, icon, loc, location_id, inspect_required, status, ssh_host, ssh_port, ssh_username, lat, lng,
        check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, locId, inspReq, ssh_host || ip, ssh_port || 22, ssh_username || null,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [unitId, name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, locId, inspReq, ssh_host || ip, ssh_port || 22, ssh_username || null,
      lat === '' || lat == null ? null : Number(lat), lng === '' || lng == null ? null : Number(lng),
      normCheckType(check_type), check_port ? Number(check_port) : null, check_url?.trim() || null,
      snmp_enabled ? 1 : 0, snmp_community?.trim() || 'public', snmp_port ? Number(snmp_port) : 161]
@@ -48,7 +54,7 @@ export async function updateDevice(req, res) {
   const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   const [existing] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
-  if (!existing[0]) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  if (!existing[0] || !rowInUnit(existing[0], req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   await pool.query(
     `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, location_id=?, inspect_required=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=?,
        check_type=?, check_port=?, check_url=?, snmp_enabled=?, snmp_community=?, snmp_port=? WHERE id=?`,
@@ -81,7 +87,8 @@ export async function updateDevice(req, res) {
 
 export async function deleteDevice(req, res) {
   const id = Number(req.params.id);
-  await pool.query('DELETE FROM devices WHERE id = ?', [id]);
+  const uf = unitFilter(req.unitId);
+  await pool.query(`DELETE FROM devices WHERE id = ?${uf.clause}`, [id, ...uf.params]);
   res.json({ ok: true });
 }
 
@@ -91,7 +98,7 @@ export async function requestAlarm(req, res) {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   const device = rows[0];
-  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   const conn = await pool.getConnection();
   try {
     await conn.query('UPDATE devices SET alarm_override=1, off_reason=NULL WHERE id=?', [id]);
@@ -103,9 +110,9 @@ export async function requestAlarm(req, res) {
         incidentId = await nextIncidentId(conn);
         const issue = 'Perangkat tidak merespons - dialarmkan manual (override jam malam)';
         await conn.query(
-          `INSERT INTO incidents (id, device_id, device_name, ip, issue, priority, tech_id, status, step, source)
-           VALUES (?, ?, ?, ?, ?, 'kritis', NULL, 'aktif', 0, 'manual')`,
-          [incidentId, id, device.name, device.ip, issue]
+          `INSERT INTO incidents (id, unit_id, device_id, device_name, ip, issue, priority, tech_id, status, step, source)
+           VALUES (?, ?, ?, ?, ?, ?, 'kritis', NULL, 'aktif', 0, 'manual')`,
+          [incidentId, device.unit_id ?? null, id, device.name, device.ip, issue]
         );
         await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [incidentId, `Alarm diminta manual oleh ${req.user.name} (override aturan jam malam).`]);
         notified = (await snapshotAndNotifyOnDuty(conn, { id: incidentId, priority: 'kritis', deviceName: device.name, issue })) || 0;
@@ -124,7 +131,7 @@ export async function toggleMonitor(req, res) {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   const device = rows[0];
-  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   const next = device.monitor_enabled ? 0 : 1;
   await pool.query('UPDATE devices SET monitor_enabled=? WHERE id=?', [next, id]);
   const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
@@ -137,7 +144,7 @@ export async function toggleAlwaysOn(req, res) {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   const device = rows[0];
-  if (!device) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   const next = device.always_on ? 0 : 1;
   // Saat ditandai selalu aktif, pastikan monitoring hidup & bersihkan status "dimatikan".
   if (next) await pool.query("UPDATE devices SET always_on=1, monitor_enabled=1, off_reason = CASE WHEN off_reason='dimatikan' THEN NULL ELSE off_reason END WHERE id=?", [id]);
@@ -156,6 +163,9 @@ const RANGE = {
 
 export async function getDeviceMetrics(req, res) {
   const id = Number(req.params.id);
+  // Scope metrik lewat perangkat induknya (device_metrics tidak ber-unit).
+  const [[device]] = await pool.query('SELECT id, unit_id FROM devices WHERE id = ?', [id]);
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   const range = RANGE[req.query.range] ? req.query.range : '24h';
   const { hours, bucketSec } = RANGE[range];
   const [rows] = await pool.query(

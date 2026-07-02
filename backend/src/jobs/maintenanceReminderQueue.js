@@ -27,7 +27,7 @@ export async function scheduleMaintenanceReminder() {
 // Dipanggil oleh worker (dan bisa dipanggil manual/test) — query + kirim WA.
 export async function sendDailyMaintenanceReminders() {
   const [maint] = await pool.query(
-    `SELECT em.id, em.scheduled_date, em.task, em.status, d.name AS device_name, d.loc AS device_loc
+    `SELECT em.id, em.scheduled_date, em.task, em.status, em.unit_id, d.name AS device_name, d.loc AS device_loc
      FROM equipment_maintenance em
      JOIN devices d ON d.id = em.device_id
      WHERE em.scheduled_date = CURDATE() AND em.status = 'rencana'
@@ -36,16 +36,9 @@ export async function sendDailyMaintenanceReminders() {
 
   if (maint.length === 0) return { sent: 0, technicians: 0 };
 
-  const lines = maint.map((m) => `- ${m.device_name}${m.device_loc ? ` (${m.device_loc})` : ''}: ${m.task}`);
-  const message =
-    `Pengingat Maintenance Peralatan - Hari Ini\n\n` +
-    `Berikut rencana maintenance peralatan yang dijadwalkan hari ini:\n` +
-    lines.join('\n') +
-    `\n\nSilakan koordinasi pelaksanaan dengan tim. Terima kasih.`;
-
   // Teknisi yang dinas hari ini (bukan libur/cuti/dinas_luar).
   const [techs] = await pool.query(
-    `SELECT u.id
+    `SELECT u.id, u.unit_id
      FROM users u
      JOIN shifts s ON s.user_id = u.id
      WHERE s.shift_date = CURDATE()
@@ -54,11 +47,21 @@ export async function sendDailyMaintenanceReminders() {
        AND u.phone IS NOT NULL AND u.phone <> ''`
   );
 
+  // Multi-unit: tiap teknisi hanya menerima daftar maintenance unitnya sendiri
+  // (baris lama tanpa unit dianggap milik semua unit agar tidak terlewat).
+  const buildMessage = (rows) =>
+    `Pengingat Maintenance Peralatan - Hari Ini\n\n` +
+    `Berikut rencana maintenance peralatan yang dijadwalkan hari ini:\n` +
+    rows.map((m) => `- ${m.device_name}${m.device_loc ? ` (${m.device_loc})` : ''}: ${m.task}`).join('\n') +
+    `\n\nSilakan koordinasi pelaksanaan dengan tim. Terima kasih.`;
+
   let sent = 0;
   for (const t of techs) {
+    const rows = maint.filter((m) => m.unit_id == null || t.unit_id == null || Number(m.unit_id) === Number(t.unit_id));
+    if (!rows.length) continue;
     if (!(await isNotifyEnabledForUser('maintenance_reminder', t.id))) continue;
     try {
-      await queueWaNotification({ type: 'other', toUserId: t.id, message });
+      await queueWaNotification({ type: 'other', toUserId: t.id, message: buildMessage(rows) });
       sent += 1;
     } catch (err) {
       logger.error({ err: err?.message, userId: t.id }, '[maintenanceReminder] gagal queue WA');

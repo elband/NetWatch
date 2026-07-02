@@ -6,6 +6,7 @@ import {
   listWindowPhotos, addWindowPhotos, removeWindowPhoto, completeMaintenanceWindow, MW_PHOTO_DIR,
 } from '../controllers/maintenanceController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope } from '../middleware/unitScope.js';
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -17,7 +18,7 @@ const upload = multer({
 });
 
 const router = Router();
-router.use(requireAuth);
+router.use(requireAuth, unitScope);
 router.get('/', listMaintenanceWindows);
 router.post('/', requireRole('admin', 'koordinator'), createMaintenanceWindow);
 

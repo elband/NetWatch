@@ -14,9 +14,12 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Token tidak valid atau kedaluwarsa' });
   }
   // Verifikasi akun masih ada & aktif — akses dashboard langsung hilang bila di-nonaktifkan/dihapus.
+  // unit_id selalu diambil segar dari DB (bukan dari token) agar pemindahan unit langsung efektif
+  // dan token lama (tanpa klaim unit) tetap ter-scope benar.
   try {
-    const [rows] = await pool.query('SELECT active FROM users WHERE id = ? LIMIT 1', [payload.id]);
+    const [rows] = await pool.query('SELECT active, unit_id FROM users WHERE id = ? LIMIT 1', [payload.id]);
     if (!rows[0] || !rows[0].active) return res.status(401).json({ error: 'Akun nonaktif atau telah dihapus. Silakan hubungi admin.' });
+    payload.unit_id = rows[0].unit_id ?? null;
   } catch {
     return res.status(500).json({ error: 'Gagal memverifikasi akun.' });
   }

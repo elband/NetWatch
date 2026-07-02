@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 // Lokasi kantor & ambang (diatur admin via Pengaturan, key 'office').
 const OFFICE_DEFAULT = { lat: -0.3748, lng: 117.2536, radius_m: 400, acc_m: 150, enabled: true };
@@ -127,8 +129,9 @@ router.post('/check-in', async (req, res) => {
     await pool.query('UPDATE attendance SET check_in_at=NOW(), check_in_lat=?, check_in_lng=?, check_in_dist_m=?, accuracy_m=?, check_in_ip=?, device_id=?, check_in_vpn=?, flagged=GREATEST(flagged,?), reason=? WHERE id=?',
       [lat ?? null, lng ?? null, dist, acc, ip, deviceId || null, fl, fl, reason, exist[0].id]);
   } else {
-    await pool.query('INSERT INTO attendance (user_id, work_date, check_in_at, check_in_lat, check_in_lng, check_in_dist_m, accuracy_m, check_in_ip, device_id, check_in_vpn, flagged, reason) VALUES (?,?,NOW(),?,?,?,?,?,?,?,?,?)',
-      [req.user.id, date, lat ?? null, lng ?? null, dist, acc, ip, deviceId || null, fl, fl, reason]);
+    // unit_id absensi = unit milik user sendiri.
+    await pool.query('INSERT INTO attendance (user_id, work_date, check_in_at, check_in_lat, check_in_lng, check_in_dist_m, accuracy_m, check_in_ip, device_id, check_in_vpn, flagged, reason, unit_id) VALUES (?,?,NOW(),?,?,?,?,?,?,?,?,?,?)',
+      [req.user.id, date, lat ?? null, lng ?? null, dist, acc, ip, deviceId || null, fl, fl, reason, req.user.unit_id ?? null]);
   }
   await audit(req.user, 'attendance_checkin', 'attendance', null, vpn ? `flagged: ${reason}` : 'OK');
   if (vpn) await notifyCoords(`⚠️ *Absensi Mencurigakan*\n${req.user.name} absen masuk dengan anomali.\nAlasan: ${reason}\nPerforma bulan ini dikurangi 50%.`);
@@ -160,11 +163,12 @@ router.post('/check-out', async (req, res) => {
 // ===== Manajemen (admin/koordinator) =====
 router.get('/', requireRole('admin', 'koordinator'), async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : todayKey().slice(0, 7);
+  const uf = unitFilter(req.unitId, 'a.unit_id');
   const [rows] = await pool.query(
     `SELECT a.*, u.name, u.jabatan FROM attendance a JOIN users u ON u.id=a.user_id
-      WHERE DATE_FORMAT(a.work_date,'%Y-%m')=? ${req.query.userId ? 'AND a.user_id=?' : ''} ${req.query.flagged === '1' ? 'AND a.flagged=1' : ''}
+      WHERE DATE_FORMAT(a.work_date,'%Y-%m')=?${uf.clause} ${req.query.userId ? 'AND a.user_id=?' : ''} ${req.query.flagged === '1' ? 'AND a.flagged=1' : ''}
       ORDER BY a.work_date DESC, u.name`,
-    req.query.userId ? [month, Number(req.query.userId)] : [month]
+    req.query.userId ? [month, ...uf.params, Number(req.query.userId)] : [month, ...uf.params]
   );
   res.json({ attendance: rows, office: await getOffice() });
 });
@@ -175,7 +179,8 @@ router.get('/recap', requireRole('admin', 'koordinator'), async (req, res) => {
   const [y, m] = month.split('-').map(Number);
   const start = `${month}-01`, end = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
   const today = todayKey();
-  const [techs] = await pool.query("SELECT id, name, jabatan, active FROM users WHERE (role='teknisi' OR JSON_CONTAINS(roles,'\"teknisi\"')) ORDER BY active DESC, name");
+  const ufU = unitFilter(req.unitId, 'unit_id');
+  const [techs] = await pool.query(`SELECT id, name, jabatan, active FROM users WHERE (role='teknisi' OR JSON_CONTAINS(roles,'"teknisi"'))${ufU.clause} ORDER BY active DESC, name`, ufU.params);
   const recap = [];
   for (const t of techs) {
     const [[at]] = await pool.query('SELECT COUNT(check_in_at) hadir, COALESCE(SUM(flagged),0) flagged FROM attendance WHERE user_id=? AND work_date>=? AND work_date<?', [t.id, start, end]);
@@ -208,6 +213,7 @@ router.get('/absences', requireRole('admin', 'koordinator'), async (req, res) =>
   const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : todayKey().slice(0, 7);
   const [y, m] = month.split('-').map(Number);
   const start = `${month}-01`, end = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+  const uf = unitFilter(req.unitId, 'u.unit_id'); // scope roster teknisi per unit
   const [rows] = await pool.query(
     `SELECT s.user_id, u.name, u.jabatan, DATE_FORMAT(s.shift_date,'%Y-%m-%d') work_date, s.shift_type,
             ar.status, ar.note, ar.decided_at, du.name AS decided_by_name
@@ -216,12 +222,12 @@ router.get('/absences', requireRole('admin', 'koordinator'), async (req, res) =>
        LEFT JOIN attendance a ON a.user_id=s.user_id AND a.work_date=s.shift_date AND a.check_in_at IS NOT NULL
        LEFT JOIN absence_reviews ar ON ar.user_id=s.user_id AND ar.work_date=s.shift_date
        LEFT JOIN users du ON du.id=ar.decided_by
-      WHERE s.shift_type NOT IN ('libur','dinas_luar','cuti')
+      WHERE s.shift_type NOT IN ('libur','dinas_luar','cuti')${uf.clause}
         AND s.shift_date>=? AND s.shift_date<? AND s.shift_date<CURDATE()
         AND a.id IS NULL
         AND NOT EXISTS (SELECT 1 FROM leave_requests lr WHERE lr.user_id=s.user_id AND lr.status='disetujui' AND s.shift_date BETWEEN lr.start_date AND lr.end_date)
       ORDER BY (ar.status IS NULL) DESC, s.shift_date DESC, u.name`,
-    [start, end]
+    [...uf.params, start, end]
   );
   res.json({ month, absences: rows });
 });
@@ -233,8 +239,8 @@ router.post('/absences/decide', requireRole('admin', 'koordinator'), async (req,
   const status = req.body.status;
   const note = (req.body.note || '').trim() || null;
   if (!userId || !/^\d{4}-\d{2}-\d{2}$/.test(workDate)) return res.status(400).json({ error: 'userId & workDate (YYYY-MM-DD) wajib.' });
-  const [[u]] = await pool.query('SELECT name FROM users WHERE id=?', [userId]);
-  if (!u) return res.status(404).json({ error: 'Teknisi tidak ditemukan.' });
+  const [[u]] = await pool.query('SELECT name, unit_id FROM users WHERE id=?', [userId]);
+  if (!u || !rowInUnit(u, req.unitId)) return res.status(404).json({ error: 'Teknisi tidak ditemukan.' });
 
   if (status === 'reset') {
     await pool.query('DELETE FROM absence_reviews WHERE user_id=? AND work_date=?', [userId, workDate]);
@@ -242,10 +248,13 @@ router.post('/absences/decide', requireRole('admin', 'koordinator'), async (req,
     return res.json({ ok: true, status: null });
   }
   if (status !== 'penalti' && status !== 'dimaafkan') return res.status(400).json({ error: 'status tidak valid.' });
+  // unit_id tinjauan mengikuti unit USER TARGET.
+  const unitId = u.unit_id ?? insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   await pool.query(
-    `INSERT INTO absence_reviews (user_id, work_date, status, note, decided_by) VALUES (?,?,?,?,?)
-     ON DUPLICATE KEY UPDATE status=VALUES(status), note=VALUES(note), decided_by=VALUES(decided_by), decided_at=NOW()`,
-    [userId, workDate, status, note, req.user.id]
+    `INSERT INTO absence_reviews (user_id, work_date, status, note, decided_by, unit_id) VALUES (?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE status=VALUES(status), note=VALUES(note), decided_by=VALUES(decided_by), decided_at=NOW(), unit_id=VALUES(unit_id)`,
+    [userId, workDate, status, note, req.user.id, unitId]
   );
   await audit(req.user, status === 'penalti' ? 'absence_penalti' : 'absence_excuse', 'attendance', null, `${u.name} ${workDate}${note ? ' · ' + note : ''}`);
   const msg = status === 'penalti'
@@ -258,7 +267,8 @@ router.post('/absences/decide', requireRole('admin', 'koordinator'), async (req,
 // Tandai ulang VPN/wajar (admin) + audit.
 router.patch('/:id', requireRole('admin'), async (req, res) => {
   const flagged = req.body.flagged ? 1 : 0;
-  const [[a]] = await pool.query('SELECT a.work_date, u.name FROM attendance a JOIN users u ON u.id=a.user_id WHERE a.id=?', [Number(req.params.id)]);
+  const [[a]] = await pool.query('SELECT a.work_date, a.unit_id, u.name FROM attendance a JOIN users u ON u.id=a.user_id WHERE a.id=?', [Number(req.params.id)]);
+  if (!a || !rowInUnit(a, req.unitId)) return res.status(404).json({ error: 'Absensi tidak ditemukan.' });
   await pool.query('UPDATE attendance SET flagged=?, reason=COALESCE(?,reason) WHERE id=?', [flagged, req.body.reason || null, Number(req.params.id)]);
   await audit(req.user, flagged ? 'attendance_flag' : 'attendance_unflag', 'attendance', req.params.id, `${a?.name || ''} ${a ? ymd(a.work_date) : ''}${req.body.reason ? ' · ' + req.body.reason : ''}`);
   res.json({ ok: true });
@@ -272,7 +282,8 @@ router.get('/audit', requireRole('admin'), async (req, res) => {
 
 // Reset device binding (admin) — agar teknisi bisa ikat ulang perangkat baru.
 router.post('/reset-device/:userId', requireRole('admin'), async (req, res) => {
-  const [[u]] = await pool.query('SELECT name FROM users WHERE id=?', [Number(req.params.userId)]);
+  const [[u]] = await pool.query('SELECT name, unit_id FROM users WHERE id=?', [Number(req.params.userId)]);
+  if (!u || !rowInUnit(u, req.unitId)) return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
   await pool.query('UPDATE users SET device_id=NULL WHERE id=?', [Number(req.params.userId)]);
   await audit(req.user, 'device_reset', 'user', req.params.userId, `Reset perangkat absensi: ${u?.name || ''}`);
   res.json({ ok: true });

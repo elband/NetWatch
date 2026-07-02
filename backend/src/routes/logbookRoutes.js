@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
+import { unitScope, unitFilter } from '../middleware/unitScope.js';
 import { jsonToBuffer } from '../utils/xlsx.js';
 
 // Logbook peralatan: rekap bulanan per perangkat yang menggabungkan inspeksi harian,
 // hidupkan/matikan peralatan, maintenance, dan insiden/gangguan menjadi satu kronologi.
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 function monthRange(month) {
   const m = /^\d{4}-\d{2}$/.test(month) ? month : new Date().toISOString().slice(0, 7);
@@ -19,28 +21,38 @@ const dstr = (v) => (v ? String(v).slice(0, 10) : '');
 const tstr = (v) => { if (!v) return ''; const d = new Date(String(v).replace(' ', 'T')); return isNaN(d.getTime()) ? '' : d.toTimeString().slice(0, 5); };
 
 // Kumpulkan semua data bulan tsb lalu susun per perangkat + kronologi + rekap.
-export async function buildLogbook(month, q) {
+// unitId opsional (null = semua unit) — pemanggil lama (laporanRoutes) tetap kompatibel.
+export async function buildLogbook(month, q, unitId = null) {
   const { month: mm, start, end } = monthRange(month);
 
+  // Filter unit tiap query lewat unit PERANGKAT-nya (subquery devices) — konsisten
+  // dgn sumber unit saat INSERT & aman untuk baris legacy yang unit_id-nya kosong.
+  const devUnit = (col = 'device_id') =>
+    unitId != null
+      ? { clause: ` AND ${col} IN (SELECT id FROM devices WHERE unit_id = ?)`, params: [unitId] }
+      : { clause: '', params: [] };
+
+  const du = devUnit();
   const [insp] = await pool.query(
-    'SELECT device_id, inspect_date, slot, status, note, photo_url, verified, inspector_name, created_at FROM equipment_inspections WHERE inspect_date >= ? AND inspect_date < ?',
-    [start, end]
+    `SELECT device_id, inspect_date, slot, status, note, photo_url, verified, inspector_name, created_at FROM equipment_inspections WHERE inspect_date >= ? AND inspect_date < ?${du.clause}`,
+    [start, end, ...du.params]
   );
   const [pon] = await pool.query(
-    'SELECT device_id, on_date, state, note, photo_url, verified, done_by_name, created_at FROM equipment_poweron WHERE on_date >= ? AND on_date < ?',
-    [start, end]
+    `SELECT device_id, on_date, state, note, photo_url, verified, done_by_name, created_at FROM equipment_poweron WHERE on_date >= ? AND on_date < ?${du.clause}`,
+    [start, end, ...du.params]
   );
+  const dum = devUnit('m.device_id');
   const [maint] = await pool.query(
     `SELECT m.device_id, m.scheduled_date, m.task, m.status, m.note, m.done_at, u.name AS done_by_name,
             (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id = m.id) AS photo_count,
             (SELECT p.url FROM equipment_maintenance_photos p WHERE p.maintenance_id = m.id ORDER BY p.id ASC LIMIT 1) AS first_photo
        FROM equipment_maintenance m LEFT JOIN users u ON u.id = m.done_by
-      WHERE m.plan_month = ?`,
-    [mm]
+      WHERE m.plan_month = ?${dum.clause}`,
+    [mm, ...dum.params]
   );
   const [inc] = await pool.query(
-    "SELECT id, device_id, issue, priority, status, created_at, resolved_at, duration_min FROM incidents WHERE device_id IS NOT NULL AND created_at >= ? AND created_at < ?",
-    [start, end]
+    `SELECT id, device_id, issue, priority, status, created_at, resolved_at, duration_min FROM incidents WHERE device_id IS NOT NULL AND created_at >= ? AND created_at < ?${du.clause}`,
+    [start, end, ...du.params]
   );
   // Metrik pemantauan bulan tsb per perangkat: uptime%, latency rata-rata & maks
   // (kecualikan sampel dalam jendela maintenance) — konsisten dgn getDeviceMetrics.
@@ -48,15 +60,16 @@ export async function buildLogbook(month, q) {
     `SELECT device_id, COUNT(*) AS samples,
             ROUND(AVG(status <> 'offline') * 100, 2) AS up_pct,
             ROUND(AVG(ping_ms)) AS avg_ping, MAX(ping_ms) AS max_ping
-       FROM device_metrics WHERE recorded_at >= ? AND recorded_at < ? AND in_maint = 0 GROUP BY device_id`,
-    [start, end]
+       FROM device_metrics WHERE recorded_at >= ? AND recorded_at < ? AND in_maint = 0${du.clause} GROUP BY device_id`,
+    [start, end, ...du.params]
   );
   const metricMap = new Map(metrics.map((m) => [m.device_id, m]));
 
   // Perangkat yang punya aktivitas ATAU metrik pemantauan bulan ini (union) — beserta info dasarnya.
   const ids = [...new Set([...insp, ...pon, ...maint, ...inc, ...metrics].map((r) => r.device_id).filter(Boolean))];
   if (!ids.length) return { month: mm, devices: [] };
-  const [devs] = await pool.query(`SELECT id, name, ip, type, loc FROM devices WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+  const ufd = unitFilter(unitId, 'unit_id');
+  const [devs] = await pool.query(`SELECT id, name, ip, type, loc FROM devices WHERE id IN (${ids.map(() => '?').join(',')})${ufd.clause}`, [...ids, ...ufd.params]);
 
   const map = new Map(devs.map((d) => {
     const mt = metricMap.get(d.id);
@@ -103,11 +116,11 @@ export async function buildLogbook(month, q) {
 }
 
 router.get('/', async (req, res) => {
-  res.json(await buildLogbook(req.query.month, req.query.q));
+  res.json(await buildLogbook(req.query.month, req.query.q, req.unitId));
 });
 
 router.get('/export', async (req, res) => {
-  const { month, devices } = await buildLogbook(req.query.month, req.query.q);
+  const { month, devices } = await buildLogbook(req.query.month, req.query.q, req.unitId);
   const KIND = { inspeksi: 'Inspeksi Harian', power: 'Hidupkan/Matikan', maintenance: 'Maintenance', insiden: 'Insiden' };
   const rows = [];
   for (const d of devices) {

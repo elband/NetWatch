@@ -5,12 +5,14 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(unitScope);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(__dirname, '..', '..', 'uploads', 'activities');
@@ -38,8 +40,9 @@ router.get('/mine', async (req, res) => {
 // Semua kegiatan (koordinator/admin) — opsional ?status=menunggu.
 router.get('/', requireRole('koordinator', 'admin'), async (req, res) => {
   const { status } = req.query;
-  let sql = `SELECT a.*, u.name AS user_name, u.emoji AS user_emoji FROM activities a JOIN users u ON u.id = a.user_id WHERE 1=1`;
-  const params = [];
+  const uf = unitFilter(req.unitId, 'a.unit_id');
+  let sql = `SELECT a.*, u.name AS user_name, u.emoji AS user_emoji FROM activities a JOIN users u ON u.id = a.user_id WHERE 1=1${uf.clause}`;
+  const params = [...uf.params];
   if (status) { sql += ' AND a.status = ?'; params.push(status); }
   sql += ' ORDER BY FIELD(a.status,"menunggu","disetujui","ditolak"), a.created_at DESC';
   const [rows] = await pool.query(sql, params);
@@ -54,10 +57,11 @@ router.post('/', upload.single('bukti'), async (req, res) => {
     return res.status(400).json({ error: 'Judul kegiatan dan tanggal (YYYY-MM-DD) wajib diisi.' });
   }
   const buktiUrl = req.file ? `/uploads/activities/${req.file.filename}` : null;
+  // unit_id kegiatan = unit milik user sendiri (pengajuan pribadi).
   const [r] = await pool.query(
-    `INSERT INTO activities (user_id, type, title, detail, activity_date, start_time, end_time, bukti_url)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [req.user.id, t, title.trim(), detail?.trim() || null, activityDate, startTime || null, endTime || null, buktiUrl]
+    `INSERT INTO activities (user_id, type, title, detail, activity_date, start_time, end_time, bukti_url, unit_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [req.user.id, t, title.trim(), detail?.trim() || null, activityDate, startTime || null, endTime || null, buktiUrl, req.user.unit_id ?? insertUnitId(req)]
   );
   const [rows] = await pool.query('SELECT * FROM activities WHERE id = ?', [r.insertId]);
   const act = rows[0];
@@ -80,7 +84,7 @@ async function decide(req, res, status) {
   const note = (req.body.note || '').trim() || null;
   const [rows] = await pool.query('SELECT a.*, u.name AS user_name FROM activities a JOIN users u ON u.id = a.user_id WHERE a.id = ?', [id]);
   const act = rows[0];
-  if (!act) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
+  if (!act || !rowInUnit(act, req.unitId)) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
   if (act.status !== 'menunggu') return res.status(400).json({ error: 'Kegiatan sudah diproses.' });
 
   await pool.query(
