@@ -154,7 +154,7 @@ export default function LaporPublik() {
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-[22px] leading-tight font-extrabold tracking-tight">Pelaporan Fasilitas</div>
-            <div className="text-[12px] text-slate-400">Unit Elektronika Bandara • A.P.T. Pranoto</div>
+            <div className="text-[12px] text-slate-400">Seksi Teknik dan Operasi • Bandara A.P.T Pranoto</div>
           </div>
           <button onClick={openTrack} className="hidden sm:flex items-center gap-2 rounded-xl border border-violet-400/40 bg-violet-500/10 px-3.5 py-2 text-[12px] font-semibold text-violet-200 hover:bg-violet-500/20 transition-colors whitespace-nowrap">
             <Icon name="clock" size={15} /> Riwayat Laporan

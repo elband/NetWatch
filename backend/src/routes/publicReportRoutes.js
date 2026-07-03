@@ -48,6 +48,9 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
       const [un] = await conn.query('SELECT id FROM units WHERE id=? AND active=1', [reqUnit]);
       if (un[0]) unitId = un[0].id;
     }
+    // Nama unit tujuan untuk narasi WA ke pelapor (mengikuti unit yang dipilih).
+    const [[unitRow]] = await conn.query('SELECT name FROM units WHERE id=?', [unitId]);
+    const unitName = unitRow?.name || 'Elektronika Bandara';
     const id = await nextReportId(conn);
     await conn.query(
       `INSERT INTO public_reports (id, nama, nip, unit, hp, judul, jenis, merk, inv, gedung, ruang, room_id, room_code, urgensi, detail, status, unit_id)
@@ -73,7 +76,7 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
       const trackUrl = `${base}/lapor?track=${id}`;
       const sapaan = b.nama?.trim() ? ` ${b.nama.trim()}` : '';
       const prioLabel = { kritis: 'Kritis 🔴', tinggi: 'Tinggi 🟠', sedang: 'Sedang 🟡', rendah: 'Rendah 🟢' }[prio] || 'Sedang';
-      const msg = `Halo${sapaan} 🙏\n\nTerima kasih telah melaporkan gangguan fasilitas. Laporan Anda *telah kami terima* dan diteruskan ke tim teknisi Unit Elektronika Bandara.\n\n📋 *Nomor Tiket:* ${id}\n🔧 *Gangguan:* ${b.judul.trim()}\n📍 *Lokasi:* ${ruang || gedung || '-'}\n⚡ *Prioritas:* ${prioLabel}\n⏱️ *Status:* Menunggu penanganan\n\n🔎 Pantau perkembangan laporan Anda:\n${trackUrl}\n\nTim kami akan segera menindaklanjuti. Terima kasih atas partisipasinya menjaga kelancaran layanan bandara. 🛫\n\n— Unit Elektronika Bandara\nA.P.T. Pranoto Samarinda`;
+      const msg = `Halo${sapaan} 🙏\n\nTerima kasih telah melaporkan gangguan fasilitas. Laporan Anda *telah kami terima* dan diteruskan ke tim teknisi Unit ${unitName}.\n\n📋 *Nomor Tiket:* ${id}\n🔧 *Gangguan:* ${b.judul.trim()}\n📍 *Lokasi:* ${ruang || gedung || '-'}\n⚡ *Prioritas:* ${prioLabel}\n⏱️ *Status:* Menunggu penanganan\n\n🔎 Pantau perkembangan laporan Anda:\n${trackUrl}\n\nTim kami akan segera menindaklanjuti. Terima kasih atas partisipasinya menjaga kelancaran layanan bandara. 🛫\n\n— Seksi Teknik dan Operasi\nBandara A.P.T Pranoto`;
       try { await queueWaRaw({ type: 'other', toLabel: `Pelapor ${b.nama?.trim() || id}`, phone: reporterPhone, message: msg, relatedIncidentId: incId }); } catch { /* abaikan */ }
     }
     res.status(201).json({ id, incident_id: incId });
