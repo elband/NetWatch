@@ -903,3 +903,80 @@ CREATE TABLE IF NOT EXISTS asset_metric_types (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_amt (unit_id, metric_key)
 ) ENGINE=InnoDB;
+
+-- ===== Fase 3: checklist inspeksi, preventive maintenance & riwayat status =====
+CREATE TABLE IF NOT EXISTS checklist_templates (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  name VARCHAR(120) NOT NULL,
+  category VARCHAR(80) DEFAULT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ct_unit (unit_id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS checklist_template_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  template_id INT NOT NULL,
+  label VARCHAR(160) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_cti_tpl FOREIGN KEY (template_id) REFERENCES checklist_templates(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS checklist_runs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  unit_id INT DEFAULT NULL,
+  template_id INT DEFAULT NULL,
+  run_date DATE NOT NULL,
+  overall ENUM('baik','perhatian','rusak') NOT NULL DEFAULT 'baik',
+  note VARCHAR(255) DEFAULT NULL,
+  photo_url VARCHAR(255) DEFAULT NULL,
+  done_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_cr_device_date (device_id, run_date),
+  CONSTRAINT fk_cr_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS checklist_run_items (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  run_id BIGINT NOT NULL,
+  label VARCHAR(160) NOT NULL,
+  result ENUM('ok','tidak','na') NOT NULL DEFAULT 'ok',
+  note VARCHAR(255) DEFAULT NULL,
+  CONSTRAINT fk_cri_run FOREIGN KEY (run_id) REFERENCES checklist_runs(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS asset_pm_plans (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  unit_id INT DEFAULT NULL,
+  name VARCHAR(120) NOT NULL,
+  trigger_type ENUM('hours','calendar') NOT NULL DEFAULT 'hours',
+  metric_key VARCHAR(40) DEFAULT NULL,
+  interval_hours DECIMAL(10,2) DEFAULT NULL,
+  interval_days INT DEFAULT NULL,
+  anchor_value DECIMAL(12,2) DEFAULT NULL,
+  anchor_date DATE DEFAULT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_pm_device (device_id), INDEX idx_pm_unit (unit_id),
+  CONSTRAINT fk_pm_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS asset_pm_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  plan_id INT NOT NULL,
+  device_id INT NOT NULL,
+  done_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  meter_value DECIMAL(12,2) DEFAULT NULL,
+  note VARCHAR(255) DEFAULT NULL,
+  done_by INT DEFAULT NULL,
+  INDEX idx_pmh_plan (plan_id),
+  CONSTRAINT fk_pmh_plan FOREIGN KEY (plan_id) REFERENCES asset_pm_plans(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS asset_status_log (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  unit_id INT DEFAULT NULL,
+  op_status ENUM('operasional','standby','rusak','perbaikan') NOT NULL,
+  changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  changed_by INT DEFAULT NULL,
+  INDEX idx_asl_device_time (device_id, changed_at),
+  CONSTRAINT fk_asl_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

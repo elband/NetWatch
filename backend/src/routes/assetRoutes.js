@@ -11,6 +11,12 @@ import {
   listMetricTypes, createMetricType, updateMetricType, deleteMetricType,
   getPublicAsset,
 } from '../controllers/assetController.js';
+import {
+  listTemplates, createTemplate, updateTemplate, deleteTemplate,
+  assetChecklist, createRun,
+  listPm, createPm, updatePm, deletePm, donePm, listDue,
+  availability,
+} from '../controllers/assetOpsController.js';
 
 const router = Router();
 
@@ -42,6 +48,17 @@ router.post('/metric-types', requireRole('admin', 'koordinator'), createMetricTy
 router.put('/metric-types/:id', requireRole('admin', 'koordinator'), updateMetricType);
 router.delete('/metric-types/:id', requireRole('admin', 'koordinator'), deleteMetricType);
 
+// ── Fase 3: checklist template, PM, availability (semua literal → sebelum '/:id') ──
+router.get('/checklist-templates', listTemplates);
+router.post('/checklist-templates', requireRole('admin', 'koordinator'), createTemplate);
+router.put('/checklist-templates/:id', requireRole('admin', 'koordinator'), updateTemplate);
+router.delete('/checklist-templates/:id', requireRole('admin', 'koordinator'), deleteTemplate);
+router.get('/pm/due', listDue);
+router.put('/pm/:planId', requireRole('admin', 'koordinator', 'teknisi'), updatePm);
+router.delete('/pm/:planId', requireRole('admin', 'koordinator'), deletePm);
+router.post('/pm/:planId/done', requireRole('admin', 'koordinator', 'teknisi'), donePm);
+router.get('/availability', availability);
+
 // Aset fisik
 router.get('/', listAssets);
 router.post('/', requireRole('admin', 'koordinator', 'teknisi'), createAsset);
@@ -55,5 +72,11 @@ router.post('/:id/regenerate-qr', requireRole('admin', 'koordinator'), regenerat
 router.get('/:id/readings', listReadings);
 router.get('/:id/readings/latest', latestReadings);
 router.post('/:id/readings', requireRole('admin', 'koordinator', 'teknisi'), withReadingPhoto, addReading);
+
+// Checklist inspeksi & preventive maintenance per aset
+router.get('/:id/checklist', assetChecklist);
+router.post('/:id/checklist', requireRole('admin', 'koordinator', 'teknisi'), withReadingPhoto, createRun);
+router.get('/:id/pm', listPm);
+router.post('/:id/pm', requireRole('admin', 'koordinator', 'teknisi'), createPm);
 
 export default router;

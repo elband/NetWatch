@@ -9,6 +9,15 @@ import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middle
 const OP_STATUS = ['operasional', 'standby', 'rusak', 'perbaikan'];
 const newQrToken = () => crypto.randomBytes(16).toString('hex'); // 32 hex chars
 
+// Catat perubahan status aset → sumber laporan availability/MTBF/MTTR (Fase 3).
+// Menerima pool atau koneksi transaksi.
+export async function logAssetStatus(db, deviceId, unitId, opStatus, userId = null) {
+  await db.query(
+    'INSERT INTO asset_status_log (device_id, unit_id, op_status, changed_by) VALUES (?,?,?,?)',
+    [deviceId, unitId ?? null, opStatus, userId]
+  );
+}
+
 // ————— Aset fisik —————
 
 export async function listAssets(req, res) {
@@ -60,6 +69,7 @@ export async function createAsset(req, res) {
        icon?.trim() || '🔧', loc?.trim() || null, locId, opStatus, newQrToken()]
     );
     await conn.query("UPDATE devices SET ip = CONCAT('N/A-', id) WHERE id = ?", [result.insertId]);
+    await logAssetStatus(conn, result.insertId, unitId, opStatus, req.user.id);
     const [[asset]] = await conn.query('SELECT * FROM devices WHERE id = ?', [result.insertId]);
     res.status(201).json({ asset });
   } finally {
@@ -102,6 +112,7 @@ export async function setAssetStatus(req, res) {
   const [[existing]] = await pool.query("SELECT id, unit_id FROM devices WHERE id = ? AND asset_class = 'physical'", [id]);
   if (!existing || !rowInUnit(existing, req.unitId)) return res.status(404).json({ error: 'Aset tidak ditemukan' });
   await pool.query('UPDATE devices SET op_status = ? WHERE id = ?', [op_status, id]);
+  await logAssetStatus(pool, id, existing.unit_id, op_status, req.user.id);
   res.json({ ok: true, op_status });
 }
 
