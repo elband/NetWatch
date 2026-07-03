@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { confirmDialog } from './dialog';
-import type { PhysicalAsset, AssetMetricType, PmPlan } from '../types';
+import type { PhysicalAsset, AssetMetricType, PmPlan, Sparepart } from '../types';
+
+interface UsedPart { sparepart_id: number; qty: string }
 
 export default function PmModal({ asset, metricTypes, onClose, onSaved }: {
   asset: PhysicalAsset; metricTypes: AssetMetricType[]; onClose: () => void; onSaved?: () => void;
@@ -12,11 +14,16 @@ export default function PmModal({ asset, metricTypes, onClose, onSaved }: {
   const [form, setForm] = useState({ name: '', trigger_type: 'hours' as 'hours' | 'calendar', metric_key: cumulative[0]?.metric_key || '', interval_hours: '', interval_days: '', anchor_value: '', anchor_date: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [spareparts, setSpareparts] = useState<Sparepart[]>([]);
+  const [doneTarget, setDoneTarget] = useState<PmPlan | null>(null);
+  const [doneNote, setDoneNote] = useState('');
+  const [usedParts, setUsedParts] = useState<UsedPart[]>([]);
 
   const load = useCallback(() => {
     api.get(`/aset/${asset.id}/pm`).then((r) => setPlans(r.data.plans || [])).catch(() => setPlans([]));
   }, [asset.id]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.get('/spareparts').then((r) => setSpareparts(r.data.spareparts || [])).catch(() => {}); }, []);
 
   async function add() {
     if (!form.name.trim()) { setError('Nama PM wajib diisi.'); return; }
@@ -28,10 +35,12 @@ export default function PmModal({ asset, metricTypes, onClose, onSaved }: {
     } catch (e: any) { setError(e?.response?.data?.error || 'Gagal menyimpan PM.'); }
     finally { setBusy(false); }
   }
-  async function markDone(p: PmPlan) {
-    if (!await confirmDialog(`Tandai "${p.name}" selesai? Siklus akan direset dari kondisi saat ini.`)) return;
-    await api.post(`/aset/pm/${p.id}/done`, {});
-    load(); onSaved?.();
+  function openDone(p: PmPlan) { setDoneTarget(p); setDoneNote(''); setUsedParts([]); }
+  async function submitDone() {
+    if (!doneTarget) return;
+    const parts = usedParts.filter((u) => u.sparepart_id && Number(u.qty) > 0).map((u) => ({ sparepart_id: u.sparepart_id, qty: Number(u.qty) }));
+    await api.post(`/aset/pm/${doneTarget.id}/done`, { note: doneNote, parts });
+    setDoneTarget(null); load(); onSaved?.();
   }
   async function del(p: PmPlan) {
     if (!await confirmDialog(`Hapus rencana PM "${p.name}"?`)) return;
@@ -80,7 +89,7 @@ export default function PmModal({ asset, metricTypes, onClose, onSaved }: {
                 </div>
 
                 <div className="mt-2 flex items-center gap-1.5">
-                  <button className="px-2 py-1 rounded-md bg-accent/15 text-accent border border-accent/30 text-[11px] font-medium" onClick={() => markDone(p)}>✔ Tandai Selesai</button>
+                  <button className="px-2 py-1 rounded-md bg-accent/15 text-accent border border-accent/30 text-[11px] font-medium" onClick={() => openDone(p)}>✔ Tandai Selesai</button>
                   <button className="px-2 py-1 rounded-md border border-border text-danger text-[11px]" onClick={() => del(p)}>🗑️</button>
                   {p.history?.length > 0 && <span className="text-[10px] text-text2 ml-1">Terakhir: {new Date(p.history[0].done_at).toLocaleDateString('id-ID')}</span>}
                 </div>
@@ -133,6 +142,31 @@ export default function PmModal({ asset, metricTypes, onClose, onSaved }: {
             </div>
           )}
         </div>
+
+        {doneTarget && (
+          <div className="border-t border-border p-4 bg-surface2 shrink-0">
+            <div className="text-[12px] font-semibold mb-2">Selesaikan: {doneTarget.name}</div>
+            <input className={`${inp} mb-2`} placeholder="Catatan (opsional)" value={doneNote} onChange={(e) => setDoneNote(e.target.value)} />
+            <div className="text-[10px] text-text2 mb-1">Sparepart terpakai (opsional — stok otomatis berkurang):</div>
+            <div className="space-y-1.5">
+              {usedParts.map((u, i) => (
+                <div key={i} className="flex gap-1.5">
+                  <select className={inp} value={u.sparepart_id || ''} onChange={(e) => setUsedParts((p) => p.map((x, j) => (j === i ? { ...x, sparepart_id: Number(e.target.value) } : x)))}>
+                    <option value="">— pilih sparepart —</option>
+                    {spareparts.map((s) => <option key={s.id} value={s.id}>{s.name} (stok {Number(s.stock_qty)} {s.satuan})</option>)}
+                  </select>
+                  <input className={`${inp} w-20`} inputMode="decimal" placeholder="qty" value={u.qty} onChange={(e) => setUsedParts((p) => p.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} />
+                  <button className="px-2 text-danger" onClick={() => setUsedParts((p) => p.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+            </div>
+            {spareparts.length > 0 && <button className="text-[11px] text-accent mt-1.5" onClick={() => setUsedParts((p) => [...p, { sparepart_id: 0, qty: '' }])}>+ tambah sparepart</button>}
+            <div className="flex gap-2 mt-3">
+              <button onClick={submitDone} className="bg-accent text-bg font-semibold rounded-md px-3 py-1.5 text-xs">✔ Konfirmasi Selesai</button>
+              <button onClick={() => setDoneTarget(null)} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs">Batal</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

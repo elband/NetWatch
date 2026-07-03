@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { api, getActiveUnitId } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import LocationMap from '../components/LocationMap';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Asset, ServiceItem, LocationItem, Unit, User } from '../types';
 
-type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'checklist' | 'unit';
+type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'checklist' | 'surat-id' | 'unit';
 interface DeviceTypeItem { id: number; name: string; icon: string | null; sort_order: number }
 
 export default function MasterData() {
   const { user } = useAuth();
   const isAdmin = hasRole(user, 'admin'); // tab Unit hanya untuk Super Admin
   const [tab, setTab] = useState<Tab>('aset');
-  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat'], ['metrik', '📊 Metrik Aset'], ['checklist', '✅ Checklist']];
+  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat'], ['metrik', '📊 Metrik Aset'], ['checklist', '✅ Checklist'], ['surat-id', '🖋️ Identitas Surat']];
   if (isAdmin) tabs.push(['unit', '🏢 Unit Kerja']);
   return (
     <div>
@@ -32,6 +32,7 @@ export default function MasterData() {
       {tab === 'tipe' && <DeviceTypesTab />}
       {tab === 'metrik' && <MetricTypesTab />}
       {tab === 'checklist' && <ChecklistTemplatesTab />}
+      {tab === 'surat-id' && <SuratIdentityTab />}
       {tab === 'unit' && isAdmin && <UnitsTab />}
     </div>
   );
@@ -258,6 +259,73 @@ function LocationsTab() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ===================== IDENTITAS SURAT UNIT (Fase 4) =====================
+// Override per-unit untuk kop/kode surat & koordinator penandatangan. Identitas
+// kantor & Kepala Seksi tetap global (di Pengaturan). Koordinator = unitnya sendiri.
+const SURAT_FIELDS: [string, string, string][] = [
+  ['nd_kode', 'Kode Surat', 'mis. ELBAND/APTP — dipakai pada nomor surat'],
+  ['unit', 'Nama Unit (kop)', 'mis. Unit Elektronika Bandara'],
+  ['koord_nama', 'Nama Koordinator', 'penandatangan surat'],
+  ['koord_nip', 'NIP Koordinator', ''],
+  ['koord_jabatan', 'Jabatan Koordinator', 'mis. Koordinator Unit ...'],
+  ['nd_dari', 'Nota Dinas — Dari', ''],
+  ['nd_yth', 'Nota Dinas — Yth', ''],
+];
+function SuratIdentityTab() {
+  const { user } = useAuth();
+  const isAdmin = hasRole(user, 'admin');
+  const uid = isAdmin ? getActiveUnitId() : (user?.unit_id ?? null);
+  const [cfg, setCfg] = useState<Record<string, string>>({});
+  const [kopUrl, setKopUrl] = useState<string | null>(null);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!uid) return;
+    api.get(`/units/${uid}/config`).then((r) => { setCfg(r.data.config || {}); setKopUrl(r.data.config?.kop_url || null); }).catch(() => {});
+  }, [uid]);
+
+  if (!uid) return <div className="text-[12px] text-text2 bg-surface2 border border-border rounded-md px-3 py-4">Pilih satu unit di switcher header untuk mengatur identitas suratnya.</div>;
+
+  async function save() {
+    setErr(''); setMsg('');
+    try { await api.put(`/units/${uid}/config`, cfg); setMsg('✅ Identitas surat unit tersimpan.'); }
+    catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
+  }
+  async function uploadKop(file: File) {
+    setErr(''); setMsg('');
+    const fd = new FormData(); fd.append('kop', file);
+    try { const r = await api.post(`/units/${uid}/kop`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setKopUrl(r.data.kop_url); setCfg((c) => ({ ...c, kop_url: r.data.kop_url })); setMsg('✅ Kop diunggah.'); }
+    catch (e: any) { setErr(e?.response?.data?.error || 'Gagal unggah kop.'); }
+  }
+
+  return (
+    <div>
+      <div className="text-[11px] text-text2 mb-3">Identitas ini menimpa pengaturan global <b>hanya untuk unit ini</b> saat membuat surat/laporan (kop, kode & nomor surat, penandatangan koordinator). Identitas kantor & Kepala Seksi diatur global di menu Pengaturan.</div>
+      <div className="bg-surface border border-border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-3xl">
+        {SURAT_FIELDS.map(([key, label, hint]) => (
+          <label key={key} className="block">
+            <span className="text-[11px] text-text2">{label}</span>
+            <input className={`${inputCls} w-full`} value={cfg[key] || ''} onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })} placeholder={hint} />
+          </label>
+        ))}
+        <div className="sm:col-span-2">
+          <span className="text-[11px] text-text2">Kop / Letterhead (gambar)</span>
+          <div className="flex items-center gap-3 mt-1">
+            {kopUrl ? <img src={kopUrl} alt="kop" className="h-12 bg-white rounded border border-border" /> : <span className="text-[11px] text-text2">Belum ada kop unit</span>}
+            <label className="cursor-pointer text-[11px] bg-surface2 border border-border rounded px-3 py-1.5 hover:text-white">
+              📤 Unggah kop<input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) uploadKop(e.target.files[0]); }} />
+            </label>
+          </div>
+        </div>
+      </div>
+      {msg && <div className="text-[12px] text-success mt-2">{msg}</div>}
+      {err && <div className="text-[12px] text-danger mt-2">⚠️ {err}</div>}
+      <button className={`${btnPrimary} mt-3`} onClick={save}>💾 Simpan Identitas Surat</button>
     </div>
   );
 }

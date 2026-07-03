@@ -1,6 +1,7 @@
 # Rancangan Fase 4 — Identitas Surat per Unit & Sparepart/Stok
 
-> Status: **RANCANGAN — belum dieksekusi.** Disusun 2026-07-03. Lanjutan dari [Fase 3](RANCANGAN-MULTI-UNIT-FASE3.md). Fase terakhir roadmap multi-unit.
+> Status: **DIIMPLEMENTASIKAN & TERUJI 2026-07-03.** Lanjutan dari [Fase 3](RANCANGAN-MULTI-UNIT-FASE3.md). Fase terakhir roadmap multi-unit.
+> Uji: E2E API (kode surat per unit AAB/APTP vs ELBAND/APTP, isolasi config, sparepart masuk/keluar/adjust + guard + low-stock, PM↔sparepart) + verifikasi browser (halaman Sparepart + kartu stok, tab Identitas Surat). `tsc --noEmit` bersih.
 
 Dua sub-modul: **4a identitas surat per unit** (kop + kode/nomor unik per unit) dan **4b sparepart & stok**.
 

@@ -16,6 +16,7 @@ import CoordDashboard from './pages/CoordDashboard';
 import Devices from './pages/Devices';
 import Aset from './pages/Aset';
 import AsetAvailability from './pages/AsetAvailability';
+import Spareparts from './pages/Spareparts';
 import Monitor from './pages/Monitor';
 import DeviceMap from './pages/DeviceMap';
 import SlaReport from './pages/SlaReport';
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/devices" element={<Devices />} />
           <Route path="/aset" element={<Aset />} />
           <Route path="/aset-availability" element={<AsetAvailability />} />
+          <Route path="/sparepart" element={<Spareparts />} />
           <Route path="/monitor" element={<Monitor />} />
           <Route path="/peta" element={<DeviceMap />} />
           <Route path="/sla" element={<SlaReport />} />

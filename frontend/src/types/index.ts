@@ -211,6 +211,32 @@ export interface AvailabilityRow {
   mtbf_sec: number | null;
 }
 
+// ——— Fase 4: sparepart & stok ———
+export interface Sparepart {
+  id: number;
+  unit_id: number | null;
+  name: string;
+  part_no: string | null;
+  category: string | null;
+  satuan: string;
+  stock_qty: string | number;
+  min_qty: string | number;
+  location: string | null;
+  notes: string | null;
+  active: number;
+  low?: number;
+}
+export interface SparepartMove {
+  id: number;
+  type: 'masuk' | 'keluar' | 'adjust';
+  qty: string | number;
+  device_id: number | null;
+  device_name?: string | null;
+  note: string | null;
+  moved_by_name?: string | null;
+  moved_at: string;
+}
+
 export interface DeviceMetricPoint {
   t: string;
   avg_ping: number | null;
