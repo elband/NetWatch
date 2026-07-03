@@ -13,6 +13,16 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# --- Preflight: pastikan semua tool tersedia (Ubuntu: mysqldump dari paket mysql-client) ---
+for tool in git node npm pm2 mysqldump gzip; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "❌ '$tool' tidak ditemukan."
+    [ "$tool" = "mysqldump" ] && echo "   Install: sudo apt install mysql-client   (atau mariadb-client)"
+    [ "$tool" = "pm2" ] && echo "   Install: sudo npm i -g pm2"
+    exit 1
+  }
+done
+
 PM2_APP="${PM2_APP:-}"                 # nama proses PM2 (kosong = pakai ecosystem.config.cjs)
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BRANCH="${BRANCH:-main}"
