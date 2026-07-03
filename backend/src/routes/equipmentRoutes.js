@@ -8,7 +8,7 @@ import exifr from 'exifr';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
-import { getDutyStatus, dateKey } from '../config/shifts.js';
+import { getDutyStatus, dateKey, shiftOpenGate } from '../config/shifts.js';
 import { withInspectionPhoto, INSPECTION_DIR } from '../middleware/upload.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
@@ -243,7 +243,14 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
 router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const { deviceId, note } = req.body;
   if (!deviceId) return res.status(400).json({ error: 'Perangkat wajib valid.' });
-  if (!(await canInspect(req.user))) return res.status(403).json({ error: 'Hanya teknisi on-duty (atau koordinator/admin) yang bisa mencatat menghidupkan peralatan.' });
+  // Gate: teknisi hanya bisa menghidupkan peralatan mulai 30 menit sebelum jam dinasnya
+  // (per unit). Koordinator/admin dikecualikan.
+  const roles = req.user.roles?.length ? req.user.roles : (req.user.role ? [req.user.role] : []);
+  if (!roles.includes('admin') && !roles.includes('koordinator')) {
+    const gate = await shiftOpenGate(pool, req.user.id);
+    if (!gate.hasShift) return res.status(403).json({ error: 'Anda tidak terjadwal dinas hari ini.' });
+    if (!gate.allowed) return res.status(403).json({ error: `Menghidupkan peralatan dibuka pukul ${gate.opensAt} (30 menit sebelum jam dinas Anda).` });
+  }
 
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });

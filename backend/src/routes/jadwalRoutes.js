@@ -4,7 +4,7 @@ import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
-import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows } from '../config/shifts.js';
+import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows, getUnitWindows } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -44,13 +44,15 @@ router.get('/', async (req, res) => {
 });
 
 // ----- Aturan jam dinas (shift windows) -----
-// GET: window aktif + default (untuk modal "Atur Jam Dinas").
+// GET: jam dinas efektif unit aktif + default (untuk modal "Atur Jam Dinas").
 router.get('/shift-windows', (req, res) => {
-  res.json({ windows: SHIFT_WINDOWS, defaults: DEFAULT_SHIFT_WINDOWS });
+  res.json({ windows: getUnitWindows(req.unitId), defaults: DEFAULT_SHIFT_WINDOWS, perUnit: req.unitId != null });
 });
 
-// PUT: ubah jam dinas (admin/koordinator). Simpan ke settings + refresh cache on-duty.
+// PUT: ubah jam dinas PER UNIT (admin/koordinator). Simpan ke units.config.shift_windows.
 router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, res) => {
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu untuk mengatur jam dinasnya.' });
   const body = req.body || {};
   const out = {};
   for (const k of ['pagi', 'siang']) {
@@ -73,13 +75,15 @@ router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, re
     if (start === end) return res.status(400).json({ error: 'Jam mulai & selesai shift "Dinas Kantor" tidak boleh sama.' });
     out.malam = { start, end };
   }
-  await pool.query(
-    `INSERT INTO settings (setting_key, setting_value) VALUES ('shift_windows', ?)
-     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
-    [JSON.stringify(out)]
-  );
+  // Simpan ke units.config.shift_windows (per unit).
+  const [[u]] = await pool.query('SELECT config FROM units WHERE id = ?', [unitId]);
+  let cfg = u?.config;
+  if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch { cfg = {}; } }
+  cfg = cfg && typeof cfg === 'object' ? cfg : {};
+  cfg.shift_windows = out;
+  await pool.query('UPDATE units SET config = ? WHERE id = ?', [JSON.stringify(cfg), unitId]);
   await loadShiftWindows(pool); // terapkan langsung tanpa restart
-  res.json({ ok: true, windows: SHIFT_WINDOWS });
+  res.json({ ok: true, windows: getUnitWindows(unitId) });
 });
 
 router.put('/:userId/:date', requireRole('admin', 'koordinator'), async (req, res) => {

@@ -29,33 +29,61 @@ export const SHIFT_WINDOWS = {
   siang: { ...DEFAULT_SHIFT_WINDOWS.siang },
 };
 
+// Jam dinas PER UNIT (Fase jam-dinas). Diisi dari units.config.shift_windows.
+// { [unitId]: { pagi:{start,end}, siang:{start,end}, malam?:{start,end} } }.
+// Unit tanpa override memakai SHIFT_WINDOWS global.
+export const UNIT_SHIFT_WINDOWS = {};
+
+// Normalisasi objek windows dari sumber apa pun → pagi/siang wajib (fallback ke base),
+// malam opsional. `base` = nilai fallback bila field tidak valid.
+function normalizeWindows(v, base) {
+  const out = {};
+  for (const k of REQUIRED_WINS) {
+    const d = base[k] || DEFAULT_SHIFT_WINDOWS[k];
+    const o = v && typeof v === 'object' ? v[k] : null;
+    const start = o && Number.isFinite(Number(o.start)) ? Number(o.start) : d.start;
+    const end = o && Number.isFinite(Number(o.end)) ? Number(o.end) : d.end;
+    out[k] = { start, end };
+  }
+  for (const k of OPTIONAL_WINS) {
+    const o = v && typeof v === 'object' ? v[k] : null;
+    if (o && Number.isFinite(Number(o.start)) && Number.isFinite(Number(o.end))) {
+      out[k] = { start: Number(o.start), end: Number(o.end) };
+    }
+  }
+  return out;
+}
+
 /**
- * Muat override jam dinas dari tabel `settings` (key 'shift_windows').
- * Setiap nilai yang tidak valid jatuh kembali ke default. Aman dipanggil ulang.
- * Shift opsional (malam) hanya aktif bila tersimpan di settings.
+ * Muat jam dinas global (settings 'shift_windows') + per-unit (units.config.shift_windows).
+ * Aman dipanggil ulang. Global dipertahankan sbg fallback untuk unit tanpa override.
  */
 export async function loadShiftWindows(conn) {
   try {
     const [rows] = await conn.query("SELECT setting_value FROM settings WHERE setting_key = 'shift_windows' LIMIT 1");
     let v = rows[0]?.setting_value;
     if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
-    for (const k of REQUIRED_WINS) {
-      const d = DEFAULT_SHIFT_WINDOWS[k];
-      const o = v && typeof v === 'object' ? v[k] : null;
-      const start = o && Number.isFinite(Number(o.start)) ? Number(o.start) : d.start;
-      const end = o && Number.isFinite(Number(o.end)) ? Number(o.end) : d.end;
-      SHIFT_WINDOWS[k] = { start, end };
+    const g = normalizeWindows(v, DEFAULT_SHIFT_WINDOWS);
+    SHIFT_WINDOWS.pagi = g.pagi; SHIFT_WINDOWS.siang = g.siang;
+    if (g.malam) SHIFT_WINDOWS.malam = g.malam; else delete SHIFT_WINDOWS.malam;
+  } catch { /* pertahankan nilai global saat ini */ }
+  // Per-unit dari units.config.shift_windows.
+  try {
+    const [units] = await conn.query('SELECT id, config FROM units');
+    for (const k of Object.keys(UNIT_SHIFT_WINDOWS)) delete UNIT_SHIFT_WINDOWS[k];
+    for (const u of units) {
+      let cfg = u.config;
+      if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch { cfg = null; } }
+      const sw = cfg && typeof cfg === 'object' ? cfg.shift_windows : null;
+      if (sw && typeof sw === 'object') UNIT_SHIFT_WINDOWS[u.id] = normalizeWindows(sw, SHIFT_WINDOWS);
     }
-    for (const k of OPTIONAL_WINS) {
-      const o = v && typeof v === 'object' ? v[k] : null;
-      if (o && Number.isFinite(Number(o.start)) && Number.isFinite(Number(o.end))) {
-        SHIFT_WINDOWS[k] = { start: Number(o.start), end: Number(o.end) };
-      } else {
-        delete SHIFT_WINDOWS[k]; // tidak dikonfigurasi → bukan jendela on-duty
-      }
-    }
-  } catch { /* pertahankan nilai saat ini bila DB gagal dibaca */ }
+  } catch { /* abaikan; unit pakai global */ }
   return SHIFT_WINDOWS;
+}
+
+/** Jendela jam dinas efektif untuk sebuah unit (override unit → global). */
+export function getUnitWindows(unitId) {
+  return (unitId != null && UNIT_SHIFT_WINDOWS[unitId]) || SHIFT_WINDOWS;
 }
 
 // Batas waktu (menit) sebuah insiden harus sudah diambil/ditangani oleh
@@ -85,9 +113,9 @@ export function dateKey(d) {
   return `${y}-${m}-${day}`;
 }
 
-/** Apakah jam `when` berada dalam window sebuah shift_type. (tanpa cek tanggal) */
-export function hourInWindow(shiftType, when = new Date()) {
-  const w = SHIFT_WINDOWS[shiftType];
+/** Apakah jam `when` berada dalam window sebuah shift_type untuk unit tsb. (tanpa cek tanggal) */
+export function hourInWindow(shiftType, when = new Date(), unitId = null) {
+  const w = getUnitWindows(unitId)[shiftType];
   if (!w) return false;
   const h = when.getHours() + when.getMinutes() / 60;
   return w.start <= w.end ? h >= w.start && h < w.end : h >= w.start || h < w.end;
@@ -101,7 +129,7 @@ export async function getOnDutyTechIds(conn, when = new Date()) {
   const todayKey = dateKey(when);
   const ydayKey = dateKey(new Date(when.getTime() - 86400000));
   const [rows] = await conn.query(
-    `SELECT s.user_id, s.shift_date, s.shift_type
+    `SELECT s.user_id, s.shift_date, s.shift_type, u.unit_id
        FROM shifts s JOIN users u ON u.id = s.user_id
       WHERE u.active = 1 AND (u.role = 'teknisi' OR JSON_CONTAINS(u.roles, '"teknisi"')) AND s.shift_date IN (?, ?)`,
     [todayKey, ydayKey]
@@ -109,7 +137,7 @@ export async function getOnDutyTechIds(conn, when = new Date()) {
   const h = when.getHours() + when.getMinutes() / 60;
   const onDuty = new Set();
   for (const r of rows) {
-    const w = SHIFT_WINDOWS[r.shift_type];
+    const w = getUnitWindows(r.unit_id)[r.shift_type]; // jam dinas per unit
     if (!w) continue;
     const rowKey = dateKey(r.shift_date);
     if (w.start <= w.end) {
@@ -131,13 +159,52 @@ export async function getDutyStatus(conn, userId, when = new Date()) {
   const onDuty = ids.includes(Number(userId));
   let shift = null;
   if (onDuty) {
+    const [[u]] = await conn.query('SELECT unit_id FROM users WHERE id = ? LIMIT 1', [userId]);
     const [rows] = await conn.query(
       `SELECT shift_type, shift_date FROM shifts
         WHERE user_id = ? AND shift_date IN (?, ?)`,
       [userId, dateKey(when), dateKey(new Date(when.getTime() - 86400000))]
     );
-    const active = rows.find((r) => hourInWindow(r.shift_type, when));
+    const active = rows.find((r) => hourInWindow(r.shift_type, when, u?.unit_id));
     shift = active ? active.shift_type : null;
   }
   return { onDuty, shift, onDutyCount: ids.length };
+}
+
+// ===== Gate "buka 30 menit sebelum jam dinas" (absensi & hidupkan-peralatan) =====
+const OPEN_BEFORE_MIN = 30;
+const WORK_SHIFTS = ['pagi', 'siang', 'malam'];
+
+const fmtHour = (h) => {
+  const norm = ((h % 24) + 24) % 24;
+  const hh = Math.floor(norm);
+  const mm = Math.round((norm - hh) * 60);
+  return `${String(hh).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
+};
+
+/**
+ * Cek apakah user boleh absen/menghidupkan peralatan pada `when`.
+ * Aturan: hanya mulai OPEN_BEFORE_MIN menit sebelum jam mulai shift dinasnya hari ini
+ * (jam dinas per unit). Bila user tidak terjadwal dinas hari ini → tidak digating.
+ * Mengembalikan { hasShift, allowed, opensAt, shiftType }.
+ */
+export async function shiftOpenGate(conn, userId, when = new Date()) {
+  const [[u]] = await conn.query('SELECT unit_id FROM users WHERE id = ? LIMIT 1', [userId]);
+  const [rows] = await conn.query(
+    "SELECT shift_type FROM shifts WHERE user_id = ? AND shift_date = ? AND shift_type IN ('pagi','siang','malam')",
+    [userId, dateKey(when)]
+  );
+  if (!rows.length) return { hasShift: false, allowed: true, opensAt: null, shiftType: null };
+  const win = getUnitWindows(u?.unit_id);
+  // Ambil shift dgn jam buka paling awal (bila kebetulan ada >1).
+  let best = null;
+  for (const r of rows) {
+    const w = win[r.shift_type];
+    if (!w || !WORK_SHIFTS.includes(r.shift_type)) continue;
+    const openH = w.start - OPEN_BEFORE_MIN / 60;
+    if (best == null || openH < best.openH) best = { openH, start: w.start, shiftType: r.shift_type };
+  }
+  if (!best) return { hasShift: false, allowed: true, opensAt: null, shiftType: null };
+  const h = when.getHours() + when.getMinutes() / 60;
+  return { hasShift: true, allowed: h >= best.openH, opensAt: fmtHour(best.openH), shiftType: best.shiftType };
 }

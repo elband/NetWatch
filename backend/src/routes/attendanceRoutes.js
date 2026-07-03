@@ -5,6 +5,7 @@ import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/un
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
+import { shiftOpenGate } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -123,6 +124,11 @@ router.post('/check-in', async (req, res) => {
 
   const [exist] = await pool.query('SELECT id, check_in_at FROM attendance WHERE user_id=? AND work_date=?', [req.user.id, date]);
   if (exist[0]?.check_in_at) return res.status(400).json({ error: 'Anda sudah absen masuk hari ini.' });
+  // Gate: absensi dibuka 30 menit sebelum jam dinas (per unit). Tidak terjadwal = tidak digating.
+  const gate = await shiftOpenGate(pool, req.user.id);
+  if (gate.hasShift && !gate.allowed) {
+    return res.status(400).json({ error: `Absensi masuk dibuka pukul ${gate.opensAt} (30 menit sebelum jam dinas Anda).` });
+  }
   const acc = accuracy != null ? Math.round(accuracy) : null;
   const fl = vpn ? 1 : 0;
   if (exist[0]) {
