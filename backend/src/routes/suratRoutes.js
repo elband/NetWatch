@@ -13,6 +13,7 @@ import { buildLaporanData } from './laporanRoutes.js';
 import { createNotification } from '../services/notify.js';
 import { renderDocPdf } from '../services/pdfRenderer.js';
 import { sendToSiKeren, isSiKerenConfigured } from '../services/siKerenService.js';
+import { effectiveLkp } from '../services/unitConfig.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -49,6 +50,8 @@ async function nextNomor(conn, jenis = 'Nota Dinas', unitId) {
   const [sRows] = await conn.query("SELECT setting_value FROM settings WHERE setting_key = 'lkp'");
   let lkp = {};
   try { const v = sRows[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { /* default */ }
+  // Fase 4: kode surat dari override unit (units.config.nd_kode) bila ada.
+  lkp = await effectiveLkp(lkp, unitId);
   const kode = (lkp.nd_kode || 'ELBAND/APTP').trim();
   const now = new Date();
   const bulan = now.getMonth() + 1, tahun = now.getFullYear();
@@ -249,10 +252,12 @@ router.post('/:id/kirim-sikeren', requireRole('koordinator', 'admin'), async (re
 
 // Baca pengaturan kop/penanda-tangan (LKP) dari tabel settings.
 // Normalisasi: Settings memakai kepala_*, laporan memakai kasie_* — samakan agar konsisten.
-async function getLkp() {
+async function getLkp(unitId = null) {
   const [r] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='lkp'");
   let lkp = {};
   try { const v = r[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { lkp = {}; }
+  // Fase 4: timpa identitas surat per unit (kode/kop/koordinator) bila unit diketahui.
+  if (unitId != null) lkp = await effectiveLkp(lkp, unitId);
   lkp.kasie_nama = lkp.kasie_nama || lkp.kepala_nama || 'MURDOKO';
   lkp.kasie_nip = lkp.kasie_nip || lkp.kepala_nip || '';
   lkp.kasie_jabatan = lkp.kasie_jabatan || lkp.kepala_jabatan || 'KEPALA SEKSI TEKNIK DAN OPERASI';
@@ -265,7 +270,7 @@ async function getLkp() {
 // Menyimpan status ke kolom sikeren_*; melempar error bila gagal (dipakai manual & auto).
 async function pushSuratSiKeren(s) {
   if (!s.sign_token) throw new Error('Surat belum di-TTE — sahkan dulu sebelum kirim ke SiKeren.');
-  const lkp = await getLkp();
+  const lkp = await getLkp(s.unit_id);
   const { buffer } = await renderDocPdf(s.sign_token);
   const periode = s.report_month || '';
   const verifyUrl = `${env.appUrl}/verify-tte?token=${s.sign_token}`;
@@ -289,7 +294,7 @@ router.post('/:id/request-kasi', requireRole('koordinator', 'admin'), async (req
   const [rows] = await pool.query('SELECT * FROM nota_dinas WHERE id = ?', [id]);
   const s = rows[0];
   if (!s || !rowInUnit(s, req.unitId)) return res.status(404).json({ error: 'Surat tidak ditemukan' });
-  const lkp = await getLkp();
+  const lkp = await getLkp(s.unit_id);
   const phone = String(req.body.phone || lkp.kasie_phone || '').trim();
   if (!phone) return res.status(400).json({ error: 'Nomor WA Kepala Seksi belum diatur. Isi di Pengaturan (kasie_phone) atau kirim nomornya.' });
   // Token akses deterministik agar pengiriman ulang memakai tautan yang sama.
@@ -357,7 +362,7 @@ export async function getTtdDoc(req, res) {
   const s = rows[0];
   if (!s) return res.json({ valid: false });
   const [lamp] = await pool.query('SELECT id, file_url, filename, mimetype FROM surat_lampiran WHERE surat_id = ? ORDER BY id', [s.id]);
-  const lkp = await getLkp();
+  const lkp = await getLkp(s.unit_id);
   // Bila surat adalah pengantar Laporan Bulanan → sertakan data laporan penuh agar bisa ditinjau per halaman.
   // report_month diutamakan; cover lama di-parse dari teks Hal.
   let rm = s.report_month;
@@ -396,7 +401,7 @@ export async function submitTtd(req, res) {
   const s = rows[0];
   if (!s) return res.status(404).json({ error: 'Tautan tidak valid / dokumen tidak ditemukan.' });
   if (s.kasi_status === 'disetujui') return res.status(400).json({ error: 'Dokumen sudah ditandatangani Kepala Seksi.' });
-  const lkp = await getLkp();
+  const lkp = await getLkp(s.unit_id);
   if (req.body.action === 'reject') {
     await pool.query("UPDATE nota_dinas SET kasi_status='ditolak', kasi_note=? WHERE id=?", [String(req.body.note || '').slice(0, 255) || null, s.id]);
     return res.json({ ok: true, status: 'ditolak' });

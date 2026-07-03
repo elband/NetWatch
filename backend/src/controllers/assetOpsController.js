@@ -3,6 +3,7 @@ import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middle
 import { logAssetStatus } from './assetController.js';
 import { nextIncidentId } from '../utils/incidentId.js';
 import { snapshotAndNotifyOnDuty } from './incidentController.js';
+import { recordMove } from './sparepartController.js';
 
 // Fase 3 — checklist inspeksi, preventive maintenance (interval jam/kalender),
 // dan laporan availability (MTBF/MTTR) untuk aset fisik (asset_class='physical').
@@ -270,6 +271,16 @@ export async function donePm(req, res) {
     }
     await conn.query('INSERT INTO asset_pm_history (plan_id, device_id, meter_value, note, done_by) VALUES (?,?,?,?,?)',
       [id, p.device_id, meterVal, req.body.note?.trim() || null, req.user.id]);
+    // Fase 4: sparepart terpakai saat PM → move 'keluar' ref aset (kurangi stok).
+    let parts = req.body.parts;
+    if (typeof parts === 'string') { try { parts = JSON.parse(parts); } catch { parts = []; } }
+    for (const pt of (Array.isArray(parts) ? parts : [])) {
+      const spId = Number(pt?.sparepart_id); const qty = Number(pt?.qty);
+      if (!spId || !Number.isFinite(qty) || qty <= 0) continue;
+      const [[sp]] = await conn.query('SELECT * FROM spareparts WHERE id = ? AND (unit_id = ? OR unit_id IS NULL)', [spId, p.unit_id]);
+      if (!sp) throw new Error('Sparepart tidak valid untuk unit ini.');
+      await recordMove(sp, { type: 'keluar', qty, deviceId: p.device_id, note: `Dipakai PM: ${p.name}`, userId: req.user.id }, conn);
+    }
     await conn.commit();
     res.json({ ok: true });
   } catch (e) { await conn.rollback(); throw e; }

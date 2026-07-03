@@ -8,6 +8,7 @@ import { remindOnDutyTechs } from '../services/coordWatcher.js';
 import { isNotifyEnabledForUser, notifyKasiIfEnabled } from '../services/notifyPrefs.js';
 import { nextIncidentId } from '../utils/incidentId.js';
 import { buildLaporanData } from '../routes/laporanRoutes.js';
+import { effectiveLkp } from '../services/unitConfig.js';
 import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
 // Alur tindakan insiden berbasis pilihan/cabang (solusi perbaikan peralatan):
@@ -609,11 +610,13 @@ async function ensureNotaDinasSurat(incidentId, user) {
   const [sRows] = await pool.query("SELECT setting_value FROM settings WHERE setting_key = 'lkp'");
   let lkp = {};
   try { const v = sRows[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { /* default */ }
+  // Fase 4: kode & urutan surat LKP per unit (mengikuti unit insiden).
+  lkp = await effectiveLkp(lkp, incident.unit_id);
   const kode = (lkp.nd_kode || 'ELBAND/APTP').trim();
 
   const now = new Date();
   const bulan = now.getMonth() + 1, tahun = now.getFullYear();
-  const [seqRows] = await pool.query('SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE bulan = ? AND tahun = ?', [bulan, tahun]);
+  const [seqRows] = await pool.query('SELECT COALESCE(MAX(seq),0)+1 AS s FROM nota_dinas WHERE bulan = ? AND tahun = ? AND (unit_id = ? OR ? IS NULL)', [bulan, tahun, incident.unit_id ?? null, incident.unit_id ?? null]);
   const seq = seqRows[0].s;
   const nomor = `${String(seq).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`;
   const loc = incident.device_loc ? ` di ${incident.device_loc}` : '';
@@ -800,10 +803,11 @@ export async function verifyTteDocData(req, res) {
     try { laporan = await buildLaporanData(month); } catch { laporan = null; }
   }
 
-  // Org config (kop, nama/jabatan penanda tangan, dll).
+  // Org config (kop, nama/jabatan penanda tangan, dll) — per unit surat (Fase 4).
   const [sRows] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='lkp'");
   let lkp = {};
   try { const v = sRows[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { lkp = {}; }
+  lkp = await effectiveLkp(lkp, surat.unit_id);
 
   res.json({ valid: true, surat, incident, laporan, lkp });
 }

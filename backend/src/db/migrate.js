@@ -381,6 +381,41 @@ async function migrate() {
      WHERE d.asset_class='physical'
        AND NOT EXISTS (SELECT 1 FROM asset_status_log a WHERE a.device_id=d.id)`);
 
+  // ── Fase 4: identitas surat per unit + sparepart/stok ──
+  // Override identitas surat per unit (kode, kop, nama unit, koordinator penandatangan).
+  // lkp efektif = { ...settings.lkp global, ...units.config }.
+  await addColumnIfMissing(conn, env.db.database, 'units', 'config', 'JSON DEFAULT NULL');
+
+  await conn.query(`CREATE TABLE IF NOT EXISTS spareparts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    unit_id INT DEFAULT NULL,
+    name VARCHAR(150) NOT NULL,
+    part_no VARCHAR(80) DEFAULT NULL,
+    category VARCHAR(80) DEFAULT NULL,
+    satuan VARCHAR(20) NOT NULL DEFAULT 'pcs',
+    stock_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+    min_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+    location VARCHAR(120) DEFAULT NULL,
+    notes VARCHAR(255) DEFAULT NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_sp_unit (unit_id)
+  ) ENGINE=InnoDB`);
+  await conn.query(`CREATE TABLE IF NOT EXISTS sparepart_moves (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    sparepart_id INT NOT NULL,
+    unit_id INT DEFAULT NULL,
+    type ENUM('masuk','keluar','adjust') NOT NULL,
+    qty DECIMAL(12,2) NOT NULL,
+    device_id INT DEFAULT NULL,
+    note VARCHAR(255) DEFAULT NULL,
+    moved_by INT DEFAULT NULL,
+    moved_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_spm_part (sparepart_id),
+    CONSTRAINT fk_spm_part FOREIGN KEY (sparepart_id) REFERENCES spareparts(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`);
+
   // ── Index untuk performa query (dashboard, laporan bulanan, filter status) ──
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_created_at', '(created_at)');
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_status', '(status)');

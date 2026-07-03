@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { unitScope } from '../middleware/unitScope.js';
 import { applyTimezone, isValidTz, serverTimeInfo } from '../services/timezone.js';
 import { diagnoseTz, runTzMigration } from '../services/tzMigration.js';
+import { mergeUnitLkp, getUnitConfig } from '../services/unitConfig.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -28,7 +30,7 @@ router.post('/tz-migration', requireRole('admin'), async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-router.get('/', async (req, res) => {
+router.get('/', unitScope, async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM settings');
   const map = {};
   for (const r of rows) {
@@ -38,6 +40,11 @@ router.get('/', async (req, res) => {
       try { value = JSON.parse(value); } catch { /* keep raw string */ }
     }
     map[r.setting_key] = value;
+  }
+  // Fase 4: untuk unit aktif, timpa field surat per-unit (kode/kop/koordinator) ke lkp.
+  if (req.unitId != null) {
+    map.lkp = mergeUnitLkp(map.lkp || {}, await getUnitConfig(req.unitId));
+    map.unit_config = await getUnitConfig(req.unitId); // agar editor bisa tampilkan nilai override saja
   }
   res.json({ settings: map });
 });

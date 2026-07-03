@@ -5,6 +5,7 @@ import { queueWaNotification } from './waQueue.js';
 import { logger } from '../config/logger.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 import { computeDuePlans } from '../controllers/assetOpsController.js';
+import { computeLowStock } from '../controllers/sparepartController.js';
 
 const inUnit = (rowUnit, userUnit) => rowUnit == null || userUnit == null || Number(rowUnit) === Number(userUnit);
 
@@ -39,8 +40,10 @@ export async function sendDailyMaintenanceReminders() {
 
   // Fase 3: preventive maintenance aset (interval jam/kalender) yang jatuh tempo, semua unit.
   const duePm = await computeDuePlans(null).catch(() => []);
+  // Fase 4: sparepart stok menipis (<= min), semua unit.
+  const lowStock = await computeLowStock(null).catch(() => []);
 
-  if (maint.length === 0 && duePm.length === 0) return { sent: 0, technicians: 0, pmDue: 0 };
+  if (maint.length === 0 && duePm.length === 0 && lowStock.length === 0) return { sent: 0, technicians: 0, pmDue: 0, lowStock: 0 };
 
   // Teknisi yang dinas hari ini (bukan libur/cuti/dinas_luar).
   const [techs] = await pool.query(
@@ -91,14 +94,22 @@ export async function sendDailyMaintenanceReminders() {
     const parts = [mRows.length ? buildMessage(mRows) : null, pRows.length ? buildPmMessage(pRows) : null].filter(Boolean);
     await notify(t.id, parts.join('\n\n'));
   }
-  // Koordinator: PM jatuh tempo unitnya (maintenance harian tetap ke teknisi).
+  const buildLowStockMessage = (rows) =>
+    `Stok Sparepart Menipis\n\n` +
+    `Sparepart berikut sudah mencapai/di bawah stok minimum:\n` +
+    rows.map((s) => `- ${s.name}${s.part_no ? ` (${s.part_no})` : ''}: sisa ${Number(s.stock_qty)} / min ${Number(s.min_qty)} ${s.satuan}`).join('\n') +
+    `\n\nSegera ajukan pengadaan. Terima kasih.`;
+
+  // Koordinator: PM jatuh tempo + stok menipis unitnya (maintenance harian tetap ke teknisi).
   for (const c of coords) {
     const pRows = duePm.filter((d) => inUnit(d.unit_id, c.unit_id));
-    if (!pRows.length) continue;
-    await notify(c.id, buildPmMessage(pRows));
+    const sRows = lowStock.filter((s) => inUnit(s.unit_id, c.unit_id));
+    if (!pRows.length && !sRows.length) continue;
+    const parts = [pRows.length ? buildPmMessage(pRows) : null, sRows.length ? buildLowStockMessage(sRows) : null].filter(Boolean);
+    await notify(c.id, parts.join('\n\n'));
   }
 
-  return { sent, technicians: techs.length, pmDue: duePm.length };
+  return { sent, technicians: techs.length, pmDue: duePm.length, lowStock: lowStock.length };
 }
 
 export function startMaintenanceReminderWorker() {

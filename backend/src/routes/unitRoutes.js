@@ -1,9 +1,38 @@
 import { Router } from 'express';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
+import { isAdminUser } from '../middleware/unitScope.js';
+import { PER_UNIT_LKP_FIELDS, getUnitConfig } from '../services/unitConfig.js';
 
 const router = Router();
+
+// Kop/letterhead per unit → simpan di uploads/surat (dibaca DocPrint saat render).
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SURAT_DIR = path.join(__dirname, '..', '..', 'uploads', 'surat');
+fs.mkdirSync(SURAT_DIR, { recursive: true });
+const kopUpload = multer({
+  storage: multer.diskStorage({
+    destination: (q, f, cb) => cb(null, SURAT_DIR),
+    filename: (q, f, cb) => cb(null, `kop-unit-${q.params.id}-${Date.now()}${path.extname(f.originalname).toLowerCase() || '.png'}`),
+  }),
+  fileFilter: (q, f, cb) => (/^image\//.test(f.mimetype) ? cb(null, true) : cb(new Error('Kop harus gambar.'))),
+  limits: { fileSize: 8 * 1024 * 1024 },
+}).single('kop');
+
+// Boleh edit identitas surat unit: super admin (unit mana pun) atau koordinator unitnya sendiri.
+function canEditUnit(req, id) {
+  if (isAdminUser(req.user)) return true;
+  const roles = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+  return roles.includes('koordinator') && Number(req.user.unit_id) === Number(id);
+}
+async function writeUnitConfig(id, config) {
+  await pool.query('UPDATE units SET config = ? WHERE id = ?', [JSON.stringify(config), id]);
+}
 
 // Daftar unit — dipakai semua role (label unit di header/sidebar, dropdown form).
 router.get('/', requireAuth, async (_req, res) => {
@@ -87,6 +116,50 @@ router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   }
   await audit(req.user, 'delete_unit', 'unit', id, `Hapus unit ${rows[0].code}`);
   res.json({ ok: true });
+});
+
+// ── Fase 4: identitas surat per unit (config JSON) ──
+// Baca config unit (untuk editor). Koordinator: unitnya; super admin: mana pun.
+router.get('/:id/config', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!canEditUnit(req, id)) return res.status(403).json({ error: 'Tidak berhak mengubah identitas surat unit ini.' });
+  res.json({ config: await getUnitConfig(id), fields: PER_UNIT_LKP_FIELDS });
+});
+
+// Simpan override identitas surat (hanya field per-unit yang diizinkan).
+router.put('/:id/config', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!canEditUnit(req, id)) return res.status(403).json({ error: 'Tidak berhak mengubah identitas surat unit ini.' });
+  const [[u]] = await pool.query('SELECT id FROM units WHERE id = ?', [id]);
+  if (!u) return res.status(404).json({ error: 'Unit tidak ditemukan.' });
+  const cur = await getUnitConfig(id);
+  for (const k of PER_UNIT_LKP_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) {
+      const v = req.body[k];
+      if (v === '' || v == null) delete cur[k]; else cur[k] = String(v).slice(0, 255);
+    }
+  }
+  await writeUnitConfig(id, cur);
+  await audit(req.user, 'update_unit_config', 'unit', id, 'Ubah identitas surat unit');
+  res.json({ config: cur });
+});
+
+// Unggah kop/letterhead unit → config.kop_url.
+router.post('/:id/kop', requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  if (!canEditUnit(req, id)) return res.status(403).json({ error: 'Tidak berhak.' });
+  kopUpload(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'File gambar kop wajib diunggah.' });
+    const cur = await getUnitConfig(id);
+    // Hapus kop lama milik unit ini bila ada.
+    if (cur.kop_url && cur.kop_url.startsWith('/uploads/surat/')) {
+      try { fs.unlinkSync(path.join(SURAT_DIR, path.basename(cur.kop_url))); } catch { /* abaikan */ }
+    }
+    cur.kop_url = `/uploads/surat/${req.file.filename}`;
+    await writeUnitConfig(id, cur);
+    res.json({ ok: true, kop_url: cur.kop_url, config: cur });
+  });
 });
 
 export default router;

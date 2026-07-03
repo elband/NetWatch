@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS units (
   description VARCHAR(255) DEFAULT NULL,
   icon VARCHAR(10) DEFAULT '🏢',
   active TINYINT(1) NOT NULL DEFAULT 1,
+  config JSON DEFAULT NULL, -- Fase 4: override identitas surat per unit (kode, kop, koordinator)
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
@@ -979,4 +980,35 @@ CREATE TABLE IF NOT EXISTS asset_status_log (
   changed_by INT DEFAULT NULL,
   INDEX idx_asl_device_time (device_id, changed_at),
   CONSTRAINT fk_asl_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ===== Fase 4: sparepart & stok (per unit) =====
+CREATE TABLE IF NOT EXISTS spareparts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  name VARCHAR(150) NOT NULL,
+  part_no VARCHAR(80) DEFAULT NULL,
+  category VARCHAR(80) DEFAULT NULL,
+  satuan VARCHAR(20) NOT NULL DEFAULT 'pcs',
+  stock_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+  min_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+  location VARCHAR(120) DEFAULT NULL,
+  notes VARCHAR(255) DEFAULT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_sp_unit (unit_id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS sparepart_moves (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  sparepart_id INT NOT NULL,
+  unit_id INT DEFAULT NULL,
+  type ENUM('masuk','keluar','adjust') NOT NULL,
+  qty DECIMAL(12,2) NOT NULL,
+  device_id INT DEFAULT NULL,
+  note VARCHAR(255) DEFAULT NULL,
+  moved_by INT DEFAULT NULL,
+  moved_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_spm_part (sparepart_id),
+  CONSTRAINT fk_spm_part FOREIGN KEY (sparepart_id) REFERENCES spareparts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
