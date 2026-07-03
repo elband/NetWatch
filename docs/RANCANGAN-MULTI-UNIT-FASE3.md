@@ -1,6 +1,7 @@
 # Rancangan Fase 3 — Checklist Inspeksi, Preventive Maintenance & Availability
 
-> Status: **RANCANGAN — belum dieksekusi.** Disusun 2026-07-03. Lanjutan dari [Fase 2](RANCANGAN-MULTI-UNIT-FASE2.md).
+> Status: **DIIMPLEMENTASIKAN & TERUJI 2026-07-03.** Lanjutan dari [Fase 2](RANCANGAN-MULTI-UNIT-FASE2.md).
+> Uji: E2E API (checklist rusak→insiden, PM hours due+reset, PM calendar overdue, availability MTBF/MTTR, isolasi antar unit) + verifikasi browser (checklist run→insiden INC, PM due badge + Tandai Selesai + reset anchor, halaman Availability). `tsc --noEmit` bersih.
 > Tujuan: operasional harian aset fisik (AAB/WPS) — checklist inspeksi terstruktur per jenis alat, preventive maintenance terjadwal (interval jam operasi ATAU kalender) dengan reminder WA, dan laporan availability (uptime operasional, MTBF/MTTR) sebagai pengganti SLA untuk aset non-IP.
 
 ---

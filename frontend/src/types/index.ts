@@ -141,6 +141,76 @@ export interface AssetMetricType {
   active: number;
 }
 
+// ——— Fase 3: checklist, preventive maintenance, availability ———
+export interface ChecklistTemplateItem { id?: number; label: string; sort_order?: number }
+export interface ChecklistTemplate {
+  id: number;
+  unit_id: number | null;
+  name: string;
+  category: string | null;
+  active: number;
+  item_count?: number;
+  items: ChecklistTemplateItem[];
+}
+export type ChecklistResult = 'ok' | 'tidak' | 'na';
+export interface ChecklistRunItem { label: string; result: ChecklistResult; note?: string | null }
+export interface ChecklistRun {
+  id: number;
+  device_id: number;
+  template_id: number | null;
+  run_date: string;
+  overall: 'baik' | 'perhatian' | 'rusak';
+  note: string | null;
+  photo_url: string | null;
+  done_by_name?: string | null;
+  created_at: string;
+  items: ChecklistRunItem[];
+}
+
+export interface PmStatus {
+  kind: 'hours' | 'calendar';
+  due: boolean;
+  incomplete?: boolean;
+  current?: number | null;
+  anchor?: number;
+  interval?: number;
+  due_at_value?: number;
+  remaining?: number;
+  due_date?: string;
+  remaining_days?: number;
+  progress?: number;
+}
+export interface PmHistory { id: number; done_at: string; meter_value: string | number | null; note: string | null; done_by_name?: string | null }
+export interface PmPlan {
+  id: number;
+  device_id: number;
+  unit_id: number | null;
+  name: string;
+  trigger_type: 'hours' | 'calendar';
+  metric_key: string | null;
+  interval_hours: string | number | null;
+  interval_days: number | null;
+  anchor_value: string | number | null;
+  anchor_date: string | null;
+  active: number;
+  status: PmStatus;
+  history: PmHistory[];
+}
+
+export interface AvailabilityRow {
+  id: number;
+  name: string;
+  loc: string | null;
+  op_status: OpStatus | null;
+  availability_pct: number | null;
+  operasional_sec: number;
+  standby_sec: number;
+  down_sec: number;
+  failures: number;
+  mttr_sec: number | null;
+  mtbf_sec: number | null;
+}
+
 export interface DeviceMetricPoint {
   t: string;
   avg_ping: number | null;

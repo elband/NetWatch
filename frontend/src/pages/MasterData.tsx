@@ -6,14 +6,14 @@ import LocationMap from '../components/LocationMap';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Asset, ServiceItem, LocationItem, Unit, User } from '../types';
 
-type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'unit';
+type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'checklist' | 'unit';
 interface DeviceTypeItem { id: number; name: string; icon: string | null; sort_order: number }
 
 export default function MasterData() {
   const { user } = useAuth();
   const isAdmin = hasRole(user, 'admin'); // tab Unit hanya untuk Super Admin
   const [tab, setTab] = useState<Tab>('aset');
-  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat'], ['metrik', '📊 Metrik Aset']];
+  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat'], ['metrik', '📊 Metrik Aset'], ['checklist', '✅ Checklist']];
   if (isAdmin) tabs.push(['unit', '🏢 Unit Kerja']);
   return (
     <div>
@@ -31,6 +31,7 @@ export default function MasterData() {
       {tab === 'lokasi' && <LocationsTab />}
       {tab === 'tipe' && <DeviceTypesTab />}
       {tab === 'metrik' && <MetricTypesTab />}
+      {tab === 'checklist' && <ChecklistTemplatesTab />}
       {tab === 'unit' && isAdmin && <UnitsTab />}
     </div>
   );
@@ -393,6 +394,66 @@ function MetricTypesTab() {
             {items.length === 0 && <tr><td colSpan={6} className="text-center text-text2 py-6">Belum ada metrik. Tambahkan mis. Jam Operasi, BBM, Tekanan.</td></tr>}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ===================== CHECKLIST TEMPLATE (Fase 3) =====================
+// Template checklist inspeksi per unit — item satu per baris. Dipakai di halaman
+// Aset & Peralatan (tombol Checklist). Ter-scope unit di backend.
+interface ChecklistTpl { id: number; unit_id: number | null; name: string; category: string | null; active: number; items: { id?: number; label: string }[] }
+function ChecklistTemplatesTab() {
+  const [items, setItems] = useState<ChecklistTpl[]>([]);
+  const empty = { name: '', category: '', itemsText: '' };
+  const [form, setForm] = useState<any>(empty);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [err, setErr] = useState('');
+
+  function load() { api.get('/aset/checklist-templates').then((r) => setItems(r.data.templates || [])); }
+  useEffect(load, []);
+
+  async function save() {
+    if (!form.name.trim()) { setErr('Nama template wajib diisi.'); return; }
+    setErr('');
+    const itemList = String(form.itemsText).split('\n').map((s: string) => s.trim()).filter(Boolean).map((label: string) => ({ label }));
+    const body = { name: form.name, category: form.category || null, items: itemList };
+    try {
+      if (editId) await api.put(`/aset/checklist-templates/${editId}`, body);
+      else await api.post('/aset/checklist-templates', body);
+      setForm(empty); setEditId(null); load();
+    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
+  }
+  async function del(id: number, name: string) {
+    if (!(await confirmDialog({ title: 'Hapus template', message: `Template "${name}" akan dihapus.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    await api.delete(`/aset/checklist-templates/${id}`); load();
+  }
+  function edit(t: ChecklistTpl) { setEditId(t.id); setForm({ name: t.name, category: t.category || '', itemsText: (t.items || []).map((i) => i.label).join('\n') }); }
+
+  return (
+    <div>
+      <div className="bg-surface border border-border rounded-lg p-3.5 mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <input className={inputCls} placeholder="Nama template * (mis. Inspeksi Harian Excavator)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className={inputCls} placeholder="Kategori/jenis alat (opsional, cocokkan ke aset)" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+        <textarea className={`${inputCls} sm:col-span-2 min-h-[90px]`} placeholder={'Item checklist — satu per baris\nmis.\nLevel oli mesin\nTekanan ban\nRem'} value={form.itemsText} onChange={(e) => setForm({ ...form, itemsText: e.target.value })} />
+        <div className="sm:col-span-2 flex gap-2">
+          <button className={btnPrimary} onClick={save}>{editId ? '💾 Update' : '+ Tambah'}</button>
+          {editId && <button className={btnGhost} onClick={() => { setForm(empty); setEditId(null); }}>Batal</button>}
+        </div>
+      </div>
+      {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+      <div className="text-[11px] text-text2 mb-3">Template dipakai di halaman <b>Aset & Peralatan</b> (tombol Checklist). Kategori kosong = berlaku untuk semua aset unit; diisi = hanya aset dgn jenis/kategori itu.</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+        {items.map((t) => (
+          <div key={t.id} className="rounded-lg border border-border bg-surface2 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div><div className="text-sm font-semibold">{t.name}</div>{t.category && <div className="text-[10px] text-text2">Jenis: {t.category}</div>}</div>
+              <div className="flex gap-1"><button className={btnGhost} onClick={() => edit(t)}>✏️</button><button className={`${btnGhost} text-danger`} onClick={() => del(t.id, t.name)}>🗑️</button></div>
+            </div>
+            <div className="text-[11px] text-text2 mt-1.5">{(t.items || []).length} item: {(t.items || []).map((i) => i.label).join(', ') || '—'}</div>
+          </div>
+        ))}
+        {items.length === 0 && <div className="col-span-full text-center text-text2 text-xs py-6">Belum ada template checklist.</div>}
       </div>
     </div>
   );

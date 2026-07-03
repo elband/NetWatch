@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { confirmDialog } from '../components/dialog';
 import AssetReadingModal from '../components/AssetReadingModal';
+import ChecklistModal from '../components/ChecklistModal';
+import PmModal from '../components/PmModal';
 import type { PhysicalAsset, AssetMetricType, AssetLatestReading, OpStatus } from '../types';
 
 const OP: Record<OpStatus, { label: string; cls: string }> = {
@@ -41,19 +43,24 @@ export default function Aset() {
 
   const [readingAsset, setReadingAsset] = useState<PhysicalAsset | null>(null);
   const [qrAsset, setQrAsset] = useState<PhysicalAsset | null>(null);
+  const [checklistAsset, setChecklistAsset] = useState<PhysicalAsset | null>(null);
+  const [pmAsset, setPmAsset] = useState<PhysicalAsset | null>(null);
+  const [pmDueIds, setPmDueIds] = useState<Set<number>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, m, l] = await Promise.all([
+      const [a, m, l, due] = await Promise.all([
         api.get('/aset'),
         api.get('/aset/metric-types'),
         api.get('/locations').catch(() => ({ data: { locations: [] } })),
+        api.get('/aset/pm/due').catch(() => ({ data: { due: [] } })),
       ]);
       const list: PhysicalAsset[] = a.data.assets || [];
       setAssets(list);
       setMetricTypes(m.data.metricTypes || []);
       setLocations((l.data.locations || []).map((x: any) => ({ id: x.id, name: x.name })));
+      setPmDueIds(new Set((due.data.due || []).map((d: any) => d.device_id)));
       // Muat pembacaan terakhir per aset (paralel) untuk ringkasan kartu.
       const entries = await Promise.all(list.map(async (as) => {
         try { const r = await api.get(`/aset/${as.id}/readings/latest`); return [as.id, r.data.latest || []] as const; }
@@ -153,7 +160,10 @@ export default function Aset() {
                     <div className="text-[11px] text-text2 truncate">{[a.merk, a.model].filter(Boolean).join(' ') || a.type || '—'}</div>
                     {a.serial && <div className="text-[10px] text-text2 font-mono truncate">SN: {a.serial}</div>}
                   </div>
-                  <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border ${op.cls}`}>{op.label}</span>
+                  <div className="shrink-0 flex flex-col items-end gap-1">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${op.cls}`}>{op.label}</span>
+                    {pmDueIds.has(a.id) && <span className="text-[9px] px-1.5 py-0.5 rounded-full border border-danger/40 text-danger bg-danger/10 font-semibold">🔧 PM due</span>}
+                  </div>
                 </div>
 
                 <div className="text-[11px] text-text2 mt-2 flex items-center gap-2 flex-wrap">
@@ -174,6 +184,8 @@ export default function Aset() {
 
                 <div className="mt-3 pt-3 border-t border-border flex items-center gap-1.5 flex-wrap">
                   <button className="px-2 py-1 rounded-md bg-accent/15 text-accent border border-accent/30 text-xs font-medium" onClick={() => setReadingAsset(a)}>📊 Meter</button>
+                  <button className={btnGhost} onClick={() => setChecklistAsset(a)}>✅ Checklist</button>
+                  <button className={`${btnGhost} ${pmDueIds.has(a.id) ? 'text-danger border-danger/40' : ''}`} onClick={() => setPmAsset(a)}>🔧 PM</button>
                   {canManage && (
                     <select value={a.op_status || 'operasional'} onChange={(e) => changeStatus(a, e.target.value as OpStatus)}
                       className="text-[11px] bg-surface2 border border-border rounded-md px-1.5 py-1 outline-none focus:border-accent">
@@ -241,6 +253,8 @@ export default function Aset() {
       )}
 
       {readingAsset && <AssetReadingModal asset={readingAsset} metricTypes={metricTypes} onClose={() => setReadingAsset(null)} onSaved={load} />}
+      {checklistAsset && <ChecklistModal asset={checklistAsset} onClose={() => setChecklistAsset(null)} onSaved={load} />}
+      {pmAsset && <PmModal asset={pmAsset} metricTypes={metricTypes} onClose={() => setPmAsset(null)} onSaved={load} />}
       {qrAsset && <QrModal asset={qrAsset} onClose={() => setQrAsset(null)} />}
     </div>
   );
