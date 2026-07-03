@@ -1,6 +1,7 @@
 # Rancangan Fase 2 — Aset Non-IP, Meter Reading & QR
 
-> Status: **RANCANGAN — belum dieksekusi.** Disusun 2026-07-03. Lanjutan dari [Fase 1](RANCANGAN-MULTI-UNIT-FASE1.md).
+> Status: **DIIMPLEMENTASIKAN & TERUJI 2026-07-03.** Lanjutan dari [Fase 1](RANCANGAN-MULTI-UNIT-FASE1.md).
+> Uji: E2E API (CRUD, validasi metrik per unit, isolasi antar unit, QR landing, exclusion dari view jaringan) + verifikasi browser (halaman Aset, modal meter + grafik tren, prefill lapor via QR). `tsc --noEmit` bersih.
 > Tujuan: unit **Alat-Alat Besar (AAB)** & **Water & Pump System (WPS)** dapat mendata peralatan fisik (tanpa IP/sensor), mencatat pembacaan meter manual, melaporkan & menangani kerusakan, serta menempel QR per alat.
 
 ---

@@ -77,6 +77,68 @@ export interface Device {
   snmp_community?: string | null;
   snmp_port?: number;
   under_maintenance?: number;
+  // Multi-unit & aset non-IP (Fase 2)
+  unit_id?: number | null;
+  unit_code?: string | null;
+  merk?: string | null;
+  serial?: string | null;
+  tahun?: string | null;
+  asset_class?: 'network' | 'physical';
+  model?: string | null;
+  photo_url?: string | null;
+  op_status?: OpStatus | null;
+  qr_token?: string | null;
+}
+
+// ——— Aset non-IP (Fase 2) ———
+export type OpStatus = 'operasional' | 'standby' | 'rusak' | 'perbaikan';
+
+export interface PhysicalAsset {
+  id: number;
+  unit_id: number | null;
+  unit_code?: string | null;
+  name: string;
+  category: string | null;
+  type: string | null;
+  merk: string | null;
+  model: string | null;
+  serial: string | null;
+  tahun: string | null;
+  icon: string | null;
+  photo_url: string | null;
+  loc: string | null;
+  location_id: number | null;
+  location_name?: string | null;
+  op_status: OpStatus | null;
+  qr_token: string | null;
+  created_at?: string;
+}
+
+export interface AssetReading {
+  id: number;
+  metric: string;
+  value: string | number;
+  note: string | null;
+  photo_url: string | null;
+  recorded_by: number | null;
+  recorded_at: string;
+}
+
+export interface AssetLatestReading {
+  metric: string;
+  value: string | number;
+  recorded_at: string;
+}
+
+export interface AssetMetricType {
+  id: number;
+  unit_id: number | null;
+  metric_key: string;
+  label: string;
+  satuan: string | null;
+  is_cumulative: number;
+  sort_order: number;
+  active: number;
 }
 
 export interface DeviceMetricPoint {

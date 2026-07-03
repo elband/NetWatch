@@ -14,6 +14,7 @@ import Dashboard from './pages/Dashboard';
 import MyDashboard from './pages/MyDashboard';
 import CoordDashboard from './pages/CoordDashboard';
 import Devices from './pages/Devices';
+import Aset from './pages/Aset';
 import Monitor from './pages/Monitor';
 import DeviceMap from './pages/DeviceMap';
 import SlaReport from './pages/SlaReport';
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="/my-dashboard" element={<MyDashboard />} />
           <Route path="/coord-dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route path="/devices" element={<Devices />} />
+          <Route path="/aset" element={<Aset />} />
           <Route path="/monitor" element={<Monitor />} />
           <Route path="/peta" element={<DeviceMap />} />
           <Route path="/sla" element={<SlaReport />} />

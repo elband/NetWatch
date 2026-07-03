@@ -5,10 +5,11 @@ import { stampFiles } from '../utils/photoStamp';
 const KATEGORI =['Komputer', 'Printer', 'Internet', 'WiFi', 'CCTV', 'Access Control', 'FIDS', 'Telepon', 'Monitor Informasi', 'Server', 'Keamanan', 'Operasional', 'Umum', 'Lainnya'];
 const URG: Record<string, string> = { kritis: '🔴 Kritis', tinggi: '🟠 Tinggi', sedang: '🟡 Sedang', rendah: '🟢 Rendah' };
 const MAX_MB = 10;
-const emptyForm = { nama: '', hp: '', jenis: 'Komputer', judul: '', urgensi: 'sedang', detail: '', gedung: '', ruang: '', unit_id: '' };
+const emptyForm = { nama: '', hp: '', jenis: 'Komputer', judul: '', urgensi: 'sedang', detail: '', gedung: '', ruang: '', unit_id: '', merk: '', inv: '' };
 
 interface Room { kode: string; nama: string; gedung: string | null; lantai: string | null; area: string | null }
 interface PublicUnit { id: number; code: string; name: string; icon: string | null }
+interface AssetPrefill { id: number; name: string; unit_name?: string | null; op_status?: string | null; merk?: string | null; model?: string | null; loc?: string | null }
 
 // Ikon garis (stroke) ringan — meniru gaya mockup tanpa dependensi tambahan.
 function Icon({ name, className = '', size = 18 }: { name: string; className?: string; size?: number }) {
@@ -40,6 +41,9 @@ export default function LaporPublik() {
   const params = new URLSearchParams(window.location.search);
   const roomCode = params.get('room') || '';
   const trackParam = params.get('track') || '';
+  const asetToken = params.get('aset') || '';
+  const [asset, setAsset] = useState<AssetPrefill | null>(null);
+  const [isTech, setIsTech] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [roomErr, setRoomErr] = useState('');
   const [editLoc, setEditLoc] = useState(false);
@@ -70,6 +74,28 @@ export default function LaporPublik() {
   }, []);
   // Dari tautan WA: ?track=ID → langsung lacak.
   useEffect(() => { if (trackParam) doTrack(); /* eslint-disable-next-line */ }, []);
+  // Dari QR aset: ?aset=<token> → prefill form kerusakan + banner aset.
+  useEffect(() => {
+    if (!asetToken) return;
+    api.get(`/aset/public/${encodeURIComponent(asetToken)}`).then((r) => {
+      setAsset(r.data.asset);
+      const p = r.data.prefill || {};
+      setForm((f) => ({
+        ...f,
+        jenis: p.jenis || f.jenis,
+        judul: p.judul || f.judul,
+        merk: p.merk || f.merk,
+        inv: p.inv || f.inv,
+        ruang: p.ruang || f.ruang,
+        unit_id: p.unit_id ? String(p.unit_id) : f.unit_id,
+      }));
+    }).catch(() => {});
+    // Bila teknisi sedang login, tawarkan pintasan input meter.
+    api.get('/auth/me').then((r) => {
+      const roles: string[] = r.data?.user?.roles || (r.data?.user?.role ? [r.data.user.role] : []);
+      setIsTech(roles.some((x) => ['admin', 'koordinator', 'teknisi'].includes(x)));
+    }).catch(() => setIsTech(false));
+  }, [asetToken]);
 
   function addFiles(list: FileList | File[]) {
     const arr = Array.from(list);
@@ -134,6 +160,20 @@ export default function LaporPublik() {
             <Icon name="clock" size={15} /> Riwayat Laporan
           </button>
         </div>
+
+        {/* Banner aset (dari scan QR) */}
+        {asset && (
+          <div className="rounded-3xl border border-cyan-400/25 bg-gradient-to-br from-cyan-500/10 to-violet-500/5 p-5 mb-4">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-cyan-300"><Icon name="monitor" size={14} /> Aset (dari QR)</div>
+            <div className="text-[22px] font-bold mt-1 leading-tight">{asset.name}</div>
+            <div className="text-[12px] text-slate-400 mt-0.5">{[asset.merk, asset.model].filter(Boolean).join(' ')}{asset.unit_name ? ` • ${asset.unit_name}` : ''}{asset.loc ? ` • ${asset.loc}` : ''}</div>
+            {isTech && (
+              <a href={`/aset?focus=${asset.id}`} className="inline-flex items-center gap-2 mt-3 rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-3.5 py-2 text-[12px] font-semibold text-cyan-200 hover:bg-cyan-500/20 transition-colors">
+                <Icon name="doc" size={15} /> Saya teknisi — Input Meter / Detail Aset
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Lokasi */}
         <div className="rounded-3xl border border-violet-400/25 bg-gradient-to-br from-violet-500/10 to-blue-500/5 p-5 mb-4 relative overflow-hidden">

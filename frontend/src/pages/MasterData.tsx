@@ -6,14 +6,14 @@ import LocationMap from '../components/LocationMap';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Asset, ServiceItem, LocationItem, Unit, User } from '../types';
 
-type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'unit';
+type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'unit';
 interface DeviceTypeItem { id: number; name: string; icon: string | null; sort_order: number }
 
 export default function MasterData() {
   const { user } = useAuth();
   const isAdmin = hasRole(user, 'admin'); // tab Unit hanya untuk Super Admin
   const [tab, setTab] = useState<Tab>('aset');
-  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat']];
+  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat'], ['metrik', '📊 Metrik Aset']];
   if (isAdmin) tabs.push(['unit', '🏢 Unit Kerja']);
   return (
     <div>
@@ -30,6 +30,7 @@ export default function MasterData() {
       {tab === 'layanan' && <ServicesTab />}
       {tab === 'lokasi' && <LocationsTab />}
       {tab === 'tipe' && <DeviceTypesTab />}
+      {tab === 'metrik' && <MetricTypesTab />}
       {tab === 'unit' && isAdmin && <UnitsTab />}
     </div>
   );
@@ -329,6 +330,74 @@ function UnitsTab() {
 }
 
 // ===================== TIPE PERANGKAT =====================
+// ===================== METRIK ASET (Fase 2) =====================
+// Definisi metrik meter per unit (jam operasi, BBM, tekanan, dst.) — sumber
+// dropdown pada form pembacaan meter di halaman Aset. Ter-scope unit di backend.
+interface MetricTypeItem { id: number; unit_id: number | null; metric_key: string; label: string; satuan: string | null; is_cumulative: number; sort_order: number; active: number }
+function MetricTypesTab() {
+  const [items, setItems] = useState<MetricTypeItem[]>([]);
+  const empty = { metric_key: '', label: '', satuan: '', is_cumulative: false, sort_order: 0 };
+  const [form, setForm] = useState<any>(empty);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [err, setErr] = useState('');
+
+  function load() { api.get('/aset/metric-types').then((r) => setItems(r.data.metricTypes || [])); }
+  useEffect(load, []);
+
+  async function save() {
+    if (!form.label.trim()) { setErr('Label metrik wajib diisi.'); return; }
+    if (!editId && !form.metric_key.trim()) { setErr('Kunci metrik wajib diisi.'); return; }
+    setErr('');
+    try {
+      if (editId) await api.put(`/aset/metric-types/${editId}`, form);
+      else await api.post('/aset/metric-types', form);
+      setForm(empty); setEditId(null); load();
+    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
+  }
+  async function del(id: number, label: string) {
+    if (!(await confirmDialog({ title: 'Hapus metrik', message: `Metrik "${label}" akan dihapus. Pembacaan lama tetap tersimpan.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    try { await api.delete(`/aset/metric-types/${id}`); load(); }
+    catch (e: any) { alertDialog({ title: 'Tidak bisa dihapus', message: e?.response?.data?.error || 'Gagal menghapus.', variant: 'warning' }); }
+  }
+  function edit(m: MetricTypeItem) { setEditId(m.id); setForm({ metric_key: m.metric_key, label: m.label, satuan: m.satuan || '', is_cumulative: !!m.is_cumulative, sort_order: m.sort_order }); }
+
+  return (
+    <div>
+      <div className="bg-surface border border-border rounded-lg p-3.5 mb-3 flex gap-2 items-end flex-wrap">
+        <input className={`${inputCls} w-36`} placeholder="Kunci (mis. jam_operasi)" value={form.metric_key} disabled={!!editId} onChange={(e) => setForm({ ...form, metric_key: e.target.value })} />
+        <input className={inputCls} placeholder="Label * (mis. Jam Operasi)" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
+        <input className={`${inputCls} w-24`} placeholder="Satuan" value={form.satuan} onChange={(e) => setForm({ ...form, satuan: e.target.value })} />
+        <label className="flex items-center gap-1.5 text-[11px] text-text2"><input type="checkbox" checked={form.is_cumulative} onChange={(e) => setForm({ ...form, is_cumulative: e.target.checked })} /> Kumulatif</label>
+        <input className={`${inputCls} w-20`} type="number" placeholder="Urutan" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
+        <button className={btnPrimary} onClick={save}>{editId ? '💾 Update' : '+ Tambah'}</button>
+        {editId && <button className={btnGhost} onClick={() => { setForm(empty); setEditId(null); }}>Batal</button>}
+      </div>
+      {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+      <div className="text-[11px] text-text2 mb-3">Metrik meter yang dicatat pada aset unit ini (halaman <b>Aset & Peralatan</b>). <i>Kumulatif</i> = nilai selalu naik (mis. jam operasi/hour meter) — dasar preventive maintenance berbasis interval nanti.</div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="text-left text-text2 border-b border-border">
+            <th className="px-3 py-2">Label</th><th className="px-3 py-2">Kunci</th><th className="px-3 py-2">Satuan</th><th className="px-3 py-2">Kumulatif</th><th className="px-3 py-2">Urutan</th><th className="px-3 py-2"></th>
+          </tr></thead>
+          <tbody>
+            {items.map((m) => (
+              <tr key={m.id} className="border-b border-border/60">
+                <td className="px-3 py-2.5 font-semibold">{m.label}{!m.active ? ' (nonaktif)' : ''}</td>
+                <td className="px-3 py-2.5 font-mono text-text2">{m.metric_key}</td>
+                <td className="px-3 py-2.5">{m.satuan || '—'}</td>
+                <td className="px-3 py-2.5">{m.is_cumulative ? '✅' : '—'}{m.unit_id == null ? ' · global' : ''}</td>
+                <td className="px-3 py-2.5">{m.sort_order}</td>
+                <td className="px-3 py-2.5"><div className="flex gap-1.5"><button className={btnGhost} onClick={() => edit(m)}>✏️</button><button className={`${btnGhost} text-danger`} onClick={() => del(m.id, m.label)}>🗑️</button></div></td>
+              </tr>
+            ))}
+            {items.length === 0 && <tr><td colSpan={6} className="text-center text-text2 py-6">Belum ada metrik. Tambahkan mis. Jam Operasi, BBM, Tekanan.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function DeviceTypesTab() {
   const [items, setItems] = useState<DeviceTypeItem[]>([]);
   const empty = { name: '', icon: '🖥️', sortOrder: 0 };
