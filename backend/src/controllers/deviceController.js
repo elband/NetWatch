@@ -18,7 +18,7 @@ export async function listDevices(req, res) {
       ) AS under_maintenance
      FROM devices d
      LEFT JOIN locations loc ON loc.id = d.location_id
-     WHERE 1=1${uf.clause}
+     WHERE d.asset_class = 'network'${uf.clause}
      ORDER BY d.id`,
     uf.params
   );

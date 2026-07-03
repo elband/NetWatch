@@ -37,7 +37,7 @@ export async function getSlaReport(req, res) {
        FROM devices d
        LEFT JOIN device_uptime_daily u
          ON u.device_id = d.id AND u.day BETWEEN ? AND ?
-      WHERE 1=1${locFilter}${uf.clause}
+      WHERE d.asset_class = 'network'${locFilter}${uf.clause}
       GROUP BY d.id
       ORDER BY d.name ASC`,
     params

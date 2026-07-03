@@ -231,6 +231,68 @@ async function migrate() {
     }
   }
 
+  // ── Aset non-IP (Fase 2): peralatan fisik AAB/WPS di atas tabel `devices` ──
+  // Pembeda network vs physical; aset fisik: ip='N/A-<id>', monitor_enabled=0 (dilewati ping worker).
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'asset_class', "ENUM('network','physical') NOT NULL DEFAULT 'network' AFTER type");
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'model', 'VARCHAR(120) DEFAULT NULL AFTER merk');
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'photo_url', 'VARCHAR(255) DEFAULT NULL AFTER icon');
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'op_status', "ENUM('operasional','standby','rusak','perbaikan') DEFAULT NULL AFTER status");
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'qr_token', 'CHAR(32) DEFAULT NULL AFTER op_status');
+  await addIndexIfMissing(conn, env.db.database, 'devices', 'idx_dev_asset_class', '(asset_class)');
+  await addUniqueIndexIfMissing(conn, env.db.database, 'devices', 'uniq_dev_qr_token', '(qr_token)');
+
+  // Pembacaan meter manual (time-series) — dasar grafik tren jam operasi/BBM/tekanan/debit/level.
+  await conn.query(`CREATE TABLE IF NOT EXISTS asset_readings (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    device_id INT NOT NULL,
+    unit_id INT DEFAULT NULL,
+    metric VARCHAR(40) NOT NULL,
+    value DECIMAL(12,2) NOT NULL,
+    note VARCHAR(255) DEFAULT NULL,
+    photo_url VARCHAR(255) DEFAULT NULL,
+    recorded_by INT DEFAULT NULL,
+    recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_ar_device_metric_time (device_id, metric, recorded_at),
+    INDEX idx_ar_unit (unit_id),
+    CONSTRAINT fk_ar_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ar_user FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB`);
+
+  // Definisi metrik meter per unit (dikonfigurasi koordinator). unit_id NULL = default global.
+  await conn.query(`CREATE TABLE IF NOT EXISTS asset_metric_types (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    unit_id INT DEFAULT NULL,
+    metric_key VARCHAR(40) NOT NULL,
+    label VARCHAR(80) NOT NULL,
+    satuan VARCHAR(20) DEFAULT NULL,
+    is_cumulative TINYINT(1) NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_amt (unit_id, metric_key)
+  ) ENGINE=InnoDB`);
+
+  // Seed metrik default AAB & WPS (INSERT IGNORE — edit koordinator tidak tertimpa).
+  const [[aab]] = await conn.query("SELECT id FROM units WHERE code = 'AAB' LIMIT 1");
+  const [[wps]] = await conn.query("SELECT id FROM units WHERE code = 'WPS' LIMIT 1");
+  const METRICS = [
+    // unit_id, metric_key, label, satuan, is_cumulative, sort
+    [aab?.id, 'jam_operasi', 'Jam Operasi (Hour Meter)', 'jam', 1, 0],
+    [aab?.id, 'bbm', 'Konsumsi BBM', 'liter', 0, 1],
+    [wps?.id, 'jam_pompa', 'Jam Operasi Pompa', 'jam', 1, 0],
+    [wps?.id, 'tekanan', 'Tekanan', 'bar', 0, 1],
+    [wps?.id, 'debit', 'Debit', 'm³/j', 0, 2],
+    [wps?.id, 'level_air', 'Level Air', '%', 0, 3],
+  ];
+  for (const [uid, key, label, satuan, cumulative, sort] of METRICS) {
+    if (!uid) continue;
+    await conn.query(
+      'INSERT IGNORE INTO asset_metric_types (unit_id, metric_key, label, satuan, is_cumulative, sort_order) VALUES (?,?,?,?,?,?)',
+      [uid, key, label, satuan, cumulative, sort]
+    );
+  }
+
   // ── Index untuk performa query (dashboard, laporan bulanan, filter status) ──
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_created_at', '(created_at)');
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_status', '(status)');
@@ -265,6 +327,24 @@ async function addIndexIfMissing(conn, dbName, table, indexName, colsExpr) {
     }
   } catch (e) {
     console.warn(`  ! lewati index ${table}.${indexName}: ${e.message}`);
+  }
+}
+
+// Tambah UNIQUE index idempoten. Nilai NULL tidak melanggar UNIQUE di MySQL,
+// jadi aman untuk kolom seperti qr_token yang kosong pada perangkat jaringan.
+async function addUniqueIndexIfMissing(conn, dbName, table, indexName, colsExpr) {
+  try {
+    const [rows] = await conn.query(
+      `SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
+      [dbName, table, indexName]
+    );
+    if (rows.length === 0) {
+      await conn.query(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${indexName}\` ${colsExpr}`);
+      console.log(`  + unique index ${table}.${indexName}`);
+    }
+  } catch (e) {
+    console.warn(`  ! lewati unique index ${table}.${indexName}: ${e.message}`);
   }
 }
 

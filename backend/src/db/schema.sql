@@ -866,3 +866,40 @@ CREATE TABLE IF NOT EXISTS skp_bukti (
   FOREIGN KEY (indikator_id) REFERENCES skp_indikator(id) ON DELETE CASCADE,
   FOREIGN KEY (skp_id) REFERENCES skp(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+-- ===== Aset non-IP (Fase 2 multi-unit) =====
+-- Peralatan fisik (AAB/WPS) dimodelkan sebagai baris `devices` dgn asset_class='physical'.
+-- Kolom aset (asset_class, model, photo_url, op_status, qr_token) & unit_id ditambahkan
+-- via migrate.js (idempoten). Dua tabel pendukung di bawah.
+
+-- Pembacaan meter manual (time-series): jam operasi, BBM, tekanan, debit, level air, dst.
+CREATE TABLE IF NOT EXISTS asset_readings (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  unit_id INT DEFAULT NULL,
+  metric VARCHAR(40) NOT NULL,
+  value DECIMAL(12,2) NOT NULL,
+  note VARCHAR(255) DEFAULT NULL,
+  photo_url VARCHAR(255) DEFAULT NULL,
+  recorded_by INT DEFAULT NULL,
+  recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ar_device_metric_time (device_id, metric, recorded_at),
+  INDEX idx_ar_unit (unit_id),
+  CONSTRAINT fk_ar_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ar_user FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Definisi metrik meter per unit (dikonfigurasi koordinator). unit_id NULL = default global.
+CREATE TABLE IF NOT EXISTS asset_metric_types (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  metric_key VARCHAR(40) NOT NULL,
+  label VARCHAR(80) NOT NULL,
+  satuan VARCHAR(20) DEFAULT NULL,
+  is_cumulative TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_amt (unit_id, metric_key)
+) ENGINE=InnoDB;

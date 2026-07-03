@@ -22,9 +22,11 @@ router.get('/public', async (_req, res) => {
 router.get('/summary', requireAuth, requireRole('admin'), async (_req, res) => {
   const [rows] = await pool.query(`
     SELECT un.id, un.code, un.name, un.icon, un.active,
-      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id) AS devices_total,
-      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id AND d.status = 'online') AS devices_online,
-      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id AND d.status = 'offline') AS devices_offline,
+      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id AND d.asset_class = 'network') AS devices_total,
+      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id AND d.asset_class = 'network' AND d.status = 'online') AS devices_online,
+      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id AND d.asset_class = 'network' AND d.status = 'offline') AS devices_offline,
+      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id AND d.asset_class = 'physical') AS assets_total,
+      (SELECT COUNT(*) FROM devices d WHERE d.unit_id = un.id AND d.asset_class = 'physical' AND d.op_status IN ('rusak','perbaikan')) AS assets_down,
       (SELECT COUNT(*) FROM incidents i WHERE i.unit_id = un.id AND i.status <> 'selesai') AS incidents_active,
       (SELECT COUNT(*) FROM incidents i WHERE i.unit_id = un.id AND i.status <> 'selesai' AND i.tech_id IS NULL) AS incidents_pool,
       (SELECT COUNT(*) FROM users u WHERE u.unit_id = un.id AND u.active = 1) AS users_total
