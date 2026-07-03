@@ -22,11 +22,11 @@ router.use(requireAuth, unitScope);
 router.get('/', listMaintenanceWindows);
 router.post('/', requireRole('admin', 'koordinator'), createMaintenanceWindow);
 
-// Dokumentasi foto & penyelesaian pekerjaan (boleh oleh teknisi pelaksana — cukup login).
+// Dokumentasi foto & penyelesaian pekerjaan — teknisi pelaksana ke atas (bukan viewer).
 router.get('/:id/photos', listWindowPhotos);
-router.post('/:id/photos', upload.array('photos', 20), addWindowPhotos);
-router.delete('/photos/:photoId', removeWindowPhoto);
-router.put('/:id/complete', completeMaintenanceWindow);
+router.post('/:id/photos', requireRole('admin', 'koordinator', 'teknisi'), upload.array('photos', 20), addWindowPhotos);
+router.delete('/photos/:photoId', requireRole('admin', 'koordinator', 'teknisi'), removeWindowPhoto);
+router.put('/:id/complete', requireRole('admin', 'koordinator', 'teknisi'), completeMaintenanceWindow);
 
 router.put('/:id', requireRole('admin', 'koordinator'), updateMaintenanceWindow);
 router.delete('/:id', requireRole('admin', 'koordinator'), deleteMaintenanceWindow);

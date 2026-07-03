@@ -11,6 +11,16 @@ export const authLimiter = rateLimit({
   message: { error: 'Terlalu banyak percobaan login. Coba lagi dalam beberapa menit.' },
 });
 
+// Pembatas EKSTRA ketat khusus login PIN: satu PIN dicocokkan ke seluruh basis user,
+// sehingga rawan brute-force lintas-akun. Batasi agresif per-IP.
+export const pinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.isProd ? 5 : 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Terlalu banyak percobaan PIN. Coba lagi dalam beberapa menit.' },
+});
+
 // Pembatas umum untuk seluruh API (anti abuse/DoS ringan).
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,

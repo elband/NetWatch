@@ -28,10 +28,26 @@ export async function listDevices(req, res) {
 const CHECK_TYPES = ['ping', 'tcp', 'http'];
 function normCheckType(v) { return CHECK_TYPES.includes(v) ? v : 'ping'; }
 
+// Validasi URL health-check (anti-SSRF): kosong OK; wajib http/https; tolak host
+// metadata cloud/link-local. RFC1918 privat diizinkan (monitoring internal sah).
+function validateCheckUrl(u) {
+  const s = (u ?? '').toString().trim();
+  if (!s) return null;
+  let url; try { url = new URL(s); } catch { return 'URL health-check tidak valid.'; }
+  if (!/^https?:$/.test(url.protocol)) return 'URL health-check harus berskema http/https.';
+  const h = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'metadata.google.internal' || h === '0.0.0.0' || h.startsWith('169.254.')) {
+    return 'Host URL health-check tidak diizinkan (metadata/link-local).';
+  }
+  return null;
+}
+
 export async function createDevice(req, res) {
   const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   if (!name || !ip || !type) return res.status(400).json({ error: 'Nama, IP, tipe wajib diisi' });
+  const urlErr = validateCheckUrl(check_url);
+  if (urlErr) return res.status(400).json({ error: urlErr });
   const unitId = insertUnitId(req);
   if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const inspReq = inspect_required == null ? 1 : (inspect_required ? 1 : 0);
@@ -53,6 +69,10 @@ export async function updateDevice(req, res) {
   const id = Number(req.params.id);
   const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
+  if (check_url !== undefined) {
+    const urlErr = validateCheckUrl(check_url);
+    if (urlErr) return res.status(400).json({ error: urlErr });
+  }
   const [existing] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   if (!existing[0] || !rowInUnit(existing[0], req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   await pool.query(

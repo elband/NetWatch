@@ -20,7 +20,7 @@ const mapUpload = multer({
     destination: (req, file, cb) => cb(null, MAP_DIR),
     filename: (req, file, cb) => cb(null, `map-${Date.now()}${path.extname(file.originalname).toLowerCase() || '.png'}`),
   }),
-  fileFilter: (req, file, cb) => (/^image\//.test(file.mimetype) ? cb(null, true) : cb(new Error('Harus gambar.'))),
+  fileFilter: (req, file, cb) => (/^image\/(jpe?g|png|webp|gif)$/.test(file.mimetype) ? cb(null, true) : cb(new Error('Harus gambar (JPG/PNG/WebP/GIF).'))),
   limits: { fileSize: 8 * 1024 * 1024 },
 }).single('map');
 

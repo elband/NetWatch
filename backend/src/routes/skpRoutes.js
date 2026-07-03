@@ -134,9 +134,10 @@ router.get('/bukti/public/:token', async (req, res) => {
   if (!rows[0]) return res.status(404).json({ valid: false, error: 'Bukti dukung tidak ditemukan.' });
   const b = rows[0];
   const [[ind]] = await pool.query('SELECT aspek, indikator FROM skp_indikator WHERE id=?', [b.indikator_id]);
-  const [[skp]] = await pool.query('SELECT periode, tahun, pegawai_nama, pegawai_nip, pegawai_jabatan FROM skp WHERE id=?', [b.skp_id]);
+  const [[skp]] = await pool.query('SELECT periode, tahun, pegawai_nama, pegawai_nip, pegawai_jabatan, unit_id FROM skp WHERE id=?', [b.skp_id]);
   const snapshot = b.kind === 'data' ? (typeof b.snapshot === 'string' ? JSON.parse(b.snapshot || 'null') : b.snapshot) : null;
-  res.json({ valid: true, bukti: { ...publicBuktiView(b), bulan: b.bulan, snapshot }, indikator: ind || null, skp: skp || null, laporanBulanan: await signedLaporanBulanan(b.bulan) });
+  // Laporan bulanan pendukung mengikuti unit pemilik SKP (bukan lintas unit).
+  res.json({ valid: true, bukti: { ...publicBuktiView(b), bulan: b.bulan, snapshot }, indikator: ind || null, skp: skp || null, laporanBulanan: await signedLaporanBulanan(b.bulan, skp?.unit_id ?? null) });
 });
 
 // =================== TERPROTEKSI (admin/koordinator) ===================

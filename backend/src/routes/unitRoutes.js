@@ -20,7 +20,7 @@ const kopUpload = multer({
     destination: (q, f, cb) => cb(null, SURAT_DIR),
     filename: (q, f, cb) => cb(null, `kop-unit-${q.params.id}-${Date.now()}${path.extname(f.originalname).toLowerCase() || '.png'}`),
   }),
-  fileFilter: (q, f, cb) => (/^image\//.test(f.mimetype) ? cb(null, true) : cb(new Error('Kop harus gambar.'))),
+  fileFilter: (q, f, cb) => (/^image\/(jpe?g|png|webp|gif)$/.test(f.mimetype) ? cb(null, true) : cb(new Error('Kop harus gambar (JPG/PNG/WebP/GIF).'))),
   limits: { fileSize: 8 * 1024 * 1024 },
 }).single('kop');
 

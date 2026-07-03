@@ -430,7 +430,7 @@ router.post('/maintenance', requireRole('admin', 'koordinator'), maintUpload.sin
 
 // Update status (teknisi boleh menandai selesai/batal saat eksekusi) + dokumentasi.
 // Saat menandai SELESAI wajib ada dokumentasi (upload/kamera) → lalu notifikasi ke koordinator.
-router.put('/maintenance/:id', maintUpload.single('doc'), async (req, res) => {
+router.put('/maintenance/:id', requireRole('admin', 'koordinator', 'teknisi'), maintUpload.single('doc'), async (req, res) => {
   const { status, note } = req.body;
   const valid = ['rencana', 'selesai', 'batal'];
   if (!valid.includes(status)) return res.status(400).json({ error: 'Status tidak valid.' });
@@ -492,7 +492,7 @@ router.get('/maintenance/:id/photos', async (req, res) => {
 });
 
 // Unggah satu/banyak foto sekaligus untuk sebuah maintenance.
-router.post('/maintenance/:id/photos', maintUpload.array('photos', 20), async (req, res) => {
+router.post('/maintenance/:id/photos', requireRole('admin', 'koordinator', 'teknisi'), maintUpload.array('photos', 20), async (req, res) => {
   // Scope via induk (fallback unit perangkat untuk baris legacy).
   const [[m]] = await pool.query(
     'SELECT m.id, m.unit_id, d.unit_id AS device_unit_id FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id = ?',
@@ -517,7 +517,7 @@ router.post('/maintenance/:id/photos', maintUpload.array('photos', 20), async (r
 });
 
 // Hapus satu foto dokumentasi (+ berkas di disk).
-router.delete('/maintenance/photos/:photoId', async (req, res) => {
+router.delete('/maintenance/photos/:photoId', requireRole('admin', 'koordinator', 'teknisi'), async (req, res) => {
   // Scope via induk maintenance (fallback unit perangkat).
   const [[ph]] = await pool.query(
     `SELECT p.url, m.unit_id, d.unit_id AS device_unit_id

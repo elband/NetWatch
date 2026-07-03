@@ -40,9 +40,9 @@ function normalizeRoles(roles, role) {
   return list;
 }
 
-// PIN harus 4–6 digit & unik antar user (karena login hanya pakai PIN).
+// PIN harus 6 digit & unik antar user (login hanya pakai PIN → keyspace lebih besar = lebih aman).
 async function validatePin(pin, exceptId = null) {
-  if (!/^\d{4,6}$/.test(pin)) return { error: 'PIN harus 4–6 digit angka.' };
+  if (!/^\d{6}$/.test(pin)) return { error: 'PIN harus 6 digit angka.' };
   const [rows] = await pool.query('SELECT id, pin_hash FROM users WHERE pin_hash IS NOT NULL');
   for (const u of rows) {
     if (exceptId && u.id === exceptId) continue;

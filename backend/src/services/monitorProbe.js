@@ -56,13 +56,29 @@ function probeTcp(host, port, timeoutMs = 2500) {
   });
 }
 
+// Host yang dilarang diprobe (mitigasi SSRF): endpoint metadata cloud & link-local.
+// Catatan: rentang privat RFC1918 (10/172.16/192.168) SENGAJA diizinkan karena
+// NetWatch memang memantau perangkat jaringan internal — bukan kebocoran.
+function isBlockedHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'metadata.google.internal' || h === '0.0.0.0') return true;
+  if (h.startsWith('169.254.')) return true;   // link-local + metadata cloud (AWS/Azure/GCP 169.254.169.254)
+  if (h === '::1' || h.startsWith('fe80:') || h.startsWith('fd')) return false; // biarkan IPv6 privat utk monitoring
+  return false;
+}
+
 // --- HTTP(S) check (service layer 7 sehat bila status < 400) -----------------
 async function probeHttp(url, timeoutMs = 4000) {
   const start = Date.now();
+  let target;
+  try { target = new URL(url); } catch { return { alive: false, avgMs: 0 }; }
+  // Hanya http/https, dan bukan host terlarang (anti-SSRF metadata).
+  if (!/^https?:$/.test(target.protocol) || isBlockedHost(target.hostname)) return { alive: false, avgMs: 0 };
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, redirect: 'follow' });
+    // redirect 'manual': cegah redirect memperluas jangkauan ke host lain (SSRF).
+    const res = await fetch(url, { signal: ctrl.signal, redirect: 'manual' });
     return { alive: res.status < 400, avgMs: Date.now() - start };
   } catch {
     return { alive: false, avgMs: 0 };

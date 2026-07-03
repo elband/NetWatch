@@ -119,7 +119,7 @@ export async function updateProfile(req, res) {
   }
   let pinHash = u.pin_hash;
   if (pin) {
-    if (!/^\d{4,6}$/.test(String(pin))) return res.status(400).json({ error: 'PIN harus 4–6 digit angka.' });
+    if (!/^\d{6}$/.test(String(pin))) return res.status(400).json({ error: 'PIN baru harus 6 digit angka (untuk keamanan).' });
     const [others] = await pool.query('SELECT pin_hash FROM users WHERE id <> ? AND pin_hash IS NOT NULL', [id]);
     for (const o of others) { if (await bcrypt.compare(String(pin), o.pin_hash)) return res.status(400).json({ error: 'PIN sudah digunakan akun lain, pilih yang lain.' }); }
     pinHash = await bcrypt.hash(String(pin), 10);

@@ -19,10 +19,24 @@ router.use(unitScope);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(__dirname, '..', '..', 'uploads', 'documents');
 fs.mkdirSync(DIR, { recursive: true });
+// Allow-list tipe dokumen (anti stored-XSS: TOLAK html/svg/js yang bisa dieksekusi
+// saat disajikan inline dari /uploads). PDF, gambar raster, Office, teks biasa, arsip.
+const DOC_MIME_OK = new Set([
+  'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'text/plain', 'text/csv',
+  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/zip', 'application/x-zip-compressed', 'application/octet-stream',
+]);
 const upload = multer({
   storage: multer.diskStorage({ destination: (q, f, cb) => cb(null, DIR), filename: (q, f, cb) => cb(null, `D${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(f.originalname).toLowerCase()}`) }),
   limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (q, f, cb) => (DOC_MIME_OK.has(f.mimetype) ? cb(null, true) : cb(new Error('Tipe file tidak diizinkan (hanya PDF, gambar, Office, teks, atau zip).'))),
 });
+// Bungkus agar error filter/ukuran jadi 400 rapi (bukan 500).
+function withDocFile(req, res, next) {
+  upload.single('file')(req, res, (err) => (err ? res.status(400).json({ error: err.message || 'Unggahan ditolak.' }) : next()));
+}
 const STATUSES = ['draft', 'review', 'disetujui', 'aktif', 'kadaluarsa', 'arsip'];
 const isManager = (u) => ['admin', 'koordinator'].some((r) => (u.roles?.length ? u.roles : [u.role]).includes(r));
 const splitTags = (s) => String(s || '').split(',').map((t) => t.trim()).filter(Boolean).slice(0, 20);
@@ -148,7 +162,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // ===== Buat (koordinator/admin) =====
-router.post('/', requireRole('admin', 'koordinator'), upload.single('file'), async (req, res) => {
+router.post('/', requireRole('admin', 'koordinator'), withDocFile, async (req, res) => {
   const b = req.body;
   if (!b.judul?.trim() || !b.kategori?.trim()) return res.status(400).json({ error: 'Judul & kategori wajib diisi.' });
   const fileUrl = req.file ? `/uploads/documents/${req.file.filename}` : null;
@@ -169,7 +183,7 @@ router.post('/', requireRole('admin', 'koordinator'), upload.single('file'), asy
 });
 
 // ===== Edit (file baru → versi baru) =====
-router.put('/:id', requireRole('admin', 'koordinator'), upload.single('file'), async (req, res) => {
+router.put('/:id', requireRole('admin', 'koordinator'), withDocFile, async (req, res) => {
   const id = Number(req.params.id);
   const [rows] = await pool.query('SELECT * FROM documents WHERE id=?', [id]);
   const d = rows[0];
