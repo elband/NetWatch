@@ -1,0 +1,2 @@
+# Skrip shell WAJIB LF agar jalan di server Linux (CRLF memecah bash)
+*.sh text eol=lf
