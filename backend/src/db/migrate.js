@@ -196,10 +196,12 @@ async function migrate() {
   }
 
   // ── Multi-unit (Fase 1): seed unit + kolom unit_id + backfill data lama ke ELB ──
+  // Catatan: unit WPS (Water & Pump System) DIGABUNG ke AAB — air/pompa berada di
+  // bawah Unit Alat-Alat Besar (sesuai laporan bulanan AAB). Lihat blok konsolidasi
+  // di bawah yang memindahkan data WPS lama ke AAB & menghapus unitnya.
   const UNITS = [
     ['ELB', 'Elektronika Bandara', 'Fasilitas elektronika & jaringan bandara', '🖥️'],
-    ['AAB', 'Alat-Alat Besar', 'Kendaraan & alat berat bandara', '🚜'],
-    ['WPS', 'Water & Pump System', 'Pompa, reservoir & jaringan air bandara', '💧'],
+    ['AAB', 'Alat-Alat Besar', 'Kendaraan, alat berat, serta sistem air & pompa bandara', '🚜'],
   ];
   for (const [code, name, description, icon] of UNITS) {
     await conn.query('INSERT IGNORE INTO units (code, name, description, icon) VALUES (?,?,?,?)', [code, name, description, icon]);
@@ -273,24 +275,45 @@ async function migrate() {
     UNIQUE KEY uniq_amt (unit_id, metric_key)
   ) ENGINE=InnoDB`);
 
-  // Seed metrik default AAB & WPS (INSERT IGNORE — edit koordinator tidak tertimpa).
+  // Seed metrik default AAB — mencakup alat berat/kendaraan (jam operasi, BBM) DAN
+  // sistem air/pompa (jam pompa, tekanan, debit, level air) karena WPS kini bagian AAB.
   const [[aab]] = await conn.query("SELECT id FROM units WHERE code = 'AAB' LIMIT 1");
-  const [[wps]] = await conn.query("SELECT id FROM units WHERE code = 'WPS' LIMIT 1");
   const METRICS = [
-    // unit_id, metric_key, label, satuan, is_cumulative, sort
-    [aab?.id, 'jam_operasi', 'Jam Operasi (Hour Meter)', 'jam', 1, 0],
-    [aab?.id, 'bbm', 'Konsumsi BBM', 'liter', 0, 1],
-    [wps?.id, 'jam_pompa', 'Jam Operasi Pompa', 'jam', 1, 0],
-    [wps?.id, 'tekanan', 'Tekanan', 'bar', 0, 1],
-    [wps?.id, 'debit', 'Debit', 'm³/j', 0, 2],
-    [wps?.id, 'level_air', 'Level Air', '%', 0, 3],
+    // metric_key, label, satuan, is_cumulative, sort
+    ['jam_operasi', 'Jam Operasi (Hour Meter)', 'jam', 1, 0],
+    ['bbm', 'Konsumsi BBM', 'liter', 0, 1],
+    ['jam_pompa', 'Jam Operasi Pompa', 'jam', 1, 2],
+    ['tekanan', 'Tekanan', 'bar', 0, 3],
+    ['debit', 'Debit', 'm³/j', 0, 4],
+    ['level_air', 'Level Air', '%', 0, 5],
   ];
-  for (const [uid, key, label, satuan, cumulative, sort] of METRICS) {
-    if (!uid) continue;
-    await conn.query(
-      'INSERT IGNORE INTO asset_metric_types (unit_id, metric_key, label, satuan, is_cumulative, sort_order) VALUES (?,?,?,?,?,?)',
-      [uid, key, label, satuan, cumulative, sort]
+  if (aab?.id) {
+    for (const [key, label, satuan, cumulative, sort] of METRICS) {
+      await conn.query(
+        'INSERT IGNORE INTO asset_metric_types (unit_id, metric_key, label, satuan, is_cumulative, sort_order) VALUES (?,?,?,?,?,?)',
+        [aab.id, key, label, satuan, cumulative, sort]
+      );
+    }
+  }
+
+  // ── Konsolidasi: gabungkan unit WPS lama ke AAB (idempoten; hanya jalan bila WPS masih ada) ──
+  const [[wpsUnit]] = await conn.query("SELECT id FROM units WHERE code = 'WPS' LIMIT 1");
+  if (wpsUnit && aab?.id && wpsUnit.id !== aab.id) {
+    const [unitTables] = await conn.query(
+      "SELECT TABLE_NAME AS t FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND COLUMN_NAME = 'unit_id'",
+      [env.db.database]
     );
+    for (const { t } of unitTables) {
+      if (t === 'asset_metric_types') {
+        // Pindahkan metrik WPS yang belum ada di AAB; sisa duplikat dihapus.
+        await conn.query('UPDATE IGNORE asset_metric_types SET unit_id = ? WHERE unit_id = ?', [aab.id, wpsUnit.id]);
+        await conn.query('DELETE FROM asset_metric_types WHERE unit_id = ?', [wpsUnit.id]);
+      } else {
+        await conn.query(`UPDATE \`${t}\` SET unit_id = ? WHERE unit_id = ?`, [aab.id, wpsUnit.id]);
+      }
+    }
+    await conn.query('DELETE FROM units WHERE id = ?', [wpsUnit.id]);
+    console.log(`  ~ unit WPS (id ${wpsUnit.id}) digabung ke AAB (id ${aab.id}) & dihapus`);
   }
 
   // ── Fase 3: checklist inspeksi, preventive maintenance & riwayat status aset ──

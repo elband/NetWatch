@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { pool } from '../db/pool.js';
 import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
-// Aset non-IP (Fase 2 multi-unit): peralatan fisik AAB/WPS dimodelkan sebagai baris
+// Aset non-IP (Fase 2 multi-unit): peralatan fisik AAB (alat berat, kendaraan, air/pompa) dimodelkan sebagai baris
 // `devices` dgn asset_class='physical' — mewarisi insiden, logbook, inspeksi via device_id.
 // Aset fisik: ip='N/A-<id>', monitor_enabled=0 → dilewati ping worker (pingService.js).
 
