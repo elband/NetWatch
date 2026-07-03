@@ -919,6 +919,7 @@ CREATE TABLE IF NOT EXISTS checklist_template_items (
   id INT AUTO_INCREMENT PRIMARY KEY,
   template_id INT NOT NULL,
   label VARCHAR(160) NOT NULL,
+  category VARCHAR(60) DEFAULT NULL,
   sort_order INT NOT NULL DEFAULT 0,
   CONSTRAINT fk_cti_tpl FOREIGN KEY (template_id) REFERENCES checklist_templates(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -940,6 +941,7 @@ CREATE TABLE IF NOT EXISTS checklist_run_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   run_id BIGINT NOT NULL,
   label VARCHAR(160) NOT NULL,
+  category VARCHAR(60) DEFAULT NULL,
   result ENUM('ok','tidak','na') NOT NULL DEFAULT 'ok',
   note VARCHAR(255) DEFAULT NULL,
   CONSTRAINT fk_cri_run FOREIGN KEY (run_id) REFERENCES checklist_runs(id) ON DELETE CASCADE
@@ -1011,4 +1013,40 @@ CREATE TABLE IF NOT EXISTS sparepart_moves (
   moved_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_spm_part (sparepart_id),
   CONSTRAINT fk_spm_part FOREIGN KEY (sparepart_id) REFERENCES spareparts(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ===== Fase 5 (AAB): grup fasilitas & obat air =====
+-- Kolom devices (kondisi B/RR/RB, fasilitas, kebutuhan) ditambahkan via migrate.js.
+CREATE TABLE IF NOT EXISTS asset_facilities (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  name VARCHAR(80) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_af (unit_id, name)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS water_chemicals (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  name VARCHAR(120) NOT NULL,
+  satuan VARCHAR(20) NOT NULL DEFAULT 'kg',
+  harga_satuan DECIMAL(12,2) NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_wc_unit (unit_id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS water_chemical_usage (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  chemical_id INT NOT NULL,
+  unit_id INT DEFAULT NULL,
+  usage_date DATE NOT NULL,
+  volume DECIMAL(12,2) NOT NULL,
+  note VARCHAR(255) DEFAULT NULL,
+  recorded_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_wcu_chem_date (chemical_id, usage_date),
+  INDEX idx_wcu_unit_date (unit_id, usage_date),
+  CONSTRAINT fk_wcu_chem FOREIGN KEY (chemical_id) REFERENCES water_chemicals(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

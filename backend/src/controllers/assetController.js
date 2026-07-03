@@ -7,6 +7,7 @@ import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middle
 // Aset fisik: ip='N/A-<id>', monitor_enabled=0 → dilewati ping worker (pingService.js).
 
 const OP_STATUS = ['operasional', 'standby', 'rusak', 'perbaikan'];
+const KONDISI = ['B', 'RR', 'RB']; // Fase 5: Baik / Rusak Ringan / Rusak Berat (inventaris)
 const newQrToken = () => crypto.randomBytes(16).toString('hex'); // 32 hex chars
 
 // Catat perubahan status aset → sumber laporan availability/MTBF/MTTR (Fase 3).
@@ -24,13 +25,13 @@ export async function listAssets(req, res) {
   const uf = unitFilter(req.unitId, 'd.unit_id');
   const [rows] = await pool.query(
     `SELECT d.id, d.unit_id, d.name, d.category, d.type, d.merk, d.model, d.serial, d.tahun,
-            d.icon, d.photo_url, d.loc, d.location_id, d.op_status, d.qr_token, d.created_at,
+            d.icon, d.photo_url, d.loc, d.location_id, d.op_status, d.kondisi, d.fasilitas, d.kebutuhan, d.qr_token, d.created_at,
             loc.name AS location_name, u.code AS unit_code
        FROM devices d
        LEFT JOIN locations loc ON loc.id = d.location_id
        LEFT JOIN units u ON u.id = d.unit_id
       WHERE d.asset_class = 'physical'${uf.clause}
-      ORDER BY d.name`,
+      ORDER BY d.fasilitas IS NULL, d.fasilitas, d.name`,
     uf.params
   );
   res.json({ assets: rows });
@@ -51,22 +52,23 @@ export async function getAsset(req, res) {
 }
 
 export async function createAsset(req, res) {
-  const { name, category, type, merk, model, serial, tahun, icon, loc, location_id, op_status } = req.body;
+  const { name, category, type, merk, model, serial, tahun, icon, loc, location_id, op_status, kondisi, fasilitas, kebutuhan } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Nama aset wajib diisi' });
   const unitId = insertUnitId(req);
   if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const locId = location_id === '' || location_id == null ? null : Number(location_id);
   const opStatus = OP_STATUS.includes(op_status) ? op_status : 'operasional';
+  const kond = KONDISI.includes(kondisi) ? kondisi : null;
   const conn = await pool.getConnection();
   try {
     // ip sementara 'N/A' → diganti 'N/A-<id>' setelah dapat insertId. monitor_enabled=0 wajib.
     const [result] = await conn.query(
       `INSERT INTO devices (unit_id, asset_class, name, ip, type, category, merk, model, serial, tahun,
-         icon, photo_url, loc, location_id, op_status, qr_token, monitor_enabled, inspect_required, status)
-       VALUES (?, 'physical', ?, 'N/A', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, 1, 'offline')`,
+         icon, photo_url, loc, location_id, op_status, kondisi, fasilitas, kebutuhan, qr_token, monitor_enabled, inspect_required, status)
+       VALUES (?, 'physical', ?, 'N/A', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, 1, 'offline')`,
       [unitId, name.trim(), (type?.trim() || category?.trim() || 'Peralatan'), category?.trim() || null,
        merk?.trim() || null, model?.trim() || null, serial?.trim() || null, tahun?.toString().trim() || null,
-       icon?.trim() || '🔧', loc?.trim() || null, locId, opStatus, newQrToken()]
+       icon?.trim() || '🔧', loc?.trim() || null, locId, opStatus, kond, fasilitas?.trim() || null, kebutuhan?.trim() || null, newQrToken()]
     );
     await conn.query("UPDATE devices SET ip = CONCAT('N/A-', id) WHERE id = ?", [result.insertId]);
     await logAssetStatus(conn, result.insertId, unitId, opStatus, req.user.id);
@@ -81,10 +83,11 @@ export async function updateAsset(req, res) {
   const id = Number(req.params.id);
   const [[existing]] = await pool.query("SELECT * FROM devices WHERE id = ? AND asset_class = 'physical'", [id]);
   if (!existing || !rowInUnit(existing, req.unitId)) return res.status(404).json({ error: 'Aset tidak ditemukan' });
-  const { name, category, type, merk, model, serial, tahun, icon, loc, location_id, op_status } = req.body;
+  const { name, category, type, merk, model, serial, tahun, icon, loc, location_id, op_status, kondisi, fasilitas, kebutuhan } = req.body;
   const opStatus = op_status === undefined ? existing.op_status : (OP_STATUS.includes(op_status) ? op_status : existing.op_status);
+  const kond = kondisi === undefined ? existing.kondisi : (kondisi === '' || kondisi == null ? null : (KONDISI.includes(kondisi) ? kondisi : existing.kondisi));
   await pool.query(
-    `UPDATE devices SET name=?, type=?, category=?, merk=?, model=?, serial=?, tahun=?, icon=?, loc=?, location_id=?, op_status=?
+    `UPDATE devices SET name=?, type=?, category=?, merk=?, model=?, serial=?, tahun=?, icon=?, loc=?, location_id=?, op_status=?, kondisi=?, fasilitas=?, kebutuhan=?
       WHERE id = ?`,
     [
       name?.trim() ?? existing.name,
@@ -97,7 +100,9 @@ export async function updateAsset(req, res) {
       icon?.trim() ?? existing.icon,
       loc === '' ? null : (loc?.trim() ?? existing.loc),
       location_id === undefined ? existing.location_id : (location_id === '' || location_id == null ? null : Number(location_id)),
-      opStatus,
+      opStatus, kond,
+      fasilitas === undefined ? existing.fasilitas : (fasilitas?.trim() || null),
+      kebutuhan === undefined ? existing.kebutuhan : (kebutuhan?.trim() || null),
       id,
     ]
   );

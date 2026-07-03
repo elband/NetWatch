@@ -439,6 +439,92 @@ async function migrate() {
     CONSTRAINT fk_spm_part FOREIGN KEY (sparepart_id) REFERENCES spareparts(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`);
 
+  // ── Fase 5 (AAB): kondisi B/RR/RB, grup fasilitas, kebutuhan; checklist berkategori; obat air ──
+  // 5a. Aset fisik: klasifikasi kondisi inventaris (berdampingan dgn op_status), grup fasilitas, kebutuhan pengadaan.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'kondisi', "ENUM('B','RR','RB') DEFAULT NULL AFTER op_status");
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'fasilitas', 'VARCHAR(80) DEFAULT NULL AFTER kondisi');
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'kebutuhan', 'VARCHAR(255) DEFAULT NULL AFTER fasilitas');
+
+  // Master grup fasilitas per unit (dropdown "Fasilitas" pada aset & pengelompokan laporan).
+  await conn.query(`CREATE TABLE IF NOT EXISTS asset_facilities (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    unit_id INT DEFAULT NULL,
+    name VARCHAR(80) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_af (unit_id, name)
+  ) ENGINE=InnoDB`);
+  if (aab?.id) {
+    const FACILITIES = ['Alat & Tools', 'Kendaraan & Alat Besar', 'GWT (Ground Water Tank)', 'WTP / STP', 'SWP Kawasan', 'SWP Unit', 'Intake'];
+    for (let i = 0; i < FACILITIES.length; i++) {
+      await conn.query('INSERT IGNORE INTO asset_facilities (unit_id, name, sort_order) VALUES (?,?,?)', [aab.id, FACILITIES[i], i]);
+    }
+  }
+
+  // 5b. Checklist berkategori (Mesin/Body/Elektronik/Kemudi/Rem/dst.) — kolom category + snapshot.
+  await addColumnIfMissing(conn, env.db.database, 'checklist_template_items', 'category', 'VARCHAR(60) DEFAULT NULL AFTER label');
+  await addColumnIfMissing(conn, env.db.database, 'checklist_run_items', 'category', 'VARCHAR(60) DEFAULT NULL AFTER label');
+
+  // 5c. Obat air: master bahan kimia (dgn harga) + pemakaian harian → laporan biaya periodik.
+  await conn.query(`CREATE TABLE IF NOT EXISTS water_chemicals (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    unit_id INT DEFAULT NULL,
+    name VARCHAR(120) NOT NULL,
+    satuan VARCHAR(20) NOT NULL DEFAULT 'kg',
+    harga_satuan DECIMAL(12,2) NOT NULL DEFAULT 0,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_wc_unit (unit_id)
+  ) ENGINE=InnoDB`);
+  await conn.query(`CREATE TABLE IF NOT EXISTS water_chemical_usage (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    chemical_id INT NOT NULL,
+    unit_id INT DEFAULT NULL,
+    usage_date DATE NOT NULL,
+    volume DECIMAL(12,2) NOT NULL,
+    note VARCHAR(255) DEFAULT NULL,
+    recorded_by INT DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_wcu_chem_date (chemical_id, usage_date),
+    INDEX idx_wcu_unit_date (unit_id, usage_date),
+    CONSTRAINT fk_wcu_chem FOREIGN KEY (chemical_id) REFERENCES water_chemicals(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`);
+
+  // 5b. Seed template "Checklist Harian Kendaraan" AAB (berkategori, sesuai form riil).
+  // Hanya dibuat sekali (bila belum ada) — edit koordinator tidak tertimpa.
+  if (aab?.id) {
+    const [[existTpl]] = await conn.query("SELECT id FROM checklist_templates WHERE unit_id=? AND name='Checklist Harian Kendaraan' LIMIT 1", [aab.id]);
+    if (!existTpl) {
+      const [tpl] = await conn.query('INSERT INTO checklist_templates (unit_id, name, category) VALUES (?,?,NULL)', [aab.id, 'Checklist Harian Kendaraan']);
+      const ITEMS = [
+        ['Mesin', 'Nyalakan mesin & periksa kebocoran oli'],
+        ['Mesin', 'Penambahan bahan bakar sampai tangki FULL'],
+        ['Mesin', 'Periksa Battery Accu dan terminalnya'],
+        ['Mesin', 'Periksa tekanan angin & kondisi ban'],
+        ['Body', 'Periksa & amankan Cover Body, Arm Rest, Inner Door Panel'],
+        ['Body', 'Periksa fungsionalitas kunci pada semua pintu'],
+        ['Elektronik', 'Periksa seluruh fungsionalitas lampu'],
+        ['Elektronik', 'Periksa fungsi semua saklar & lampu indikator'],
+        ['Elektronik', 'Periksa fungsionalitas Cable Body'],
+        ['Elektronik', 'Periksa fungsionalitas dari setiap Outlet'],
+        ['Elektronik', 'Periksa sambungan ground pada semua sirkuit'],
+        ['Elektronik', 'Periksa fungsionalitas semua Eksterior'],
+        ['Kemudi', 'Periksa sistem kemudi & kelurusan'],
+        ['Rem', 'Periksa pengoperasian rem dan baut velg'],
+        ['Rem', 'Periksa pengoperasian klakson'],
+        ['Penghasil Listrik', 'Periksa fungsi penghasil listrik / genset'],
+        ['First Aid', 'Periksa fungsionalitas & kelengkapan P3K'],
+        ['First Aid', 'Periksa laju aliran oksigen di setiap outlet'],
+      ];
+      for (let i = 0; i < ITEMS.length; i++) {
+        await conn.query('INSERT INTO checklist_template_items (template_id, label, category, sort_order) VALUES (?,?,?,?)', [tpl.insertId, ITEMS[i][1], ITEMS[i][0], i]);
+      }
+      console.log('  + seed checklist "Checklist Harian Kendaraan" (AAB)');
+    }
+  }
+
   // ── Index untuk performa query (dashboard, laporan bulanan, filter status) ──
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_created_at', '(created_at)');
   await addIndexIfMissing(conn, env.db.database, 'incidents', 'idx_inc_status', '(status)');

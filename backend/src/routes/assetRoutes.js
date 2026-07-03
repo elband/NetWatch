@@ -16,6 +16,7 @@ import {
   assetChecklist, createRun,
   listPm, createPm, updatePm, deletePm, donePm, listDue,
   availability,
+  listFacilities, createFacility, updateFacility, deleteFacility, procurement,
 } from '../controllers/assetOpsController.js';
 
 const router = Router();
@@ -58,6 +59,12 @@ router.put('/pm/:planId', requireRole('admin', 'koordinator', 'teknisi'), update
 router.delete('/pm/:planId', requireRole('admin', 'koordinator'), deletePm);
 router.post('/pm/:planId/done', requireRole('admin', 'koordinator', 'teknisi'), donePm);
 router.get('/availability', availability);
+// Fase 5: grup fasilitas (master) & daftar kebutuhan pengadaan.
+router.get('/facilities', listFacilities);
+router.post('/facilities', requireRole('admin', 'koordinator'), createFacility);
+router.put('/facilities/:id', requireRole('admin', 'koordinator'), updateFacility);
+router.delete('/facilities/:id', requireRole('admin', 'koordinator'), deleteFacility);
+router.get('/procurement', procurement);
 
 // Aset fisik
 router.get('/', listAssets);

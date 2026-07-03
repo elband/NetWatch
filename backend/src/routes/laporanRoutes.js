@@ -5,6 +5,7 @@ import { unitScope, unitFilter } from '../middleware/unitScope.js';
 import { SLA_MINUTES, COORD_BREACH_MINUTES } from '../config/shifts.js';
 import { metricsFor } from './performaRoutes.js';
 import { buildLogbook } from './logbookRoutes.js';
+import { computeReport as obatAirReport } from '../controllers/waterChemController.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -322,6 +323,92 @@ export async function buildLaporanData(monthIn, unitId = null) {
 
 router.get('/bulanan', requireRole('koordinator', 'admin'), async (req, res) => {
   res.json(await buildLaporanData(req.query.month, req.unitId));
+});
+
+// ===== Laporan Bulanan AAB (Fase 5d) — seksi berbasis data unit AAB =====
+export async function buildAabReport(monthIn, unitId) {
+  const now = new Date();
+  const month = /^\d{4}-\d{2}$/.test(monthIn) ? monthIn : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const p2 = (n) => String(n).padStart(2, '0');
+  const start = `${y}-${p2(m)}-01`;
+  const end = `${m === 12 ? y + 1 : y}-${p2(m === 12 ? 1 : m + 1)}-01`;
+  const lastDay = `${y}-${p2(m)}-${p2(daysInMonth)}`;
+  const monthName = `${BULAN[m - 1]} ${y}`;
+  const uf = unitFilter(unitId);
+
+  // I. Personil
+  const [personil] = await pool.query(
+    `SELECT name, nip, jabatan FROM users WHERE active=1 AND (role='teknisi' OR role='koordinator' OR JSON_CONTAINS(roles,'"teknisi"') OR JSON_CONTAINS(roles,'"koordinator"'))${uf.clause}
+      ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"')) DESC, name`, uf.params
+  );
+
+  // II. Inventaris per fasilitas (kondisi B/RR/RB + kebutuhan)
+  const [assets] = await pool.query(
+    `SELECT name, merk, model, serial, tahun, loc, kondisi, kebutuhan, COALESCE(fasilitas,'Lainnya') AS fasilitas
+       FROM devices WHERE asset_class='physical'${uf.clause} ORDER BY fasilitas IS NULL, fasilitas, name`, uf.params
+  );
+  const grup = {};
+  for (const a of assets) (grup[a.fasilitas] ||= []).push(a);
+  const inventaris = Object.entries(grup).map(([fasilitas, items]) => ({ fasilitas, items }));
+  const kondisiRekap = { B: 0, RR: 0, RB: 0, '-': 0 };
+  for (const a of assets) kondisiRekap[a.kondisi || '-']++;
+
+  // III. Rekap checklist bulan berjalan
+  const ufc = unitFilter(unitId, 'unit_id');
+  const [[chkTot]] = await pool.query(
+    `SELECT COUNT(*) AS total, COUNT(DISTINCT device_id) AS aset FROM checklist_runs WHERE run_date>=? AND run_date<?${ufc.clause}`,
+    [start, end, ...ufc.params]
+  );
+  const [chkByOverall] = await pool.query(
+    `SELECT overall, COUNT(*) n FROM checklist_runs WHERE run_date>=? AND run_date<?${ufc.clause} GROUP BY overall`,
+    [start, end, ...ufc.params]
+  );
+
+  // IV. Obat air (biaya periode)
+  const obatAir = await obatAirReport(unitId, start, lastDay);
+  const obatTotal = obatAir.reduce((s, r) => s + Number(r.biaya || 0), 0);
+
+  // V. Daftar kebutuhan pengadaan (kondisi RR/RB atau ada catatan kebutuhan)
+  const procurement = assets.filter((a) => a.kondisi === 'RR' || a.kondisi === 'RB' || (a.kebutuhan && a.kebutuhan.trim()));
+
+  // VI. Kegiatan pemeliharaan bulan ini
+  const ufk = unitFilter(unitId, 'unit_id');
+  const [kegiatan] = await pool.query(
+    `SELECT tanggal_kegiatan, judul, lokasi, hasil, petugas_nama FROM kegiatan_non_rutin
+      WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?${ufk.clause} ORDER BY tanggal_kegiatan`,
+    [start, end, ...ufk.params]
+  );
+
+  // VII. Jadwal dinas bulan ini (grid)
+  const ufs = unitFilter(unitId, 's.unit_id');
+  const [shiftRows] = await pool.query(
+    `SELECT s.user_id, u.name, DAY(s.shift_date) d, s.shift_type FROM shifts s JOIN users u ON u.id=s.user_id
+      WHERE s.shift_date>=? AND s.shift_date<?${ufs.clause}
+      ORDER BY (u.role='koordinator' OR JSON_CONTAINS(u.roles,'"koordinator"')) DESC, u.name`,
+    [start, end, ...ufs.params]
+  );
+  const jmap = new Map();
+  for (const r of shiftRows) {
+    if (!jmap.has(r.user_id)) jmap.set(r.user_id, { nama: r.name, cells: Array(daysInMonth).fill('') });
+    jmap.get(r.user_id).cells[r.d - 1] = SHIFT_CODE[r.shift_type] || '';
+  }
+
+  return {
+    month, monthName, daysInMonth,
+    personil: personil.map((p, i) => ({ no: i + 1, ...p })),
+    inventaris, kondisiRekap,
+    checklist: { total: chkTot.total, aset: chkTot.aset, byOverall: chkByOverall },
+    obatAir, obatTotal,
+    procurement,
+    kegiatan,
+    jadwal: { days: daysInMonth, rows: [...jmap.values()] },
+  };
+}
+
+router.get('/aab', requireRole('koordinator', 'admin'), async (req, res) => {
+  res.json(await buildAabReport(req.query.month, req.unitId));
 });
 
 export default router;

@@ -26,7 +26,7 @@ export async function listTemplates(req, res) {
   );
   // Sertakan item agar frontend bisa langsung menampilkan/isi.
   for (const t of rows) {
-    const [items] = await pool.query('SELECT id, label, sort_order FROM checklist_template_items WHERE template_id = ? ORDER BY sort_order, id', [t.id]);
+    const [items] = await pool.query('SELECT id, label, category, sort_order FROM checklist_template_items WHERE template_id = ? ORDER BY sort_order, id', [t.id]);
     t.items = items;
   }
   res.json({ templates: rows });
@@ -81,7 +81,8 @@ async function insertItems(conn, templateId, items) {
   let i = 0;
   for (const it of items) {
     const label = (typeof it === 'string' ? it : it?.label)?.trim();
-    if (label) { await conn.query('INSERT INTO checklist_template_items (template_id, label, sort_order) VALUES (?,?,?)', [templateId, label, i]); i++; }
+    const category = typeof it === 'object' && it?.category ? String(it.category).trim().slice(0, 60) : null;
+    if (label) { await conn.query('INSERT INTO checklist_template_items (template_id, label, category, sort_order) VALUES (?,?,?,?)', [templateId, label, category, i]); i++; }
   }
 }
 
@@ -98,7 +99,7 @@ export async function assetChecklist(req, res) {
     [...uf.params, dev?.category || '', dev?.type || '']
   );
   for (const t of templates) {
-    const [items] = await pool.query('SELECT id, label FROM checklist_template_items WHERE template_id = ? ORDER BY sort_order, id', [t.id]);
+    const [items] = await pool.query('SELECT id, label, category FROM checklist_template_items WHERE template_id = ? ORDER BY sort_order, id', [t.id]);
     t.items = items;
   }
   const [runs] = await pool.query(
@@ -106,7 +107,7 @@ export async function assetChecklist(req, res) {
       WHERE r.device_id = ? ORDER BY r.created_at DESC LIMIT 30`, [asset.id]
   );
   for (const run of runs) {
-    const [items] = await pool.query('SELECT label, result, note FROM checklist_run_items WHERE run_id = ?', [run.id]);
+    const [items] = await pool.query('SELECT label, category, result, note FROM checklist_run_items WHERE run_id = ?', [run.id]);
     run.items = items;
   }
   res.json({ templates, runs });
@@ -131,7 +132,7 @@ export async function createRun(req, res) {
     for (const it of (Array.isArray(items) ? items : [])) {
       if (!it?.label) continue;
       const result = ['ok', 'tidak', 'na'].includes(it.result) ? it.result : 'ok';
-      await conn.query('INSERT INTO checklist_run_items (run_id, label, result, note) VALUES (?,?,?,?)', [r.insertId, String(it.label).slice(0, 160), result, it.note?.trim() || null]);
+      await conn.query('INSERT INTO checklist_run_items (run_id, label, category, result, note) VALUES (?,?,?,?,?)', [r.insertId, String(it.label).slice(0, 160), it.category ? String(it.category).slice(0,60) : null, result, it.note?.trim() || null]);
     }
     // Keputusan user: overall='rusak' → set op_status='rusak' + tawarkan insiden.
     let incidentId = null;
@@ -377,3 +378,60 @@ export async function availability(req, res) {
 }
 
 function isUnplanned(s) { return s === 'rusak' || s === 'perbaikan'; }
+
+// ─────────────────── 5a. Grup fasilitas (master) & daftar pengadaan ───────────────────
+
+export async function listFacilities(req, res) {
+  const uf = unitFilterShared(req.unitId);
+  const [rows] = await pool.query(`SELECT * FROM asset_facilities WHERE 1=1${uf.clause} ORDER BY sort_order, name`, uf.params);
+  res.json({ facilities: rows });
+}
+
+export async function createFacility(req, res) {
+  const { name, sort_order } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nama fasilitas wajib diisi.' });
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
+  try {
+    const [r] = await pool.query('INSERT INTO asset_facilities (unit_id, name, sort_order) VALUES (?,?,?)', [unitId, name.trim(), Number(sort_order) || 0]);
+    res.status(201).json({ id: r.insertId });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Fasilitas dengan nama itu sudah ada.' });
+    throw e;
+  }
+}
+
+export async function updateFacility(req, res) {
+  const id = Number(req.params.id);
+  const [[f]] = await pool.query('SELECT * FROM asset_facilities WHERE id = ?', [id]);
+  if (!f || !rowInUnit(f, req.unitId)) return res.status(404).json({ error: 'Fasilitas tidak ditemukan' });
+  const { name, sort_order, active } = req.body;
+  // Sinkronkan aset yang memakai nama lama bila nama diubah.
+  if (name?.trim() && name.trim() !== f.name) {
+    await pool.query('UPDATE devices SET fasilitas = ? WHERE fasilitas = ? AND unit_id = ?', [name.trim(), f.name, f.unit_id]);
+  }
+  await pool.query('UPDATE asset_facilities SET name=COALESCE(?,name), sort_order=COALESCE(?,sort_order), active=? WHERE id=?',
+    [name?.trim() || null, sort_order == null ? null : Number(sort_order), active == null ? f.active : (active ? 1 : 0), id]);
+  res.json({ ok: true });
+}
+
+export async function deleteFacility(req, res) {
+  const id = Number(req.params.id);
+  const [[f]] = await pool.query('SELECT * FROM asset_facilities WHERE id = ?', [id]);
+  if (!f || !rowInUnit(f, req.unitId)) return res.status(404).json({ error: 'Fasilitas tidak ditemukan' });
+  await pool.query('DELETE FROM asset_facilities WHERE id = ?', [id]);
+  res.json({ ok: true });
+}
+
+// Daftar kebutuhan pengadaan: aset kondisi RR/RB atau ber-catatan kebutuhan.
+export async function procurement(req, res) {
+  const uf = unitFilter(req.unitId, 'd.unit_id');
+  const [rows] = await pool.query(
+    `SELECT d.id, d.name, d.merk, d.model, d.serial, d.tahun, d.fasilitas, d.kondisi, d.kebutuhan, d.op_status
+       FROM devices d
+      WHERE d.asset_class = 'physical' AND (d.kondisi IN ('RR','RB') OR (d.kebutuhan IS NOT NULL AND d.kebutuhan <> ''))${uf.clause}
+      ORDER BY FIELD(d.kondisi,'RB','RR','B'), d.fasilitas, d.name`,
+    uf.params
+  );
+  res.json({ items: rows });
+}
