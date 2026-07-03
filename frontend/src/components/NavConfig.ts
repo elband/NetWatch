@@ -38,6 +38,17 @@ export const NAV_ITEMS: Record<Role, NavEntry[]> = {
   ],
 };
 
+// Menu yang hanya relevan untuk unit tertentu (berdasarkan KODE unit). Item yang
+// tidak tercantum di sini tampil untuk semua unit. Dipakai AppLayout untuk menyaring
+// sidebar sesuai unit aktif (koordinator = unitnya; super admin = unit di switcher,
+// "Semua Unit" = tampil semua). ELB = jaringan; AAB = alat berat, kendaraan, air/pompa.
+export const UNIT_ONLY: Record<string, string[]> = {
+  // Khusus AAB (aset fisik non-IP, air/pompa)
+  aset: ['AAB'], 'aset-availability': ['AAB'], sparepart: ['AAB'], 'obat-air': ['AAB'], 'laporan-aab': ['AAB'],
+  // Khusus ELB (jaringan/perangkat ber-IP + laporan bulanan format Kemenhub)
+  devices: ['ELB'], monitor: ['ELB'], peta: ['ELB'], sla: ['ELB'], 'laporan-bulanan': ['ELB'],
+};
+
 export const PAGE_TITLES: Record<string, string> = {
   dashboard: 'Dashboard', notifikasi: 'Pusat Notifikasi', devices: 'Manajemen Perangkat', aset: 'Aset & Peralatan', 'aset-availability': 'Availability Aset', sparepart: 'Sparepart & Stok', 'obat-air': 'Obat Air / Bahan Kimia', 'laporan-aab': 'Laporan Bulanan AAB', monitor: 'Live Monitor', peta: 'Peta Perangkat', sla: 'Laporan SLA & Uptime', maintenance: 'Jendela Maintenance',
   incidents: 'Manajemen Insiden', reports: 'Laporan Selesai', jadwal: 'Jadwal Dinas',

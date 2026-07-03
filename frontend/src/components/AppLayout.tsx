@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api, getActiveUnitId, setActiveUnitId } from '../api/client';
 import { hasRole, userRoles } from '../utils/roles';
-import { NAV_ITEMS, PAGE_TITLES, type NavEntry } from './NavConfig';
+import { NAV_ITEMS, PAGE_TITLES, UNIT_ONLY, type NavEntry } from './NavConfig';
 import NotificationCenter from './NotificationCenter';
 import ThemeToggle from './ThemeToggle';
 import ImageLightbox from './ImageLightbox';
@@ -49,6 +49,23 @@ function mergedNav(roles: Role[]): NavEntry[] {
   return out;
 }
 
+// Saring menu sesuai unit aktif (kode). null = tampil semua (mis. super admin "Semua Unit"
+// atau unit belum termuat). Header section yang jadi kosong dibuang.
+function filterNavByUnit(items: NavEntry[], code: string | null): NavEntry[] {
+  if (!code) return items;
+  const kept = items.filter((e) => ('section' in e) || !UNIT_ONLY[e.id] || UNIT_ONLY[e.id].includes(code));
+  const out: NavEntry[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const e = kept[i];
+    if ('section' in e) {
+      let j = i + 1, has = false;
+      while (j < kept.length && !('section' in kept[j])) { has = true; j++; }
+      if (has) out.push(e);
+    } else out.push(e);
+  }
+  return out;
+}
+
 export default function AppLayout() {
   const { user, logout, updateSession } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
@@ -58,6 +75,9 @@ export default function AppLayout() {
   const isTech = hasRole(user, 'teknisi');
   const isManager = hasRole(user, 'koordinator', 'admin');
   const [notif, setNotif] = useState(0);
+  // Daftar unit — untuk memetakan unit aktif → kode & menyaring menu per unit.
+  const [unitList, setUnitList] = useState<Unit[]>([]);
+  useEffect(() => { api.get('/units').then((r) => setUnitList(r.data.units || [])).catch(() => {}); }, []);
   useEffect(() => {
     if (isTech) api.get('/incidents/duty-status').then((res) => setDuty(res.data)).catch(() => {});
   }, [isTech]);
@@ -73,7 +93,12 @@ export default function AppLayout() {
 
   if (!user) return null;
   const allRoles = userRoles(user);
-  const navItems = mergedNav(allRoles).length ? mergedNav(allRoles) : NAV_ITEMS.viewer;
+  const baseNav = mergedNav(allRoles).length ? mergedNav(allRoles) : NAV_ITEMS.viewer;
+  // Unit aktif: super admin pakai pilihan switcher (null = Semua Unit → tak disaring);
+  // role lain terkunci ke unitnya sendiri. Kode unit dipetakan dari daftar unit.
+  const effUnitId = hasRole(user, 'admin') ? getActiveUnitId() : (user.unit_id ?? null);
+  const effUnitCode = effUnitId ? (unitList.find((u) => u.id === effUnitId)?.code ?? null) : null;
+  const navItems = filterNavByUnit(baseNav, effUnitCode);
   const currentId = location.pathname.replace('/', '') || navItems.find((n): n is Extract<NavEntry, { id: string }> => 'id' in n)?.id;
   const title = PAGE_TITLES[currentId || ''] || 'Dashboard';
   const firstName = (user.name || '').split(' ')[0];
