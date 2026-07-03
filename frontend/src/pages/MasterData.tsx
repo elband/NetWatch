@@ -6,14 +6,14 @@ import LocationMap from '../components/LocationMap';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Asset, ServiceItem, LocationItem, Unit, User } from '../types';
 
-type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'checklist' | 'surat-id' | 'unit';
+type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'checklist' | 'fasilitas' | 'surat-id' | 'unit';
 interface DeviceTypeItem { id: number; name: string; icon: string | null; sort_order: number }
 
 export default function MasterData() {
   const { user } = useAuth();
   const isAdmin = hasRole(user, 'admin'); // tab Unit hanya untuk Super Admin
   const [tab, setTab] = useState<Tab>('aset');
-  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat'], ['metrik', '📊 Metrik Aset'], ['checklist', '✅ Checklist'], ['surat-id', '🖋️ Identitas Surat']];
+  const tabs: [Tab, string][] = [['aset', '📦 Aset / Inventaris'], ['layanan', '🛰️ Layanan Kritis'], ['lokasi', '📍 Lokasi'], ['tipe', '🖥️ Tipe Perangkat'], ['metrik', '📊 Metrik Aset'], ['checklist', '✅ Checklist'], ['fasilitas', '🏷️ Fasilitas Aset'], ['surat-id', '🖋️ Identitas Surat']];
   if (isAdmin) tabs.push(['unit', '🏢 Unit Kerja']);
   return (
     <div>
@@ -32,6 +32,7 @@ export default function MasterData() {
       {tab === 'tipe' && <DeviceTypesTab />}
       {tab === 'metrik' && <MetricTypesTab />}
       {tab === 'checklist' && <ChecklistTemplatesTab />}
+      {tab === 'fasilitas' && <FacilitiesTab />}
       {tab === 'surat-id' && <SuratIdentityTab />}
       {tab === 'unit' && isAdmin && <UnitsTab />}
     </div>
@@ -258,6 +259,58 @@ function LocationsTab() {
             <div className="text-[9px] text-text2">insiden aktif</div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ===================== FASILITAS ASET (Fase 5) =====================
+// Grup fasilitas per unit (Kendaraan, GWT, WTP/STP, SWP, Intake) — dropdown pada
+// form Aset & pengelompokan Laporan Bulanan. Ter-scope unit.
+interface FacilityItem { id: number; unit_id: number | null; name: string; sort_order: number; active: number }
+function FacilitiesTab() {
+  const [items, setItems] = useState<FacilityItem[]>([]);
+  const empty = { name: '', sort_order: 0 };
+  const [form, setForm] = useState<any>(empty);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [err, setErr] = useState('');
+
+  function load() { api.get('/aset/facilities').then((r) => setItems(r.data.facilities || [])); }
+  useEffect(load, []);
+
+  async function save() {
+    if (!form.name.trim()) { setErr('Nama fasilitas wajib diisi.'); return; }
+    setErr('');
+    try {
+      if (editId) await api.put(`/aset/facilities/${editId}`, form);
+      else await api.post('/aset/facilities', form);
+      setForm(empty); setEditId(null); load();
+    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
+  }
+  async function del(id: number, name: string) {
+    if (!(await confirmDialog({ title: 'Hapus fasilitas', message: `Fasilitas "${name}" akan dihapus dari master.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    await api.delete(`/aset/facilities/${id}`); load();
+  }
+  function edit(f: FacilityItem) { setEditId(f.id); setForm({ name: f.name, sort_order: f.sort_order }); }
+
+  return (
+    <div>
+      <div className="bg-surface border border-border rounded-lg p-3.5 mb-3 flex gap-2 items-end flex-wrap">
+        <input className={inputCls} placeholder="Nama fasilitas * (mis. GWT, Intake)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className={`${inputCls} w-24`} type="number" placeholder="Urutan" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
+        <button className={btnPrimary} onClick={save}>{editId ? '💾 Update' : '+ Tambah'}</button>
+        {editId && <button className={btnGhost} onClick={() => { setForm(empty); setEditId(null); }}>Batal</button>}
+      </div>
+      {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+      <div className="text-[11px] text-text2 mb-3">Grup fasilitas untuk mengelompokkan aset di form Aset & tabel inventaris Laporan Bulanan (mis. Kendaraan & Alat Besar, GWT, WTP/STP, SWP, Intake).</div>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+        {items.map((f) => (
+          <div key={f.id} className="rounded-lg border border-border bg-surface2 p-3 flex items-center justify-between gap-2">
+            <span className="text-[12px] font-semibold">{f.name}{!f.active ? ' (nonaktif)' : ''}</span>
+            <div className="flex gap-1 shrink-0"><button className={btnGhost} onClick={() => edit(f)}>✏️</button><button className={`${btnGhost} text-danger`} onClick={() => del(f.id, f.name)}>🗑️</button></div>
+          </div>
+        ))}
+        {items.length === 0 && <div className="col-span-full text-center text-text2 text-xs py-6">Belum ada fasilitas.</div>}
       </div>
     </div>
   );

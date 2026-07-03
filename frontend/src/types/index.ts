@@ -92,6 +92,12 @@ export interface Device {
 
 // ——— Aset non-IP (Fase 2) ———
 export type OpStatus = 'operasional' | 'standby' | 'rusak' | 'perbaikan';
+export type Kondisi = 'B' | 'RR' | 'RB'; // Fase 5: Baik / Rusak Ringan / Rusak Berat
+
+export interface AssetFacility { id: number; unit_id: number | null; name: string; sort_order: number; active: number }
+export interface WaterChemical { id: number; unit_id: number | null; name: string; satuan: string; harga_satuan: string | number; active: number }
+export interface WaterChemUsage { id: number; usage_date: string; volume: string | number; note: string | null; recorded_by_name?: string | null }
+export interface WaterChemReportRow { id: number; name: string; satuan: string; harga_satuan: string | number; total_volume: string | number; biaya: string | number }
 
 export interface PhysicalAsset {
   id: number;
@@ -110,6 +116,9 @@ export interface PhysicalAsset {
   location_id: number | null;
   location_name?: string | null;
   op_status: OpStatus | null;
+  kondisi?: Kondisi | null;
+  fasilitas?: string | null;
+  kebutuhan?: string | null;
   qr_token: string | null;
   created_at?: string;
 }
@@ -142,7 +151,7 @@ export interface AssetMetricType {
 }
 
 // ——— Fase 3: checklist, preventive maintenance, availability ———
-export interface ChecklistTemplateItem { id?: number; label: string; sort_order?: number }
+export interface ChecklistTemplateItem { id?: number; label: string; category?: string | null; sort_order?: number }
 export interface ChecklistTemplate {
   id: number;
   unit_id: number | null;

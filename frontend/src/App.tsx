@@ -17,6 +17,8 @@ import Devices from './pages/Devices';
 import Aset from './pages/Aset';
 import AsetAvailability from './pages/AsetAvailability';
 import Spareparts from './pages/Spareparts';
+import ObatAir from './pages/ObatAir';
+import LaporanAab from './pages/LaporanAab';
 import Monitor from './pages/Monitor';
 import DeviceMap from './pages/DeviceMap';
 import SlaReport from './pages/SlaReport';
@@ -83,6 +85,7 @@ export default function App() {
           <Route path="/aset" element={<Aset />} />
           <Route path="/aset-availability" element={<AsetAvailability />} />
           <Route path="/sparepart" element={<Spareparts />} />
+          <Route path="/obat-air" element={<ObatAir />} />
           <Route path="/monitor" element={<Monitor />} />
           <Route path="/peta" element={<DeviceMap />} />
           <Route path="/sla" element={<SlaReport />} />
@@ -112,6 +115,7 @@ export default function App() {
             <Route path="/publik-reports" element={<PublicReports />} />
             <Route path="/surat" element={<SuratKeluar />} />
             <Route path="/laporan-bulanan" element={<LaporanBulanan />} />
+            <Route path="/laporan-aab" element={<LaporanAab />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/pelaporan-qr" element={<PelaporanQR />} />
             <Route path="/skp" element={<Skp />} />

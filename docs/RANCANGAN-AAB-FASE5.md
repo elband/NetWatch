@@ -1,6 +1,7 @@
 # Rancangan Fase 5 — Penyempurnaan Unit AAB (dari Laporan Bulanan riil)
 
-> Status: **RANCANGAN — belum dieksekusi.** Disusun 2026-07-03. Berdasarkan analisis *Laporan Bulanan AAB Mei 2026*.
+> Status: **DIIMPLEMENTASIKAN & TERUJI 2026-07-03.** Berdasarkan analisis *Laporan Bulanan AAB Mei 2026*.
+> Uji: E2E API (fasilitas seed, kondisi/kebutuhan + procurement, checklist berkategori, obat air biaya, isolasi unit, laporan AAB terhimpun) + verifikasi browser (Aset kondisi/fasilitas/kebutuhan, halaman Obat Air, Laporan Bulanan AAB 7 seksi). `tsc --noEmit` bersih.
 > Tujuan: menyelaraskan NetWatch dengan workflow nyata Unit Alat-Alat Besar (kondisi B/RR/RB, grup fasilitas, checklist riil, obat air, dan generator laporan bulanan otomatis).
 
 Lima sub-modul, dikerjakan & di-commit bertahap: **5a kondisi & grup fasilitas**, **5b template checklist riil**, **5c modul obat air**, **5d generator Laporan Bulanan AAB**.

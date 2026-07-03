@@ -9,7 +9,18 @@ const RESULTS: { key: ChecklistResult; label: string; cls: string }[] = [
 ];
 const OVERALL: Record<string, string> = { baik: '🟢 Baik', perhatian: '🟡 Perhatian', rusak: '🔴 Rusak' };
 
-interface ItemState { label: string; result: ChecklistResult; note: string }
+interface ItemState { label: string; category: string | null; result: ChecklistResult; note: string }
+
+// Kelompokkan item per kategori sambil mempertahankan indeks asli (untuk setItem).
+function groupItems(items: ItemState[]): [string, { it: ItemState; idx: number }[]][] {
+  const map = new Map<string, { it: ItemState; idx: number }[]>();
+  items.forEach((it, idx) => {
+    const c = it.category || '__none__';
+    if (!map.has(c)) map.set(c, []);
+    map.get(c)!.push({ it, idx });
+  });
+  return [...map.entries()];
+}
 
 export default function ChecklistModal({ asset, onClose, onSaved }: { asset: PhysicalAsset; onClose: () => void; onSaved?: () => void }) {
   const [templates, setTemplates] = useState<ChecklistTemplate[]>([]);
@@ -29,7 +40,7 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
       setTemplates(tpls); setRuns(r.data.runs || []);
       setTplId((cur) => {
         if (cur != null) return cur;
-        if (tpls.length) { setItems((tpls[0].items || []).map((i) => ({ label: i.label, result: 'ok', note: '' }))); return tpls[0].id; }
+        if (tpls.length) { setItems((tpls[0].items || []).map((i) => ({ label: i.label, category: i.category || null, result: 'ok', note: '' }))); return tpls[0].id; }
         return null;
       });
     }).catch(() => {});
@@ -38,7 +49,7 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
 
   function pickTemplate(t: ChecklistTemplate) {
     setTplId(t.id);
-    setItems((t.items || []).map((i) => ({ label: i.label, result: 'ok', note: '' })));
+    setItems((t.items || []).map((i) => ({ label: i.label, category: i.category || null, result: 'ok', note: '' })));
   }
   function setItem(idx: number, patch: Partial<ItemState>) {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
@@ -89,23 +100,30 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
                 ))}
               </div>
 
-              <div className="space-y-1.5">
-                {items.map((it, idx) => (
-                  <div key={idx} className="bg-surface2 border border-border rounded-md p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium">{it.label}</span>
-                      <div className="flex gap-1 shrink-0">
-                        {RESULTS.map((r) => (
-                          <button key={r.key} onClick={() => setItem(idx, { result: r.key })}
-                            className={`px-2 py-0.5 rounded text-[10px] border ${it.result === r.key ? `bg-surface border-accent ${r.cls} font-semibold` : 'bg-surface border-border text-text2'}`}>
-                            {r.label}
-                          </button>
-                        ))}
-                      </div>
+              <div className="space-y-2.5">
+                {groupItems(items).map(([cat, entries]) => (
+                  <div key={cat}>
+                    {cat !== '__none__' && <div className="text-[10px] font-semibold uppercase tracking-wide text-accent mb-1">{cat}</div>}
+                    <div className="space-y-1.5">
+                      {entries.map(({ it, idx }) => (
+                        <div key={idx} className="bg-surface2 border border-border rounded-md p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium">{it.label}</span>
+                            <div className="flex gap-1 shrink-0">
+                              {RESULTS.map((r) => (
+                                <button key={r.key} onClick={() => setItem(idx, { result: r.key })}
+                                  className={`px-2 py-0.5 rounded text-[10px] border ${it.result === r.key ? `bg-surface border-accent ${r.cls} font-semibold` : 'bg-surface border-border text-text2'}`}>
+                                  {r.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {it.result === 'tidak' && (
+                            <input className={`${inp} mt-1.5`} placeholder="Catatan masalah…" value={it.note} onChange={(e) => setItem(idx, { note: e.target.value })} />
+                          )}
+                        </div>
+                      ))}
                     </div>
-                    {it.result === 'tidak' && (
-                      <input className={`${inp} mt-1.5`} placeholder="Catatan masalah…" value={it.note} onChange={(e) => setItem(idx, { note: e.target.value })} />
-                    )}
                   </div>
                 ))}
                 {items.length === 0 && <div className="text-[11px] text-text2 text-center py-3">Template ini belum punya item.</div>}

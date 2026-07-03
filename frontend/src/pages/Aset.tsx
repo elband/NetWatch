@@ -7,7 +7,13 @@ import { confirmDialog } from '../components/dialog';
 import AssetReadingModal from '../components/AssetReadingModal';
 import ChecklistModal from '../components/ChecklistModal';
 import PmModal from '../components/PmModal';
-import type { PhysicalAsset, AssetMetricType, AssetLatestReading, OpStatus } from '../types';
+import type { PhysicalAsset, AssetMetricType, AssetLatestReading, OpStatus, Kondisi, AssetFacility } from '../types';
+
+const KONDISI: Record<Kondisi, { label: string; cls: string }> = {
+  B: { label: 'Baik', cls: 'text-success bg-success/10 border-success/30' },
+  RR: { label: 'Rusak Ringan', cls: 'text-warn bg-warn/10 border-warn/30' },
+  RB: { label: 'Rusak Berat', cls: 'text-danger bg-danger/10 border-danger/30' },
+};
 
 const OP: Record<OpStatus, { label: string; cls: string }> = {
   operasional: { label: 'Operasional', cls: 'text-success bg-success/10 border-success/30' },
@@ -19,7 +25,7 @@ const OP_KEYS = Object.keys(OP) as OpStatus[];
 
 interface LocationOpt { id: number; name: string }
 
-const emptyForm = { name: '', category: '', type: '', merk: '', model: '', serial: '', tahun: '', loc: '', location_id: '', op_status: 'operasional' as OpStatus };
+const emptyForm = { name: '', category: '', type: '', merk: '', model: '', serial: '', tahun: '', loc: '', location_id: '', op_status: 'operasional' as OpStatus, kondisi: '' as Kondisi | '', fasilitas: '', kebutuhan: '' };
 
 export default function Aset() {
   const { user } = useAuth();
@@ -32,6 +38,7 @@ export default function Aset() {
   const [assets, setAssets] = useState<PhysicalAsset[]>([]);
   const [metricTypes, setMetricTypes] = useState<AssetMetricType[]>([]);
   const [locations, setLocations] = useState<LocationOpt[]>([]);
+  const [facilities, setFacilities] = useState<AssetFacility[]>([]);
   const [latest, setLatest] = useState<Record<number, AssetLatestReading[]>>({});
   const [loading, setLoading] = useState(true);
 
@@ -50,17 +57,19 @@ export default function Aset() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, m, l, due] = await Promise.all([
+      const [a, m, l, due, f] = await Promise.all([
         api.get('/aset'),
         api.get('/aset/metric-types'),
         api.get('/locations').catch(() => ({ data: { locations: [] } })),
         api.get('/aset/pm/due').catch(() => ({ data: { due: [] } })),
+        api.get('/aset/facilities').catch(() => ({ data: { facilities: [] } })),
       ]);
       const list: PhysicalAsset[] = a.data.assets || [];
       setAssets(list);
       setMetricTypes(m.data.metricTypes || []);
       setLocations((l.data.locations || []).map((x: any) => ({ id: x.id, name: x.name })));
       setPmDueIds(new Set((due.data.due || []).map((d: any) => d.device_id)));
+      setFacilities((f.data.facilities || []).filter((x: AssetFacility) => x.active));
       // Muat pembacaan terakhir per aset (paralel) untuk ringkasan kartu.
       const entries = await Promise.all(list.map(async (as) => {
         try { const r = await api.get(`/aset/${as.id}/readings/latest`); return [as.id, r.data.latest || []] as const; }
@@ -91,7 +100,7 @@ export default function Aset() {
     setForm({
       name: a.name, category: a.category || '', type: a.type || '', merk: a.merk || '', model: a.model || '',
       serial: a.serial || '', tahun: a.tahun || '', loc: a.loc || '', location_id: a.location_id ? String(a.location_id) : '',
-      op_status: a.op_status || 'operasional',
+      op_status: a.op_status || 'operasional', kondisi: a.kondisi || '', fasilitas: a.fasilitas || '', kebutuhan: a.kebutuhan || '',
     });
     setEditId(a.id); setError(''); setShowForm(true);
   }
@@ -167,10 +176,13 @@ export default function Aset() {
                 </div>
 
                 <div className="text-[11px] text-text2 mt-2 flex items-center gap-2 flex-wrap">
+                  {a.kondisi && KONDISI[a.kondisi] && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${KONDISI[a.kondisi].cls}`}>{a.kondisi}</span>}
+                  {a.fasilitas && <span>🏷️ {a.fasilitas}</span>}
                   {a.loc && <span>📍 {a.location_name || a.loc}</span>}
                   {a.tahun && <span>· {a.tahun}</span>}
                   {isAdmin && a.unit_code && <span className="px-1.5 py-0.5 rounded bg-surface2 border border-border">{a.unit_code}</span>}
                 </div>
+                {a.kebutuhan && <div className="text-[10px] text-warn mt-1">🛒 {a.kebutuhan}</div>}
 
                 {rd.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -238,10 +250,29 @@ export default function Aset() {
                   <input className={inp} value={form.loc} onChange={(e) => setForm({ ...form, loc: e.target.value })} placeholder="mis. Apron Barat" />
                 )}
               </label>
-              <label className="block sm:col-span-2"><span className="text-[10px] text-text2">Status operasional</span>
+              <label className="block"><span className="text-[10px] text-text2">Status operasional</span>
                 <select className={inp} value={form.op_status} onChange={(e) => setForm({ ...form, op_status: e.target.value as OpStatus })}>
                   {OP_KEYS.map((k) => <option key={k} value={k}>{OP[k].label}</option>)}
                 </select></label>
+              <label className="block"><span className="text-[10px] text-text2">Kondisi (inventaris)</span>
+                <select className={inp} value={form.kondisi} onChange={(e) => setForm({ ...form, kondisi: e.target.value as Kondisi | '' })}>
+                  <option value="">— belum diklasifikasi —</option>
+                  <option value="B">B — Baik</option>
+                  <option value="RR">RR — Rusak Ringan</option>
+                  <option value="RB">RB — Rusak Berat</option>
+                </select></label>
+              <label className="block"><span className="text-[10px] text-text2">Fasilitas / Grup</span>
+                {facilities.length > 0 ? (
+                  <select className={inp} value={form.fasilitas} onChange={(e) => setForm({ ...form, fasilitas: e.target.value })}>
+                    <option value="">— pilih fasilitas —</option>
+                    {facilities.map((f) => <option key={f.id} value={f.name}>{f.name}</option>)}
+                  </select>
+                ) : (
+                  <input className={inp} value={form.fasilitas} onChange={(e) => setForm({ ...form, fasilitas: e.target.value })} placeholder="mis. Kendaraan & Alat Besar" />
+                )}
+              </label>
+              <label className="block"><span className="text-[10px] text-text2">Kebutuhan / Rekomendasi (pengadaan)</span>
+                <input className={inp} value={form.kebutuhan} onChange={(e) => setForm({ ...form, kebutuhan: e.target.value })} placeholder="mis. Perlu Penggantian bearing" /></label>
             </div>
             {error && <div className="mt-2 text-[12px] text-danger">⚠️ {error}</div>}
             <div className="mt-4 flex gap-2">
