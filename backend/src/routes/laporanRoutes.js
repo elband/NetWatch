@@ -460,7 +460,8 @@ export async function buildKinerjaReport(monthIn, unitId) {
   const [assetRows] = await pool.query(
     `SELECT d.id, d.name, d.ip, d.loc, d.type, d.status AS live, d.monitor_enabled, d.asset_class,
             COALESCE(SUM(u.up_samples),0) up_s, COALESCE(SUM(u.samples),0) tot_s,
-            (SELECT COUNT(*) FROM incidents i WHERE i.device_id=d.id AND i.status<>'selesai') open_inc
+            (SELECT COUNT(*) FROM incidents i WHERE i.device_id=d.id AND i.status<>'selesai') open_inc,
+            (SELECT COUNT(*) FROM public_reports pr WHERE pr.device_id=d.id AND pr.status<>'selesai') open_rep
        FROM devices d LEFT JOIN device_uptime_daily u ON u.device_id=d.id AND u.day BETWEEN ? AND ?
       WHERE 1=1${ufd.clause}
       GROUP BY d.id ORDER BY d.name`, [start, lastDay, ...ufd.params]);
@@ -468,11 +469,13 @@ export async function buildKinerjaReport(monthIn, unitId) {
     const noIp = !d.ip || /^n\/?a/i.test(String(d.ip));
     const uptime = Number(d.tot_s) > 0 ? Math.round(1000 * d.up_s / d.tot_s) / 10 : null;
     const openInc = Number(d.open_inc) || 0;
+    // "Dilaporkan rusak" terdeteksi otomatis dari laporan publik (via QR aset) atau insiden aktif.
+    const reportedBroken = openInc > 0 || Number(d.open_rep) > 0;
     let status;
-    if (noIp) status = openInc > 0 ? 'rusak' : 'aktif';               // tanpa IP: aktif kecuali dilaporkan rusak
+    if (noIp) status = reportedBroken ? 'rusak' : 'aktif';           // tanpa IP: aktif kecuali dilaporkan rusak
     else if (uptime != null) status = uptime >= 95 ? 'aktif' : 'gangguan';
     else status = d.live === 'up' ? 'aktif' : d.live === 'down' ? 'rusak' : 'tidak_dipantau';
-    if (!noIp && openInc > 0 && status === 'aktif') status = 'gangguan'; // ber-IP + ada insiden aktif
+    if (!noIp && reportedBroken && status === 'aktif') status = 'gangguan'; // ber-IP + dilaporkan bermasalah
     return { id: d.id, name: d.name, ip: noIp ? null : d.ip, loc: d.loc, type: d.type, hasIp: !noIp, uptime, openInc, status };
   });
   const assetSummary = assets.reduce((a, x) => { a[x.status] = (a[x.status] || 0) + 1; return a; }, {});

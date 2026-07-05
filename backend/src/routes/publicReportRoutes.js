@@ -51,20 +51,27 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
     // Nama unit tujuan untuk narasi WA ke pelapor (mengikuti unit yang dipilih).
     const [[unitRow]] = await conn.query('SELECT name FROM units WHERE id=?', [unitId]);
     const unitName = unitRow?.name || 'Elektronika Bandara';
+    // Deteksi otomatis perangkat: bila laporan berasal dari scan QR aset, kaitkan device_id
+    // agar aset ber-status "Rusak" otomatis selama laporan/insiden belum tuntas.
+    let deviceId = null, assetName = null;
+    if (b.aset_token && /^[a-f0-9]{32}$/.test(b.aset_token)) {
+      const [[dv]] = await conn.query("SELECT id, name FROM devices WHERE qr_token=? AND unit_id=? LIMIT 1", [b.aset_token, unitId]);
+      if (dv) { deviceId = dv.id; assetName = dv.name; }
+    }
     const id = await nextReportId(conn);
     await conn.query(
-      `INSERT INTO public_reports (id, nama, nip, unit, hp, judul, jenis, merk, inv, gedung, ruang, room_id, room_code, urgensi, detail, status, unit_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'menunggu', ?)`,
+      `INSERT INTO public_reports (id, nama, nip, unit, hp, judul, jenis, merk, inv, gedung, ruang, room_id, room_code, urgensi, detail, status, unit_id, device_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'menunggu', ?, ?)`,
       [id, b.nama?.trim() || 'Pelapor Umum', b.nip || null, b.unit?.trim() || (ruang ? `Pengguna ${ruang}` : 'Umum'), b.hp || '-', b.judul.trim(), b.jenis,
-        b.merk || null, b.inv || null, gedung, ruang, roomId, b.room_code || null, ['kritis', 'tinggi', 'sedang', 'rendah'].includes(b.urgensi) ? b.urgensi : 'sedang', b.detail, unitId]
+        b.merk || null, b.inv || null, gedung, ruang, roomId, b.room_code || null, ['kritis', 'tinggi', 'sedang', 'rendah'].includes(b.urgensi) ? b.urgensi : 'sedang', b.detail, unitId, deviceId]
     );
     for (const f of req.files || []) await conn.query('INSERT INTO report_attachments (report_id, file_url, mimetype) VALUES (?,?,?)', [id, `/uploads/reports/${f.filename}`, f.mimetype]);
     // Tiket otomatis → insiden ke pool + notifikasi on-duty.
     const incId = await nextIncidentId(conn);
-    const deviceName = `${b.jenis}${ruang ? ` - ${ruang}` : ''}`;
+    const deviceName = assetName || `${b.jenis}${ruang ? ` - ${ruang}` : ''}`;
     const issue = `${b.judul.trim()} (Laporan QR ${id})`;
     const prio = b.urgensi === 'kritis' ? 'kritis' : b.urgensi === 'tinggi' ? 'tinggi' : 'sedang';
-    await conn.query(`INSERT INTO incidents (id, device_name, ip, issue, priority, tech_id, status, step, source, public_report_id, unit_id) VALUES (?,?,?,?,?,NULL,'aktif',0,'public_report',?,?)`, [incId, deviceName, 'N/A (Laporan QR)', issue, prio, id, unitId]);
+    await conn.query(`INSERT INTO incidents (id, device_id, device_name, ip, issue, priority, tech_id, status, step, source, public_report_id, unit_id) VALUES (?,?,?,?,?,?,NULL,'aktif',0,'public_report',?,?)`, [incId, deviceId, deviceName, 'N/A (Laporan QR)', issue, prio, id, unitId]);
     await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?,0,?)', [incId, `Laporan fasilitas via QR (${b.room_code || '-'}): ${b.detail}`]);
     await conn.query('UPDATE public_reports SET incident_id=? WHERE id=?', [incId, id]);
     try { await snapshotAndNotifyOnDuty(conn, { id: incId, priority: prio, deviceName, issue }); } catch { /* abaikan */ }

@@ -112,6 +112,7 @@ export default function LaporPublik() {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => v && fd.append(k, v));
       if (roomCode) fd.append('room_code', roomCode);
+      if (asetToken) fd.append('aset_token', asetToken); // deteksi otomatis perangkat dari QR aset
       fd.append('baseUrl', location.origin);
       const stampedFiles = await stampFiles(files, [`Laporan · ${form.judul.trim()}`]);
       stampedFiles.forEach((f) => fd.append('foto', f));

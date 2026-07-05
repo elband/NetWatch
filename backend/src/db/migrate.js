@@ -174,6 +174,9 @@ async function migrate() {
   // Pelaporan QR: kolom tautan ruangan + seed contoh ruangan.
   await addColumnIfMissing(conn, env.db.database, 'public_reports', 'room_id', 'INT DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'public_reports', 'room_code', 'VARCHAR(40) DEFAULT NULL');
+  // Deteksi otomatis aset rusak: laporan lewat QR aset menyimpan device_id perangkat yang dipindai.
+  await addColumnIfMissing(conn, env.db.database, 'public_reports', 'device_id', 'INT DEFAULT NULL');
+  await addIndexIfMissing(conn, env.db.database, 'public_reports', 'idx_pr_device', '(device_id)');
   const ROOMS = [
     ['RUANG-SERVER', 'Ruang Server', 'Terminal', 'Lantai 2', 'Data Center'], ['RUANG-NOC', 'Ruang NOC', 'Terminal', 'Lantai 2', 'Monitoring'],
     ['RUANG-ADM', 'Ruang Administrasi', 'Administrasi', 'Lantai 1', 'Perkantoran'], ['RUANG-MEETING', 'Ruang Meeting', 'Administrasi', 'Lantai 2', 'Rapat'],
