@@ -275,7 +275,7 @@ export async function buildLaporanData(monthIn, unitId = null) {
   const performaTeknisi = [];
   for (const t of techs) {
     // Skor identik dengan dashboard performa (mesin penilaian tunggal: base 30 + bobot baru, penalti VPN −50%).
-    const m = await metricsFor(t.id, start, end);
+    const m = await metricsFor(t.id, start, end, unitId);
     const [[ins]] = await pool.query(`SELECT COUNT(*) total, COALESCE(SUM(verified),0) v FROM equipment_inspections WHERE inspected_by=? AND inspect_date>=? AND inspect_date<?${uf.clause}`, [t.id, start, end, ...uf.params]);
     performaTeknisi.push({
       name: t.name, jabatan: t.jabatan,
@@ -458,7 +458,7 @@ export async function buildKinerjaReport(monthIn, unitId) {
   const uft = unitFilter(unitId);
   const [techs] = await pool.query(`SELECT id, name, jabatan FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'"teknisi"'))${uft.clause} ORDER BY name`, uft.params);
   const teknisi = [];
-  for (const t of techs) { const mm = await metricsFor(t.id, start, end); teknisi.push({ name: t.name, jabatan: t.jabatan, done: mm.done, onTime: mm.onTime, taken: mm.taken, avgResp: mm.avgResp, avgDur: mm.avgDur, pm: mm.pm, dokumentasi: mm.dokumentasi, inspections: mm.inspections, score: mm.score, grade: mm.grade }); }
+  for (const t of techs) { const mm = await metricsFor(t.id, start, end, unitId); teknisi.push({ name: t.name, jabatan: t.jabatan, done: mm.done, onTime: mm.onTime, taken: mm.taken, avgResp: mm.avgResp, avgDur: mm.avgDur, pm: mm.pm, dokumentasi: mm.dokumentasi, inspections: mm.inspections, score: mm.score, grade: mm.grade }); }
   teknisi.sort((a, b) => (b.score || 0) - (a.score || 0));
 
   // V. Pemeliharaan

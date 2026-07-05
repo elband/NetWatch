@@ -44,17 +44,21 @@ function monthRange(month) {
 }
 
 // Hitung semua metrik 1 teknisi pada rentang [start, end).
-export async function metricsFor(id, start, end) {
-  const [[d]] = await pool.query("SELECT COUNT(*) done, SUM(priority='kritis') kritis, COALESCE(AVG(duration_min),0) avgDur FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<?", [id, start, end]);
-  const [[t]] = await pool.query('SELECT COUNT(*) taken, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) onTime, COALESCE(AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at)),0) avgResp FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<?', [SLA_MINUTES, id, start, end]);
-  const [[a]] = await pool.query("SELECT COUNT(*) active FROM incidents WHERE tech_id=? AND status!='selesai'", [id]);
+// unitId: batasi insiden ke unit efektif (cegah insiden unit lama ikut terhitung
+// bila teknisi pernah dipindah unit). null = semua unit (admin).
+export async function metricsFor(id, start, end, unitId = null) {
+  const uf = unitFilter(unitId, 'unit_id');       // untuk query tanpa alias
+  const ufi = unitFilter(unitId, 'i.unit_id');    // untuk query yang join incidents i
+  const [[d]] = await pool.query(`SELECT COUNT(*) done, SUM(priority='kritis') kritis, COALESCE(AVG(duration_min),0) avgDur FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<?${uf.clause}`, [id, start, end, ...uf.params]);
+  const [[t]] = await pool.query(`SELECT COUNT(*) taken, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) onTime, COALESCE(AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at)),0) avgResp FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${uf.clause}`, [SLA_MINUTES, id, start, end, ...uf.params]);
+  const [[a]] = await pool.query(`SELECT COUNT(*) active FROM incidents WHERE tech_id=? AND status!='selesai'${uf.clause}`, [id, ...uf.params]);
   const [[br]] = await pool.query(
     `SELECT COUNT(*) c FROM incident_duty d JOIN incidents i ON i.id=d.incident_id
-      WHERE d.user_id=? AND i.created_at>=? AND i.created_at<?
+      WHERE d.user_id=? AND i.created_at>=? AND i.created_at<?${ufi.clause}
         AND ((i.taken_at IS NOT NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,i.taken_at)>?) OR (i.taken_at IS NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,NOW())>?))`,
-    [id, start, end, SLA_MINUTES, SLA_MINUTES]
+    [id, start, end, ...ufi.params, SLA_MINUTES, SLA_MINUTES]
   );
-  const [[es]] = await pool.query('SELECT COUNT(*) c FROM incident_duty d JOIN incidents i ON i.id=d.incident_id WHERE d.user_id=? AND i.coord_alerted=1 AND i.created_at>=? AND i.created_at<?', [id, start, end]);
+  const [[es]] = await pool.query(`SELECT COUNT(*) c FROM incident_duty d JOIN incidents i ON i.id=d.incident_id WHERE d.user_id=? AND i.coord_alerted=1 AND i.created_at>=? AND i.created_at<?${ufi.clause}`, [id, start, end, ...ufi.params]);
   const [[pm]] = await pool.query("SELECT COUNT(*) c FROM equipment_maintenance WHERE done_by=? AND status='selesai' AND done_at>=? AND done_at<?", [id, start, end]);
   const [[dk]] = await pool.query('SELECT COUNT(*) c FROM incident_reports WHERE reported_by=? AND created_at>=? AND created_at<?', [id, start, end]);
   const [[ins]] = await pool.query('SELECT COUNT(*) c FROM equipment_inspections WHERE inspected_by=? AND inspect_date>=? AND inspect_date<?', [id, start, end]);
@@ -91,7 +95,7 @@ router.get('/', async (req, res) => {
   const techs = await allTechs(req.unitId);
   const rows = [];
   for (const t of techs) {
-    const m = await metricsFor(t.id, start, end);
+    const m = await metricsFor(t.id, start, end, req.unitId);
     rows.push({ techId: t.id, name: t.name, jabatan: t.jabatan, emoji: t.emoji, ...m });
   }
   rows.sort((a, b) => b.score - a.score);
@@ -106,7 +110,7 @@ router.get('/dashboard', async (req, res) => {
 
   // Ranking semua teknisi.
   const ranking = [];
-  for (const t of techs) ranking.push({ techId: t.id, name: t.name, jabatan: t.jabatan, emoji: t.emoji, ...(await metricsFor(t.id, start, end)) });
+  for (const t of techs) ranking.push({ techId: t.id, name: t.name, jabatan: t.jabatan, emoji: t.emoji, ...(await metricsFor(t.id, start, end, req.unitId)) });
   ranking.sort((a, b) => b.score - a.score);
 
   // Teknisi terpilih: teknisi → diri sendiri; lainnya → query / peringkat teratas.
@@ -119,6 +123,7 @@ router.get('/dashboard', async (req, res) => {
 
   // Top 5 layanan paling banyak ditangani (insiden selesai), dengan bobot.
   const ufI = unitFilter(req.unitId, 'i.unit_id');
+  const ufU = unitFilter(req.unitId, 'unit_id'); // insiden tanpa alias (tech terpilih)
   const [svc] = await pool.query(
     `SELECT COALESCE(NULLIF(d.category,''), i.device_name) svc, COUNT(*) n
        FROM incidents i LEFT JOIN devices d ON d.id=i.device_id
@@ -135,7 +140,7 @@ router.get('/dashboard', async (req, res) => {
     const dt = new Date(base.getFullYear(), base.getMonth() - i, 1);
     const ms = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
     const r = monthRange(ms);
-    const [[row]] = await pool.query('SELECT COUNT(*) tot, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<?', [SLA_MINUTES, techId, r.start, r.end]);
+    const [[row]] = await pool.query(`SELECT COUNT(*) tot, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${ufU.clause}`, [SLA_MINUTES, techId, r.start, r.end, ...ufU.params]);
     slaMonthly.push({ month: ms, label: dt.toLocaleDateString('id-ID', { month: 'short' }), pct: row.tot ? Math.round((Number(row.ot) / row.tot) * 100) : null, total: row.tot });
   }
 
@@ -149,12 +154,12 @@ router.get('/dashboard', async (req, res) => {
   for (let i = 0; i < 30; i++) { const d = new Date(s30.getFullYear(), s30.getMonth(), s30.getDate() + i); idx[ymd(d)] = i; trend30.push({ date: ymd(d), points: 0 }); }
   const add = (rows, field, mult) => { for (const r of rows) { const k = idx[String(r.k).slice(0, 10)]; if (k != null) trend30[k].points += (Number(r.v) || 0) * mult; } };
   const ws = ymd(s30), we = ymd(e30);
-  add((await pool.query("SELECT DATE(resolved_at) k, COUNT(*) v FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<? GROUP BY DATE(resolved_at)", [techId, ws, we]))[0], 'done', W.done);
-  add((await pool.query("SELECT DATE(resolved_at) k, SUM(priority='kritis') v FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<? GROUP BY DATE(resolved_at)", [techId, ws, we]))[0], 'kritis', W.kritis);
-  add((await pool.query('SELECT DATE(taken_at) k, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) v FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<? GROUP BY DATE(taken_at)', [SLA_MINUTES, techId, ws, we]))[0], 'onTime', W.onTime);
+  add((await pool.query(`SELECT DATE(resolved_at) k, COUNT(*) v FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<?${ufU.clause} GROUP BY DATE(resolved_at)`, [techId, ws, we, ...ufU.params]))[0], 'done', W.done);
+  add((await pool.query(`SELECT DATE(resolved_at) k, SUM(priority='kritis') v FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<?${ufU.clause} GROUP BY DATE(resolved_at)`, [techId, ws, we, ...ufU.params]))[0], 'kritis', W.kritis);
+  add((await pool.query(`SELECT DATE(taken_at) k, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) v FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${ufU.clause} GROUP BY DATE(taken_at)`, [SLA_MINUTES, techId, ws, we, ...ufU.params]))[0], 'onTime', W.onTime);
   add((await pool.query("SELECT DATE(done_at) k, COUNT(*) v FROM equipment_maintenance WHERE done_by=? AND status='selesai' AND done_at>=? AND done_at<? GROUP BY DATE(done_at)", [techId, ws, we]))[0], 'pm', W.pm);
   add((await pool.query('SELECT DATE(created_at) k, COUNT(*) v FROM incident_reports WHERE reported_by=? AND created_at>=? AND created_at<? GROUP BY DATE(created_at)', [techId, ws, we]))[0], 'dok', W.dok);
-  add((await pool.query(`SELECT DATE(i.created_at) k, COUNT(*) v FROM incident_duty d JOIN incidents i ON i.id=d.incident_id WHERE d.user_id=? AND i.created_at>=? AND i.created_at<? AND ((i.taken_at IS NOT NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,i.taken_at)>?) OR (i.taken_at IS NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,NOW())>?)) GROUP BY DATE(i.created_at)`, [techId, ws, we, SLA_MINUTES, SLA_MINUTES]))[0], 'breach', W.breach);
+  add((await pool.query(`SELECT DATE(i.created_at) k, COUNT(*) v FROM incident_duty d JOIN incidents i ON i.id=d.incident_id WHERE d.user_id=? AND i.created_at>=? AND i.created_at<?${ufI.clause} AND ((i.taken_at IS NOT NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,i.taken_at)>?) OR (i.taken_at IS NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,NOW())>?)) GROUP BY DATE(i.created_at)`, [techId, ws, we, ...ufI.params, SLA_MINUTES, SLA_MINUTES]))[0], 'breach', W.breach);
 
   // AI insight & rekomendasi.
   const insight = [];
@@ -183,6 +188,8 @@ router.get('/sparkline', async (req, res) => {
   // Teknisi target harus berada dalam scope unit request.
   const [[tu]] = await pool.query('SELECT unit_id FROM users WHERE id=?', [techId]);
   if (!tu || !rowInUnit(tu, req.unitId)) return res.status(404).json({ error: 'Teknisi tidak ditemukan' });
+  const uf = unitFilter(req.unitId, 'unit_id');
+  const ufi = unitFilter(req.unitId, 'i.unit_id');
   const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
   const [y, m] = month.split('-').map(Number);
   const days = new Date(y, m, 0).getDate();
@@ -190,18 +197,18 @@ router.get('/sparkline', async (req, res) => {
   const end = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
   const zeros = () => Array.from({ length: days }, () => 0);
   const out = { done: zeros(), taken: zeros(), onTime: zeros(), inspections: zeros(), breaches: zeros(), avgResp: zeros(), avgDur: zeros() };
-  const [d1] = await pool.query("SELECT DAY(resolved_at) d, COUNT(*) c, AVG(duration_min) ad FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<? GROUP BY DAY(resolved_at)", [techId, start, end]);
+  const [d1] = await pool.query(`SELECT DAY(resolved_at) d, COUNT(*) c, AVG(duration_min) ad FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<?${uf.clause} GROUP BY DAY(resolved_at)`, [techId, start, end, ...uf.params]);
   for (const r of d1) { out.done[r.d - 1] = r.c; out.avgDur[r.d - 1] = Math.round(r.ad || 0); }
-  const [d2] = await pool.query("SELECT DAY(taken_at) d, COUNT(*) c, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at)) ar FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<? GROUP BY DAY(taken_at)", [SLA_MINUTES, techId, start, end]);
+  const [d2] = await pool.query(`SELECT DAY(taken_at) d, COUNT(*) c, SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at)) ar FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${uf.clause} GROUP BY DAY(taken_at)`, [SLA_MINUTES, techId, start, end, ...uf.params]);
   for (const r of d2) { out.taken[r.d - 1] = r.c; out.onTime[r.d - 1] = Number(r.ot) || 0; out.avgResp[r.d - 1] = Math.round(r.ar || 0); }
   const [d3] = await pool.query('SELECT DAY(inspect_date) d, COUNT(*) c FROM equipment_inspections WHERE inspected_by=? AND inspect_date>=? AND inspect_date<? GROUP BY DAY(inspect_date)', [techId, start, end]);
   for (const r of d3) out.inspections[r.d - 1] = r.c;
   const [d4] = await pool.query(
     `SELECT DAY(i.created_at) d, COUNT(*) c FROM incident_duty du JOIN incidents i ON i.id=du.incident_id
-      WHERE du.user_id=? AND i.created_at>=? AND i.created_at<?
+      WHERE du.user_id=? AND i.created_at>=? AND i.created_at<?${ufi.clause}
         AND ((i.taken_at IS NOT NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,i.taken_at)>?) OR (i.taken_at IS NULL AND TIMESTAMPDIFF(MINUTE,i.created_at,NOW())>?))
       GROUP BY DAY(i.created_at)`,
-    [techId, start, end, SLA_MINUTES, SLA_MINUTES]
+    [techId, start, end, ...ufi.params, SLA_MINUTES, SLA_MINUTES]
   );
   for (const r of d4) out.breaches[r.d - 1] = r.c;
   res.json({ month, days, spark: out });
@@ -215,16 +222,18 @@ router.get('/breakdown', async (req, res) => {
 
   const [tech] = await pool.query('SELECT id, name, jabatan, unit_id FROM users WHERE id=?', [techId]);
   if (!tech[0] || !rowInUnit(tech[0], req.unitId)) return res.status(404).json({ error: 'Teknisi tidak ditemukan' });
-  const m = await metricsFor(techId, start, end);
+  const uf = unitFilter(req.unitId, 'unit_id');
+  const ufi = unitFilter(req.unitId, 'i.unit_id');
+  const m = await metricsFor(techId, start, end, req.unitId);
 
-  const [done] = await pool.query("SELECT id, device_name, resolved_at, duration_min, priority FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<? ORDER BY resolved_at DESC", [techId, start, end]);
-  const [taken] = await pool.query('SELECT id, device_name, created_at, taken_at, TIMESTAMPDIFF(MINUTE, created_at, taken_at) AS resp FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<? ORDER BY taken_at DESC', [techId, start, end]);
+  const [done] = await pool.query(`SELECT id, device_name, resolved_at, duration_min, priority FROM incidents WHERE tech_id=? AND status='selesai' AND resolved_at>=? AND resolved_at<?${uf.clause} ORDER BY resolved_at DESC`, [techId, start, end, ...uf.params]);
+  const [taken] = await pool.query(`SELECT id, device_name, created_at, taken_at, TIMESTAMPDIFF(MINUTE, created_at, taken_at) AS resp FROM incidents WHERE tech_id=? AND taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${uf.clause} ORDER BY taken_at DESC`, [techId, start, end, ...uf.params]);
   const [breaches] = await pool.query(
     `SELECT i.id, i.device_name, i.created_at, i.taken_at, CASE WHEN i.taken_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, i.created_at, i.taken_at) ELSE TIMESTAMPDIFF(MINUTE, i.created_at, NOW()) END AS mins
        FROM incident_duty d JOIN incidents i ON i.id = d.incident_id
-      WHERE d.user_id=? AND i.created_at>=? AND i.created_at<?
+      WHERE d.user_id=? AND i.created_at>=? AND i.created_at<?${ufi.clause}
         AND ((i.taken_at IS NOT NULL AND TIMESTAMPDIFF(MINUTE, i.created_at, i.taken_at) > ?) OR (i.taken_at IS NULL AND TIMESTAMPDIFF(MINUTE, i.created_at, NOW()) > ?)) ORDER BY i.created_at DESC`,
-    [techId, start, end, SLA_MINUTES, SLA_MINUTES]
+    [techId, start, end, ...ufi.params, SLA_MINUTES, SLA_MINUTES]
   );
 
   const components = [
