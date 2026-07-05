@@ -439,12 +439,14 @@ export async function buildKinerjaReport(monthIn, unitId) {
   // II. Uptime/ketersediaan per perangkat (rollup harian)
   const [devRows] = await pool.query(
     `SELECT d.id, d.name, d.ip, d.loc,
-            COALESCE(SUM(u.up_samples),0) up_s, COALESCE(SUM(u.samples),0) tot_s,
+            COALESCE(SUM(u.up_samples + u.warn_samples),0) up_ish, COALESCE(SUM(u.samples),0) tot_s, COALESCE(SUM(u.maint_samples),0) maint_s,
             COALESCE(SUM(u.down_seconds),0) down_sec, COALESCE(SUM(u.incidents),0) inc
        FROM devices d LEFT JOIN device_uptime_daily u ON u.device_id=d.id AND u.day BETWEEN ? AND ?
       WHERE d.asset_class='network'${ufd.clause}
       GROUP BY d.id ORDER BY d.name`, [start, lastDay, ...ufd.params]);
-  const devices = devRows.map((d) => ({ id: d.id, name: d.name, ip: d.ip, loc: d.loc, down_sec: Number(d.down_sec), inc: Number(d.inc), uptime: Number(d.tot_s) > 0 ? Math.round(1000 * d.up_s / d.tot_s) / 10 : null }));
+  // Availability = (online + warning) / (samples − maintenance): perangkat yang MERESPONS
+  // dianggap tersedia (warning = hidup, hanya perlu perhatian), selaras dgn laporan SLA & bulanan.
+  const devices = devRows.map((d) => { const base = Number(d.tot_s) - Number(d.maint_s); return { id: d.id, name: d.name, ip: d.ip, loc: d.loc, down_sec: Number(d.down_sec), inc: Number(d.inc), uptime: base > 0 ? Math.round(1000 * d.up_ish / base) / 10 : null }; });
   const withU = devices.filter((d) => d.uptime != null);
   const avgUptime = withU.length ? Math.round(10 * withU.reduce((s, d) => s + d.uptime, 0) / withU.length) / 10 : null;
   const worst = [...withU].sort((a, b) => a.uptime - b.uptime).slice(0, 5);
@@ -459,7 +461,7 @@ export async function buildKinerjaReport(monthIn, unitId) {
   // pemantauan (uptime/ping); insiden aktif menurunkan status ke "gangguan".
   const [assetRows] = await pool.query(
     `SELECT d.id, d.name, d.ip, d.loc, d.type, d.status AS live, d.monitor_enabled, d.asset_class,
-            COALESCE(SUM(u.up_samples),0) up_s, COALESCE(SUM(u.samples),0) tot_s,
+            COALESCE(SUM(u.up_samples + u.warn_samples),0) up_ish, COALESCE(SUM(u.samples),0) tot_s, COALESCE(SUM(u.maint_samples),0) maint_s,
             (SELECT COUNT(*) FROM incidents i WHERE i.device_id=d.id AND i.status<>'selesai') open_inc,
             (SELECT COUNT(*) FROM public_reports pr WHERE pr.device_id=d.id AND pr.status<>'selesai') open_rep
        FROM devices d LEFT JOIN device_uptime_daily u ON u.device_id=d.id AND u.day BETWEEN ? AND ?
@@ -467,7 +469,8 @@ export async function buildKinerjaReport(monthIn, unitId) {
       GROUP BY d.id ORDER BY d.name`, [start, lastDay, ...ufd.params]);
   const assets = assetRows.map((d) => {
     const noIp = !d.ip || /^n\/?a/i.test(String(d.ip));
-    const uptime = Number(d.tot_s) > 0 ? Math.round(1000 * d.up_s / d.tot_s) / 10 : null;
+    const base = Number(d.tot_s) - Number(d.maint_s);
+    const uptime = base > 0 ? Math.round(1000 * d.up_ish / base) / 10 : null;
     const openInc = Number(d.open_inc) || 0;
     // "Dilaporkan rusak" terdeteksi otomatis dari laporan publik (via QR aset) atau insiden aktif.
     const reportedBroken = openInc > 0 || Number(d.open_rep) > 0;

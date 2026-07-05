@@ -94,10 +94,14 @@ export async function checkAllDevices(io) {
 
     const { status, pingMs } = meterFromStatus(device.status, alive, avgMs, thresholds);
     // CPU/mem riil dari SNMP bila tersedia; jika tidak, pertahankan nilai terakhir
-    // (bukan acak) agar tidak menimbulkan warning palsu. 0 saat perangkat mati.
+    // (bukan acak) hanya untuk tampilan. 0 saat perangkat mati.
     const cpu = alive ? (probe.cpu ?? device.cpu ?? 0) : 0;
     const mem = alive ? (probe.mem ?? device.mem ?? 0) : 0;
-    const finalStatus = alive && (cpu > thresholds.cpu || mem > thresholds.mem) ? 'warning' : status;
+    // Warning CPU/mem HANYA saat ada pembacaan SNMP NYATA pada sweep ini (probe.cpu/probe.mem),
+    // bukan dari nilai lama tersimpan — cegah "warning palsu" untuk perangkat tanpa SNMP
+    // (mis. AP ping 1ms tapi punya nilai cpu/mem basi > ambang → terus ditandai warning).
+    const overload = (probe.cpu != null && probe.cpu > thresholds.cpu) || (probe.mem != null && probe.mem > thresholds.mem);
+    const finalStatus = alive && overload ? 'warning' : status;
     const underMaint = maint.isUnder(device);
 
     // Aturan jam malam: perangkat NON-SERVER yang offline pada 20:00–06:00 dianggap
