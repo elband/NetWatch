@@ -173,15 +173,48 @@ export async function buildLaporanData(monthIn, unitId = null) {
     if (!downMap.has(r.device_id)) downMap.set(r.device_id, new Set());
     downMap.get(r.device_id).add(r.d);
   }
+  // Grid harian unjuk hasil DARI DATA PEMANTAUAN RIIL (device_uptime_daily) — sumber sama
+  // dengan halaman Laporan Unjuk Hasil. Ketersediaan harian = (online+warning)/(sampel−maintenance).
+  const ufUp = unitFilter(unitId, 'd.unit_id');
+  const [upDayRows] = await pool.query(
+    `SELECT u.device_id, DAY(u.day) d, u.samples, (u.up_samples + u.warn_samples) up_ish, u.maint_samples
+       FROM device_uptime_daily u JOIN devices d ON d.id=u.device_id
+      WHERE u.day>=? AND u.day<?${ufUp.clause}`,
+    [start, end, ...ufUp.params]
+  );
+  const dayAvail = new Map(); // device_id -> Map(day -> availabilityFraksi|null)
+  const monAgg = new Map();   // device_id -> { base, up } untuk ketersediaan bulanan
+  for (const r of upDayRows) {
+    const base = Number(r.samples) - Number(r.maint_samples);
+    if (!dayAvail.has(r.device_id)) dayAvail.set(r.device_id, new Map());
+    dayAvail.get(r.device_id).set(r.d, base > 0 ? Number(r.up_ish) / base : null);
+    const mm = monAgg.get(r.device_id) || { base: 0, up: 0 };
+    mm.base += Math.max(0, base); mm.up += Number(r.up_ish);
+    monAgg.set(r.device_id, mm);
+  }
+  // Kondisi (Ket) perangkat ber-IP dari ketersediaan bulanan terukur; tanpa IP dari insiden/laporan.
+  const monthlyKet = (dev) => {
+    if (!hasIp(dev)) return devKondisi(dev);
+    const mm = monAgg.get(dev.id);
+    if (!mm || mm.base <= 0) return devKondisi(dev); // belum ada data pantau → status kini
+    const pct = (mm.up / mm.base) * 100;
+    return pct >= 95 ? 'Baik' : pct >= 50 ? 'Perlu Perhatian' : 'Tidak Aktif/Rusak';
+  };
   const [devList] = await pool.query(`SELECT id, name, status, ip FROM devices WHERE 1=1${uf.clause} ORDER BY category, name`, uf.params);
   const unjukHasil = {
     days: daysInMonth,
     rows: devList.map((dev, i) => {
-      const down = downMap.get(dev.id) || new Set();
-      // Sel 'x' = ada insiden hari itu; untuk perangkat ber-IP juga 'x' bila status offline.
-      // Perangkat tanpa IP tidak diisi 'x' otomatis dari status ping (tidak terpantau).
-      const cells = Array.from({ length: daysInMonth }, (_, k) => (down.has(k + 1) ? 'x' : (hasIp(dev) && dev.status === 'offline') ? 'x' : ''));
-      return { no: i + 1, nama: dev.name, cells, ket: devKondisi(dev) };
+      const dmap = dayAvail.get(dev.id);
+      const cells = Array.from({ length: daysInMonth }, (_, k) => {
+        if (hasIp(dev)) {
+          // Sel 'x' = ketersediaan hari itu < 50% (perangkat mati mayoritas hari); kosong = baik/tak terpantau.
+          const av = dmap ? dmap.get(k + 1) : undefined;
+          return (av != null && av < 0.5) ? 'x' : '';
+        }
+        // Tanpa IP (tidak terpantau ping): 'x' pada hari ada insiden tercatat.
+        return (downMap.get(dev.id) || new Set()).has(k + 1) ? 'x' : '';
+      });
+      return { no: i + 1, nama: dev.name, cells, ket: monthlyKet(dev) };
     }),
   };
 
