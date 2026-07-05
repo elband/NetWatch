@@ -63,7 +63,7 @@ export function ScoreBreakdown({ components }: { components: ScoreComponent[] })
 
 // Penjelasan LENGKAP perhitungan skor: angka mentah tiap komponen + kontribusi ke skor akhir.
 // Dipakai teknisi untuk memahami dari mana angka performanya berasal.
-export function ScoreExplain({ score, grade, components }: { score: number | null; grade: string; components: ScoreComponent[] }) {
+export function ScoreExplain({ score, grade, components, tips }: { score: number | null; grade: string; components: ScoreComponent[]; tips?: string[] }) {
   const active = components.filter((c) => c.value != null);
   const wsum = active.reduce((s, c) => s + c.weight, 0);
   return (
@@ -98,6 +98,14 @@ export function ScoreExplain({ score, grade, components }: { score: number | nul
         <div className="text-[11px] text-text2 border-t border-border pt-2">
           Total kontribusi = <b className="text-text">{score}</b> → grade <b className="text-text">{grade}</b>.
           Skala: ≥90 Sangat Baik · 75–89 Baik · 60–74 Cukup · 50–59 Kurang · &lt;50 Perlu Pembinaan.
+        </div>
+      )}
+      {tips && tips.length > 0 && (
+        <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+          <div className="text-[12px] font-bold text-accent mb-1.5">💡 Saran untuk meningkatkan performa</div>
+          <ul className="space-y-1">
+            {tips.map((t, i) => <li key={i} className="text-[11px] text-text flex gap-1.5"><span className="text-accent">→</span><span>{t}</span></li>)}
+          </ul>
         </div>
       )}
     </div>

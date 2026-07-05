@@ -12,7 +12,7 @@ import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaB
 import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
 import { getSocket } from '../api/socket';
 
-interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[] }
+interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[]; tips?: string[] }
 import { stepLabel, nextStepLabel, progressPct, maxStep } from '../utils/steps';
 import type { Incident, IncidentQueue, PerformaRow, Device, Asset, ServiceItem, LocationItem, MonthlyStats, Activity } from '../types';
 
@@ -191,6 +191,12 @@ export default function MyDashboard() {
             <ScoreGauge score={myScore.score} grade={myScore.grade} size={120} />
             <div className="flex-1 min-w-[240px]"><ScoreBreakdown components={myScore.components} /></div>
           </div>
+          {myScore.tips && myScore.tips.length > 0 && (
+            <div className="mt-3 rounded-lg border border-accent/30 bg-accent/5 p-2.5 text-[11px]">
+              <span className="font-bold text-accent">💡 Saran: </span><span className="text-text">{myScore.tips[0]}</span>
+              {myScore.tips.length > 1 && <button onClick={() => setShowExplain(true)} className="ml-1 text-accent underline">+{myScore.tips.length - 1} saran lain</button>}
+            </div>
+          )}
         </div>
       )}
       {showExplain && myScore && (
@@ -200,7 +206,7 @@ export default function MyDashboard() {
               <h3 className="text-sm font-bold">📖 Penjelasan Skor Performa Saya · {monthLabel}</h3>
               <button onClick={() => setShowExplain(false)} className="text-text2 hover:text-text text-xl leading-none">×</button>
             </div>
-            <ScoreExplain score={myScore.score} grade={myScore.grade} components={myScore.components} />
+            <ScoreExplain score={myScore.score} grade={myScore.grade} components={myScore.components} tips={myScore.tips} />
           </div>
         </div>
       )}

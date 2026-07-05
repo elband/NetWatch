@@ -20,14 +20,36 @@ export function gradeOfPct(score) {
 const pct = (num, den) => (den > 0 ? (Number(num) / den) * 100 : null);
 const clamp = (v) => Math.max(0, Math.min(100, v));
 
+// Saran peningkatan per komponen (keyed by component.key) — dipakai untuk komponen
+// aktif yang masih di bawah target. `c` = komponen yang sudah dibentuk (value/num/den).
+const TIP_MAP = {
+  sla: (c) => `Ambil tiket lebih sigap saat on-duty — baru ${c.num}/${c.den} tiket diambil tepat waktu. Setiap tiket telat menurunkan skor terbesar.`,
+  selesai: (c) => `Tuntaskan tiket yang masih terbuka — ${Math.max(0, c.den - c.num)} dari ${c.den} tiket yang diambil belum selesai.`,
+  inspeksi: (c) => `Lakukan & catat inspeksi harian — baru ${c.num} dari ${c.den} hari dinas terisi inspeksi.`,
+  pm: (c) => `Kerjakan pemeliharaan (PM) yang jatuh tempo — baru ${c.num} dari ${c.den} PM selesai.`,
+  persetujuan: (c) => `Putuskan pengajuan tim lebih cepat (≤ 2 hari kerja) — baru ${c.num} dari ${c.den} tepat waktu.`,
+  uptimeUnit: (c) => `Tingkatkan ketersediaan alat unit (kini ${c.value}%) — percepat pemulihan gangguan & jalankan PM rutin.`,
+  eskalasi: (c) => `Tuntaskan insiden yang tereskalasi — baru ${c.num} dari ${c.den} tertangani.`,
+  jadwal: (c) => `Lengkapi jadwal dinas — baru ${c.num} dari ${c.den} hari terisi petugas.`,
+};
+
 // Gabungkan komponen dgn normalisasi bobot atas komponen AKTIF (value != null).
 function combine(components) {
   const active = components.filter((c) => c.value != null);
   const wsum = active.reduce((s, c) => s + c.weight, 0);
   const shaped = components.map((c) => ({ ...c, value: c.value == null ? null : Math.round(clamp(c.value)) }));
-  if (!wsum) return { score: null, grade: 'Belum dinilai', components: shaped };
+  if (!wsum) return { score: null, grade: 'Belum dinilai', components: shaped, tips: ['Belum ada tugas tercatat bulan ini. Ambil tiket, catat inspeksi, dan lengkapi kegiatan agar mulai dinilai.'] };
   const score = Math.round(active.reduce((s, c) => s + c.weight * clamp(c.value), 0) / wsum);
-  return { score, grade: gradeOfPct(score), components: shaped };
+  // Saran: komponen aktif di bawah target, diprioritaskan dari yg PALING berdampak
+  // (bobot × selisih ke 100). Ambil maksimal 3 saran paling bermanfaat.
+  const shapedActive = shaped.filter((c) => c.value != null);
+  const tips = shapedActive
+    .filter((c) => c.value < 90 && TIP_MAP[c.key])
+    .sort((a, b) => b.weight * (100 - b.value) - a.weight * (100 - a.value))
+    .slice(0, 3)
+    .map((c) => TIP_MAP[c.key](c));
+  if (!tips.length) tips.push('Pertahankan! Semua komponen sudah di atas target. 👍');
+  return { score, grade: gradeOfPct(score), components: shaped, tips };
 }
 
 // ————————————————————— TEKNISI —————————————————————
