@@ -3,7 +3,10 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import PerformaDetailModal from '../components/PerformaDetailModal';
+import ScoreGauge, { ScoreBreakdown, type ScoreComponent } from '../components/ScoreGauge';
 import type { PerformaDashboard } from '../types';
+
+interface SkorRow { userId: number; name: string; jabatan: string | null; emoji: string | null; role: 'teknisi' | 'koordinator'; score: number | null; grade: string; components: ScoreComponent[] }
 
 function recentMonths(count = 12) {
   const now = new Date();
@@ -82,6 +85,7 @@ export default function Performa() {
   const [techId, setTechId] = useState<number | undefined>(undefined);
   const [data, setData] = useState<PerformaDashboard | null>(null);
   const [detailFor, setDetailFor] = useState<number | null>(null);
+  const [skor, setSkor] = useState<SkorRow[]>([]);
 
   useEffect(() => {
     const q = new URLSearchParams();
@@ -89,6 +93,9 @@ export default function Performa() {
     if (techId) q.set('techId', String(techId));
     api.get(`/performa/dashboard?${q.toString()}`).then((r) => setData(r.data)).catch(() => setData(null));
   }, [month, techId]);
+  useEffect(() => {
+    api.get(`/performa/skor${month ? `?month=${month}` : ''}`).then((r) => setSkor(r.data.people || [])).catch(() => setSkor([]));
+  }, [month]);
 
   const s = data?.self;
   const insightColor = (t: string) => (t === 'good' ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' : t === 'warn' ? 'border-amber-500/30 bg-amber-500/5 text-amber-300' : 'border-rose-500/30 bg-rose-500/5 text-rose-300');
@@ -111,6 +118,25 @@ export default function Performa() {
           </select>
         </div>
       </div>
+
+      {/* Skor Performa PERSEN (0–100) — teknisi & koordinator */}
+      {skor.length > 0 && (
+        <div className="rounded-xl border border-slate-700 bg-[#0f1729] p-4 mb-4">
+          <div className="text-[14px] font-bold mb-1">🎯 Skor Performa (Persen)</div>
+          <div className="text-[11px] text-slate-400 mb-3">Rata-rata pencapaian target per komponen · {month ? months.find((m) => m.value === month)?.label : 'bulan berjalan'}. Komponen tanpa tugas bulan ini tidak dihitung.</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            {skor.map((p) => (
+              <div key={p.userId} className="rounded-lg border border-slate-700/70 bg-[#0b1220] p-3 flex flex-col items-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: p.role === 'koordinator' ? '#a78bfa' : '#38bdf8' }}>{p.role}</div>
+                <ScoreGauge score={p.score} grade={p.grade} size={112} />
+                <div className="text-[12px] font-semibold text-slate-100 mt-1.5 text-center">{p.emoji ? `${p.emoji} ` : ''}{p.name}</div>
+                {p.jabatan && <div className="text-[10px] text-slate-500 mb-2">{p.jabatan}</div>}
+                <div className="w-full mt-1"><ScoreBreakdown components={p.components} /></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!data || !s ? (
         <div className="text-center text-slate-500 py-20 text-sm">Memuat data performa…</div>
