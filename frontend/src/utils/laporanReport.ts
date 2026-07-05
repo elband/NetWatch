@@ -18,6 +18,7 @@ export interface LaporanData {
   recap: { tiketIn: number; tiketDone: number; mttr: number; slaPct: number; escalations: number; measuredUptimePct?: number | null };
   performaTeknisi: PerfTek[];
   performaKoordinator: PerfKoord[];
+  performaRinci?: { no: number; name: string; jabatan: string | null; role: string; skor: number | null; grade: string; komponen: { label: string; weight: number; value: number | null; note: string | null }[]; tips: string[] }[];
   opsHoursPerDay: number;
 }
 
@@ -34,7 +35,7 @@ export interface CoverInfo {
   kasi_signer_name?: string | null; kasi_signer_nip?: string | null; kasi_sign_token?: string | null;
 }
 
-export type SectionKey = 'cover' | 'personil' | 'inventaris' | 'jadwalBulanIni' | 'jadwal' | 'kegiatan' | 'dokumentasi' | 'unjukHasil' | 'evaluasi' | 'perbaikan' | 'lkp' | 'logbook' | 'lampiran';
+export type SectionKey = 'cover' | 'personil' | 'inventaris' | 'jadwalBulanIni' | 'jadwal' | 'kegiatan' | 'dokumentasi' | 'unjukHasil' | 'evaluasi' | 'perbaikan' | 'lkp' | 'logbook' | 'performaRinci' | 'lampiran';
 export const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: 'cover', label: 'Halaman Sampul' },
   { key: 'personil', label: 'I. Data Personil Teknisi' },
@@ -48,6 +49,7 @@ export const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: 'perbaikan', label: 'IX. Daftar Kegiatan Perbaikan & Kerusakan' },
   { key: 'lkp', label: 'X. LKP per Kerusakan' },
   { key: 'logbook', label: 'XI. Logbook Peralatan' },
+  { key: 'performaRinci', label: 'XII. Rincian Penilaian Performa Personil' },
   { key: 'lampiran', label: 'Lampiran: Ringkasan & Grafik Kinerja' },
 ];
 
@@ -230,6 +232,29 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
     pages.push(`<div class="page">${sec('Logbook Peralatan (Rekap Bulanan)')}${head2(`BULAN/TAHUN : ${bln}`)}
       <table class="data"><thead><tr><th style="width:20px">No</th><th>Peralatan</th><th>Uptime</th><th>Latensi (rata/maks)</th><th>Inspeksi (B/P/R)</th><th>Hidup/Mati</th><th>Maintenance</th><th>Insiden</th></tr></thead><tbody>${rows}</tbody></table>
       <div style="font-size:9px;margin-top:4px">Inspeksi: total (Baik/Perhatian/Rusak). Uptime &amp; latensi dari pemantauan (mengecualikan maintenance terjadwal).</div>${sign()}</div>`);
+  }
+  if (has('performaRinci') && (data.performaRinci?.length)) {
+    const rinci = data.performaRinci || [];
+    const scoreCol = (s: number | null) => s == null ? '#888' : s >= 90 ? '#16803c' : s >= 75 ? '#16a34a' : s >= 60 ? '#b45309' : s >= 50 ? '#c2410c' : '#b91c1c';
+    const perfTable = (list: NonNullable<LaporanData['performaRinci']>, roleLabel: string) => {
+      if (!list.length) return '';
+      const heads = list[0].komponen.map((k) => `<th>${esc(k.label)}<br><span style="font-size:8px;font-weight:normal">${k.weight}%</span></th>`).join('');
+      const body = list.map((r) => `<tr>
+        <td style="text-align:center">${r.no}</td>
+        <td>${esc(r.name)}${r.jabatan ? `<div style="font-size:8px;color:#666">${esc(r.jabatan)}</div>` : ''}</td>
+        ${r.komponen.map((k) => `<td style="text-align:center">${k.value == null ? '<span style="color:#999">–</span>' : k.value + '%'}</td>`).join('')}
+        <td style="text-align:center;font-weight:bold;color:${scoreCol(r.skor)}">${r.skor == null ? '–' : r.skor}</td>
+        <td style="text-align:center;font-size:9px">${esc(r.grade)}</td>
+      </tr>`).join('');
+      return `<div style="font-weight:bold;font-size:11px;margin:8px 0 2px">${roleLabel}</div>
+        <table class="data"><thead><tr><th style="width:20px">No</th><th>Nama</th>${heads}<th style="width:38px">Skor</th><th style="width:70px">Grade</th></tr></thead><tbody>${body}</tbody></table>`;
+    };
+    const tek = rinci.filter((r) => r.role === 'teknisi');
+    const koor = rinci.filter((r) => r.role === 'koordinator');
+    pages.push(`<div class="page">${sec('Rincian Penilaian Performa Personil')}${head2(`BULAN/TAHUN : ${bln}`)}
+      ${perfTable(koor, 'A. Koordinator')}
+      ${perfTable(tek, 'B. Teknisi')}
+      <div style="font-size:9px;margin-top:6px">Skor = rata-rata pencapaian target tiap komponen (0–100), ditimbang bobotnya. Komponen "–" berarti tidak ada tugasnya bulan itu sehingga tidak dihitung (bobot dibagi ke komponen lain). Skala grade: ≥90 Sangat Baik · 75–89 Baik · 60–74 Cukup · 50–59 Kurang · &lt;50 Perlu Pembinaan.</div>${sign()}</div>`);
   }
   if (has('lampiran')) {
     const tek = data.performaTeknisi.map((t) => `<tr><td>${esc(t.name)}</td><td style="text-align:center">${t.done}</td><td style="text-align:center">${t.onTime}/${t.taken}</td><td style="text-align:center">${t.kritisDone}</td><td style="text-align:center">${t.inspeksi} (${t.inspeksiV}✓)</td><td style="text-align:center;color:#b91c1c">${t.breaches}</td><td style="text-align:center;font-weight:bold">${t.score}</td></tr>`).join('');

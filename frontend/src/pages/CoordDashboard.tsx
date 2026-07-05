@@ -10,9 +10,11 @@ import { DeviceStatusBadge } from '../components/StatusBadge';
 import { promptDialog } from '../components/dialog';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
 import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
-import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity, PerformaRow } from '../types';
+import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity } from '../types';
 
 interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[]; tips?: string[] }
+interface SkorRow { userId: number; name: string; jabatan: string | null; emoji: string | null; role: 'teknisi' | 'koordinator'; score: number | null; grade: string; components: ScoreComponent[]; tips?: string[] }
+const gradeCls = (s: number | null) => s == null ? 'text-text2' : s >= 90 ? 'text-success' : s >= 75 ? 'text-success' : s >= 60 ? 'text-warn' : s >= 50 ? 'text-warn' : 'text-danger';
 
 const PURPLE = '#a78bfa';
 const fmtDur = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}j ${min % 60}m` : `${min}m`);
@@ -36,7 +38,6 @@ export default function CoordDashboard() {
   const isScored = hasRole(authUser, 'koordinator') || hasRole(authUser, 'teknisi');
   const [data, setData] = useState<CoordData | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [performa, setPerforma] = useState<PerformaRow[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [stats, setStats] = useState<MonthlyStats | null>(null);
@@ -51,6 +52,8 @@ export default function CoordDashboard() {
   const [spark, setSpark] = useState<Record<string, number[]>>({});
   const [myScore, setMyScore] = useState<MyScore | null>(null);
   const [showExplain, setShowExplain] = useState(false);
+  const [skorList, setSkorList] = useState<SkorRow[]>([]);
+  const [explainRow, setExplainRow] = useState<SkorRow | null>(null);
   const month = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
   const prevMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
 
@@ -59,11 +62,11 @@ export default function CoordDashboard() {
     api.get(`/dashboard/coordinator?month=${prevMonth}`).then((res) => setPrev(res.data.performa)).catch(() => {});
     api.get('/dashboard/coordinator-sparkline').then((res) => setSpark(res.data.spark)).catch(() => {});
     api.get('/devices').then((res) => setDevices(res.data.devices)).catch(() => {});
-    api.get('/performa').then((res) => setPerforma(res.data.performa)).catch(() => {});
     api.get('/locations').then((res) => { setLocations(res.data.locations); }).catch(() => {});
     api.get('/services').then((res) => setServices(res.data.services)).catch(() => {});
     api.get(`/dashboard/monthly?month=${month}`).then((res) => setStats(res.data)).catch(() => {});
     api.get(`/performa/skor/me?month=${month}`).then((res) => setMyScore(res.data)).catch(() => setMyScore(null));
+    api.get(`/performa/skor?month=${month}`).then((res) => setSkorList(res.data.people || [])).catch(() => setSkorList([]));
     api.get('/activities').then((res) => setActivities(res.data.activities)).catch(() => {});
     api.get('/incidents/teknisi-list').then((res) => setTeknisiList(res.data.teknisi || [])).catch(() => {});
   }
@@ -550,23 +553,35 @@ export default function CoordDashboard() {
       </Panel>
 
       {/* Performa teknisi (dari dashboard admin) */}
-      <Panel title="🏆 PERFORMA TEKNISI" right={<Link to="/performa" className="text-[11px] text-text2 hover:text-text">Detail →</Link>}>
-        {performa.length === 0 ? (
+      <Panel title="🏆 PERFORMA TEKNISI & KOORDINATOR" right={<Link to="/performa" className="text-[11px] text-text2 hover:text-text">Detail →</Link>}>
+        {skorList.length === 0 ? (
           <div className="text-center py-4 text-text2 text-xs">Belum ada data performa.</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 nw-stagger">
-            {performa.map((p) => (
-              <div key={p.techId} className="nw-card bg-surface2 border border-border rounded-lg p-3 text-center">
-                <div className="text-2xl mb-1">{p.emoji}</div>
+            {skorList.map((p) => (
+              <button key={p.userId} onClick={() => setExplainRow(p)} className="nw-card bg-surface2 border border-border rounded-lg p-3 text-center hover:border-accent/50 transition-colors">
+                <div className="text-2xl mb-1">{p.emoji || (p.role === 'koordinator' ? '👔' : '🔧')}</div>
                 <div className="text-xs font-semibold">{p.name.split(' ')[0]}</div>
                 <div className="text-[10px] text-text2 mb-2">{p.jabatan}</div>
-                <div className={`text-xl font-bold ${p.score >= 70 ? 'text-success' : p.score >= 40 ? 'text-warn' : 'text-danger'}`}>{p.score}</div>
-                <div className="text-[9px] text-text2">Skor Performa</div>
-              </div>
+                <div className={`text-xl font-bold ${gradeCls(p.score)}`}>{p.score == null ? '–' : p.score}</div>
+                <div className="text-[9px] text-text2">{p.score == null ? 'Belum dinilai' : p.grade}</div>
+              </button>
             ))}
           </div>
         )}
       </Panel>
+
+      {explainRow && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setExplainRow(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold">📖 Penjelasan Skor · {explainRow.emoji ? `${explainRow.emoji} ` : ''}{explainRow.name}</h3>
+              <button onClick={() => setExplainRow(null)} className="text-text2 hover:text-text text-xl leading-none">×</button>
+            </div>
+            <ScoreExplain score={explainRow.score} grade={explainRow.grade} components={explainRow.components} tips={explainRow.tips} />
+          </div>
+        </div>
+      )}
 
       {/* Analitik tambahan */}
       {(() => {

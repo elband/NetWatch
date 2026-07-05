@@ -53,9 +53,17 @@ export async function buildLaporanData(monthIn, unitId = null) {
   // Skor performa persen (0–100 + grade) per personil — komponen sesuai peran.
   for (const p of personil) {
     const roles = p.roles ? (typeof p.roles === 'string' ? JSON.parse(p.roles) : p.roles) : (p.role ? [p.role] : []);
-    const s = roles.includes('koordinator') ? await scoreKoordinator(p.id, start, end, unitId) : await scoreTeknisi(p.id, start, end, unitId);
+    p.isKoor = roles.includes('koordinator');
+    const s = p.isKoor ? await scoreKoordinator(p.id, start, end, unitId) : await scoreTeknisi(p.id, start, end, unitId);
     p.skor = s.score; p.grade = s.grade;
+    p.komponen = s.components.map((c) => ({ label: c.label, weight: c.weight, value: c.value, note: c.note || null }));
+    p.tips = s.tips || [];
   }
+  // Rincian penilaian performa (per personil) untuk section terpisah di laporan.
+  const performaRinci = personil.map((p, i) => ({
+    no: i + 1, name: p.name, jabatan: p.jabatan, role: p.isKoor ? 'koordinator' : 'teknisi',
+    skor: p.skor ?? null, grade: p.grade || 'Belum dinilai', komponen: p.komponen || [], tips: p.tips || [],
+  }));
 
   // ===== II. Daftar / Inventaris Peralatan =====
   const [inventaris] = await pool.query(`SELECT id, name, type, merk, serial, tahun, loc, status, category, ip FROM devices WHERE 1=1${uf.clause} ORDER BY category, name`, uf.params);
@@ -355,6 +363,7 @@ export async function buildLaporanData(monthIn, unitId = null) {
   return {
     month, monthName, year: y, nextMonthName,
     personil: personil.map((p, i) => ({ no: i + 1, name: p.name, nip: p.nip, jabatan: p.jabatan, pangkat: p.pangkat, ttl: p.ttl, skor: p.skor ?? null, grade: p.grade || 'Belum dinilai' })),
+    performaRinci,
     inventaris: inventaris.map((d, i) => ({ no: i + 1, nama: d.name, merk: d.merk || d.type || '-', serial: d.serial || '-', tahun: d.tahun || '-', lokasi: d.loc || '-', kondisi: devKondisi(d), ket: d.category || '-' })),
     jadwalBulanIni, jadwal, kegiatanHarian, dokumentasi, dokumentasiTruncated, unjukHasil, evaluasi, perbaikan: perbaikanRows, lkp, logbook,
     recap, performaTeknisi, performaKoordinator, coordBreachMinutes: COORD_BREACH_MINUTES, opsHoursPerDay: OPS_HOURS_PER_DAY,
