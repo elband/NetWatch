@@ -3,6 +3,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit } from '../middleware/unitScope.js';
 import { SLA_MINUTES } from '../config/shifts.js';
+import { scoreTeknisi, scoreKoordinator } from '../services/perfScore.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -256,6 +257,28 @@ router.get('/breakdown', async (req, res) => {
     vpnFlag: m.vpnFlag, vpnDays: m.vpnDays, metrics: m, components,
     logs: { done, taken, breaches },
   });
+});
+
+// Skor performa PERSEN (0–100 + grade) — teknisi & koordinator unit. Sumber gauge.
+router.get('/skor', async (req, res) => {
+  const { start, end } = monthRange(req.query.month);
+  const uf = unitFilter(req.unitId, 'unit_id');
+  const [people] = await pool.query(
+    `SELECT id, name, jabatan, emoji, role, roles FROM users
+      WHERE active=1 AND (role IN ('teknisi','koordinator') OR JSON_CONTAINS(roles,'"teknisi"') OR JSON_CONTAINS(roles,'"koordinator"'))${uf.clause}
+      ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"')) DESC, name`,
+    uf.params
+  );
+  const rows = [];
+  for (const p of people) {
+    const roles = p.roles ? (typeof p.roles === 'string' ? JSON.parse(p.roles) : p.roles) : (p.role ? [p.role] : []);
+    const isKoor = roles.includes('koordinator');
+    const s = isKoor ? await scoreKoordinator(p.id, start, end, req.unitId) : await scoreTeknisi(p.id, start, end, req.unitId);
+    rows.push({ userId: p.id, name: p.name, jabatan: p.jabatan, emoji: p.emoji, role: isKoor ? 'koordinator' : 'teknisi', ...s });
+  }
+  // Skor tertinggi dulu; "Belum dinilai" (null) di bawah.
+  rows.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  res.json({ month: req.query.month || null, people: rows });
 });
 
 export default router;
