@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter } from '../middleware/unitScope.js';
 import { SLA_MINUTES, COORD_BREACH_MINUTES } from '../config/shifts.js';
 import { metricsFor } from './performaRoutes.js';
+import { scoreTeknisi, scoreKoordinator } from '../services/perfScore.js';
 import { buildLogbook } from './logbookRoutes.js';
 import { computeReport as obatAirReport } from '../controllers/waterChemController.js';
 
@@ -46,9 +47,15 @@ export async function buildLaporanData(monthIn, unitId = null) {
   // ===== I. Data Personil Teknisi =====
   const [personil] = await pool.query(
     // Urutan: koordinator dulu, OJT paling bawah, sisanya per nama.
-    `SELECT name, nip, jabatan, pangkat, ttl FROM users WHERE active=1 AND (role='teknisi' OR role='koordinator' OR JSON_CONTAINS(roles,'"teknisi"') OR JSON_CONTAINS(roles,'"koordinator"'))${uf.clause} ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"')) DESC, (jabatan LIKE '%OJT%') ASC, name`,
+    `SELECT id, role, roles, name, nip, jabatan, pangkat, ttl FROM users WHERE active=1 AND (role='teknisi' OR role='koordinator' OR JSON_CONTAINS(roles,'"teknisi"') OR JSON_CONTAINS(roles,'"koordinator"'))${uf.clause} ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"')) DESC, (jabatan LIKE '%OJT%') ASC, name`,
     uf.params
   );
+  // Skor performa persen (0–100 + grade) per personil — komponen sesuai peran.
+  for (const p of personil) {
+    const roles = p.roles ? (typeof p.roles === 'string' ? JSON.parse(p.roles) : p.roles) : (p.role ? [p.role] : []);
+    const s = roles.includes('koordinator') ? await scoreKoordinator(p.id, start, end, unitId) : await scoreTeknisi(p.id, start, end, unitId);
+    p.skor = s.score; p.grade = s.grade;
+  }
 
   // ===== II. Daftar / Inventaris Peralatan =====
   const [inventaris] = await pool.query(`SELECT id, name, type, merk, serial, tahun, loc, status, category, ip FROM devices WHERE 1=1${uf.clause} ORDER BY category, name`, uf.params);
@@ -347,7 +354,7 @@ export async function buildLaporanData(monthIn, unitId = null) {
 
   return {
     month, monthName, year: y, nextMonthName,
-    personil: personil.map((p, i) => ({ no: i + 1, ...p })),
+    personil: personil.map((p, i) => ({ no: i + 1, name: p.name, nip: p.nip, jabatan: p.jabatan, pangkat: p.pangkat, ttl: p.ttl, skor: p.skor ?? null, grade: p.grade || 'Belum dinilai' })),
     inventaris: inventaris.map((d, i) => ({ no: i + 1, nama: d.name, merk: d.merk || d.type || '-', serial: d.serial || '-', tahun: d.tahun || '-', lokasi: d.loc || '-', kondisi: devKondisi(d), ket: d.category || '-' })),
     jadwalBulanIni, jadwal, kegiatanHarian, dokumentasi, dokumentasiTruncated, unjukHasil, evaluasi, perbaikan: perbaikanRows, lkp, logbook,
     recap, performaTeknisi, performaKoordinator, coordBreachMinutes: COORD_BREACH_MINUTES, opsHoursPerDay: OPS_HOURS_PER_DAY,

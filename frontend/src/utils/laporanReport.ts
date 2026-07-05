@@ -3,7 +3,7 @@ export interface PerfTek { name: string; jabatan: string | null; done: number; o
 export interface PerfKoord { name: string; jabatan: string | null; approvals: number; reportsSigned: number; suratCreated: number; suratSigned: number; escalations: number; score: number; }
 export interface LaporanData {
   month: string; monthName: string; year: number; nextMonthName: string;
-  personil: { no: number; name: string; nip: string | null; jabatan: string | null; pangkat: string | null; ttl: string | null }[];
+  personil: { no: number; name: string; nip: string | null; jabatan: string | null; pangkat: string | null; ttl: string | null; skor: number | null; grade: string }[];
   inventaris: { no: number; nama: string; merk: string; serial: string; tahun: string; lokasi: string; kondisi: string; ket: string }[];
   jadwalBulanIni: { month: string; days: number; rows: { nama: string; cells: string[] }[] };
   jadwal: { month: string; days: number; rows: { nama: string; cells: string[] }[] };
@@ -132,13 +132,19 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
 
   if (has('personil')) {
     // OJT (peserta on-the-job training) tidak memakai NIP.
+    const skorCell = (p: LaporanData['personil'][number]) => {
+      if (p.skor == null) return '<td style="text-align:center;color:#888;font-size:9px">Belum dinilai</td>';
+      const col = p.skor >= 90 ? '#16803c' : p.skor >= 75 ? '#16a34a' : p.skor >= 60 ? '#b45309' : p.skor >= 50 ? '#c2410c' : '#b91c1c';
+      return `<td style="text-align:center;font-weight:bold;color:${col}">${p.skor}<br><span style="font-size:8px;font-weight:normal">${esc(p.grade)}</span></td>`;
+    };
     const r = data.personil.map((p) => {
       const isOjt = /OJT/i.test(p.jabatan || '');
       const nip = isOjt ? '' : `<br><span style="font-size:9px">NIP. ${esc(p.nip || '-')}</span>`;
-      return `<tr><td style="text-align:center">${p.no}</td><td>${esc(p.name)}${nip}</td><td>${esc(p.pangkat || '-')}</td><td>${esc(p.ttl || '-')}</td><td>${esc(p.jabatan || '-')}</td></tr>`;
+      return `<tr><td style="text-align:center">${p.no}</td><td>${esc(p.name)}${nip}</td><td>${esc(p.pangkat || '-')}</td><td>${esc(p.ttl || '-')}</td><td>${esc(p.jabatan || '-')}</td>${skorCell(p)}</tr>`;
     }).join('');
     pages.push(`<div class="page">${sec('Data Personil Teknisi Elektronika Bandara')}${head2(`BULAN/TAHUN : ${bln}`)}
-      <table class="data"><thead><tr><th style="width:28px">No</th><th>Nama / NIP</th><th>Pangkat/Gol</th><th>Tempat, Tgl Lahir</th><th>Jabatan</th></tr></thead><tbody>${r}</tbody></table>${sign()}</div>`);
+      <table class="data"><thead><tr><th style="width:28px">No</th><th>Nama / NIP</th><th>Pangkat/Gol</th><th>Tempat, Tgl Lahir</th><th>Jabatan</th><th style="width:70px">Skor Performa</th></tr></thead><tbody>${r}</tbody></table>
+      <div style="font-size:9px;margin-top:4px">Skor performa = rata-rata pencapaian target per komponen (0–100). Teknisi: SLA, penyelesaian, inspeksi, PM. Koordinator: persetujuan, ketersediaan alat, eskalasi, jadwal. Komponen tanpa tugas bulan itu tidak dihitung.</div>${sign()}</div>`);
   }
   if (has('inventaris')) {
     const r = data.inventaris.map((d) => `<tr><td style="text-align:center">${d.no}</td><td>${esc(d.nama)}</td><td>${esc(d.merk)}</td><td>${esc(d.serial)}</td><td>${esc(d.lokasi)}</td><td>${esc(d.tahun)}</td><td style="text-align:center">${esc(d.kondisi)}</td><td>${esc(d.ket)}</td></tr>`).join('');
