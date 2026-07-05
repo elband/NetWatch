@@ -9,7 +9,10 @@ import LocationMap from '../components/LocationMap';
 import { DeviceStatusBadge } from '../components/StatusBadge';
 import { promptDialog } from '../components/dialog';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
+import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
 import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity, PerformaRow } from '../types';
+
+interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[]; tips?: string[] }
 
 const PURPLE = '#a78bfa';
 const fmtDur = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}j ${min % 60}m` : `${min}m`);
@@ -29,6 +32,8 @@ const PRIO = ['kritis', 'tinggi', 'sedang'] as const;
 const fmtAge = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}j ${min % 60}m` : `${min}m`);
 
 export default function CoordDashboard() {
+  const { user: authUser } = useAuth();
+  const isScored = hasRole(authUser, 'koordinator') || hasRole(authUser, 'teknisi');
   const [data, setData] = useState<CoordData | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [performa, setPerforma] = useState<PerformaRow[]>([]);
@@ -44,6 +49,8 @@ export default function CoordDashboard() {
   const [toast, setToast] = useState('');
   const [prev, setPrev] = useState<CoordData['performa'] | null>(null);
   const [spark, setSpark] = useState<Record<string, number[]>>({});
+  const [myScore, setMyScore] = useState<MyScore | null>(null);
+  const [showExplain, setShowExplain] = useState(false);
   const month = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
   const prevMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
 
@@ -56,6 +63,7 @@ export default function CoordDashboard() {
     api.get('/locations').then((res) => { setLocations(res.data.locations); }).catch(() => {});
     api.get('/services').then((res) => setServices(res.data.services)).catch(() => {});
     api.get(`/dashboard/monthly?month=${month}`).then((res) => setStats(res.data)).catch(() => {});
+    api.get(`/performa/skor/me?month=${month}`).then((res) => setMyScore(res.data)).catch(() => setMyScore(null));
     api.get('/activities').then((res) => setActivities(res.data.activities)).catch(() => {});
     api.get('/incidents/teknisi-list').then((res) => setTeknisiList(res.data.teknisi || [])).catch(() => {});
   }
@@ -222,6 +230,37 @@ export default function CoordDashboard() {
           💡 Saat insiden lewat <b>{coordSla} menit</b> belum diambil → pencet <span className="text-warn">🔔 Ingatkan</span>. Insiden dihitung <span className="text-danger">telat</span> bila belum diambil teknisi dalam <b>{coordBreach} menit</b>. Skor mulai 100, −10 tiap telat, +2 tiap diambil tepat waktu, +2 tiap pengingat manual.
         </div>
       </div>
+
+      {/* Skor Performa Persen (baru) — komponen manajerial koordinator */}
+      {isScored && myScore && (
+        <div className="nw-card border border-accent/25 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+            <span className="text-[13px] font-bold">🎯 Skor Performa Saya (Persen) · {monthLabel}</span>
+            <button onClick={() => setShowExplain(true)} className="border border-accent/40 text-accent rounded-md px-2.5 py-1 text-[11px] font-semibold hover:bg-accent/10">📖 Lihat Penjelasan</button>
+          </div>
+          <div className="flex items-center gap-5 flex-wrap">
+            <ScoreGauge score={myScore.score} grade={myScore.grade} size={120} />
+            <div className="flex-1 min-w-[240px]"><ScoreBreakdown components={myScore.components} /></div>
+          </div>
+          {myScore.tips && myScore.tips.length > 0 && (
+            <div className="mt-3 rounded-lg border border-accent/30 bg-accent/5 p-2.5 text-[11px]">
+              <span className="font-bold text-accent">💡 Saran: </span><span className="text-text">{myScore.tips[0]}</span>
+              {myScore.tips.length > 1 && <button onClick={() => setShowExplain(true)} className="ml-1 text-accent underline">+{myScore.tips.length - 1} saran lain</button>}
+            </div>
+          )}
+        </div>
+      )}
+      {showExplain && myScore && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowExplain(false)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold">📖 Penjelasan Skor Performa Saya · {monthLabel}</h3>
+              <button onClick={() => setShowExplain(false)} className="text-text2 hover:text-text text-xl leading-none">×</button>
+            </div>
+            <ScoreExplain score={myScore.score} grade={myScore.grade} components={myScore.components} tips={myScore.tips} />
+          </div>
+        </div>
+      )}
 
       {/* Rincian performa koordinator */}
       {showRincian && (() => {
