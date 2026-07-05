@@ -291,15 +291,20 @@ export default function Aset() {
   );
 }
 
-// Modal QR: encode URL /lapor?aset=<token> (publik bisa lapor kerusakan; teknisi login → tombol Input Meter).
+// Modal QR: dua mode — Lapor Kerusakan (/lapor?aset=) & Peminjaman (/pinjam?alat=).
+// Ditempel di box/mesin: publik scan → lapor kerusakan atau ajukan peminjaman alat.
 function QrModal({ asset, onClose }: { asset: PhysicalAsset; onClose: () => void }) {
   const [dataUrl, setDataUrl] = useState('');
-  const url = `${location.origin}/lapor?aset=${asset.qr_token}`;
+  const [mode, setMode] = useState<'lapor' | 'pinjam'>('lapor');
+  const url = mode === 'pinjam'
+    ? `${location.origin}/pinjam?alat=${asset.qr_token}`
+    : `${location.origin}/lapor?aset=${asset.qr_token}`;
+  const caption = mode === 'pinjam' ? 'Scan untuk pinjam alat' : 'Scan untuk lapor kerusakan';
   useEffect(() => { QRCode.toDataURL(url, { width: 320, margin: 2 }).then(setDataUrl).catch(() => {}); }, [url]);
   function print() {
     const w = window.open('', '_blank');
     if (!w) return;
-    w.document.write(`<html><head><title>QR ${asset.name}</title><style>body{font-family:sans-serif;text-align:center;padding:24px}img{width:320px}h2{margin:8px 0 2px}p{color:#555;margin:2px 0;font-size:13px}</style></head><body><h2>${asset.name}</h2><p>${[asset.merk, asset.model].filter(Boolean).join(' ')}${asset.serial ? ` · SN ${asset.serial}` : ''}</p><img src="${dataUrl}"/><p>Scan untuk lapor kerusakan</p></body></html>`);
+    w.document.write(`<html><head><title>QR ${asset.name}</title><style>body{font-family:sans-serif;text-align:center;padding:24px}img{width:320px}h2{margin:8px 0 2px}p{color:#555;margin:2px 0;font-size:13px}</style></head><body><h2>${asset.name}</h2><p>${[asset.merk, asset.model].filter(Boolean).join(' ')}${asset.serial ? ` · SN ${asset.serial}` : ''}</p><img src="${dataUrl}"/><p>${caption}</p></body></html>`);
     w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
   }
   return (
@@ -309,8 +314,13 @@ function QrModal({ asset, onClose }: { asset: PhysicalAsset; onClose: () => void
           <h3 className="text-sm font-bold truncate">🔳 QR — {asset.name}</h3>
           <button className="text-text2 hover:text-text text-lg" onClick={onClose}>×</button>
         </div>
+        <div className="flex gap-1 p-1 bg-bg rounded-lg mb-3 text-xs font-semibold">
+          <button onClick={() => setMode('lapor')} className={`flex-1 rounded-md py-1.5 ${mode === 'lapor' ? 'bg-accent text-bg' : 'text-text2'}`}>🛠️ Lapor Kerusakan</button>
+          <button onClick={() => setMode('pinjam')} className={`flex-1 rounded-md py-1.5 ${mode === 'pinjam' ? 'bg-accent text-bg' : 'text-text2'}`}>📦 Peminjaman</button>
+        </div>
         {dataUrl ? <img src={dataUrl} alt="QR" className="w-56 h-56 mx-auto bg-white rounded-lg p-2" /> : <div className="text-text2 text-sm py-10">Membuat QR…</div>}
-        <div className="text-[10px] text-text2 mt-2 break-all">{url}</div>
+        <div className="text-[11px] text-text2 mt-1">{caption}</div>
+        <div className="text-[10px] text-text2 mt-1 break-all">{url}</div>
         <button onClick={print} className="mt-3 w-full bg-accent text-bg font-semibold rounded-md px-4 py-2 text-sm">🖨️ Cetak Stiker</button>
       </div>
     </div>

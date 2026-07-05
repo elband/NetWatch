@@ -49,6 +49,8 @@ import Notifikasi from './pages/Notifikasi';
 import Skp from './pages/Skp';
 import SkpPublic from './pages/SkpPublic';
 import SkpBuktiPublic from './pages/SkpBuktiPublic';
+import Pinjam from './pages/Pinjam';
+import PeminjamanAlat from './pages/PeminjamanAlat';
 
 function HomeRedirect() {
   const { user } = useAuth();
@@ -75,6 +77,7 @@ export default function App() {
       <Route path="/ttd-pelaksana" element={<TtdPelaksana />} />
       <Route path="/skp-publik" element={<SkpPublic />} />
       <Route path="/skp-bukti" element={<SkpBuktiPublic />} />
+      <Route path="/pinjam" element={<Pinjam />} />
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
           {/* Terbuka untuk semua user terautentikasi */}
@@ -85,6 +88,7 @@ export default function App() {
           <Route path="/devices" element={<Devices />} />
           <Route path="/aset" element={<Aset />} />
           <Route path="/aset-availability" element={<AsetAvailability />} />
+          <Route path="/peminjaman" element={<PeminjamanAlat />} />
           <Route path="/sparepart" element={<Spareparts />} />
           <Route path="/obat-air" element={<ObatAir />} />
           <Route path="/monitor" element={<Monitor />} />

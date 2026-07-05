@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { pool } from '../db/pool.js';
 import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
+import { notifyRoles } from '../services/notify.js';
 
 // Aset non-IP (Fase 2 multi-unit): peralatan fisik AAB (alat berat, kendaraan, air/pompa) dimodelkan sebagai baris
 // `devices` dgn asset_class='physical' — mewarisi insiden, logbook, inspeksi via device_id.
@@ -282,4 +283,73 @@ export async function getPublicAsset(req, res) {
       judul: `Kerusakan ${a.name}`, ruang: a.loc || null,
     },
   });
+}
+
+// ————— Peminjaman peralatan —————
+
+// Publik (tanpa auth): ajukan peminjaman via scan QR di alat.
+export async function submitLoan(req, res) {
+  const token = String(req.params.token || '').trim();
+  if (!/^[a-f0-9]{32}$/.test(token)) return res.status(404).json({ error: 'Kode QR tidak valid.' });
+  const [[a]] = await pool.query("SELECT id, name, unit_id, op_status FROM devices WHERE qr_token = ? AND asset_class = 'physical' LIMIT 1", [token]);
+  if (!a) return res.status(404).json({ error: 'Alat tidak ditemukan.' });
+  const b = req.body || {};
+  if (!b.borrower_name?.trim()) return res.status(400).json({ error: 'Nama peminjam wajib diisi.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.loan_date || '')) return res.status(400).json({ error: 'Tanggal pinjam wajib (YYYY-MM-DD).' });
+  // Tolak bila alat sedang dipinjam (belum dikembalikan).
+  const [[busy]] = await pool.query("SELECT id FROM equipment_loans WHERE device_id = ? AND status IN ('menunggu','dipinjam') LIMIT 1", [a.id]);
+  if (busy) return res.status(409).json({ error: 'Alat ini sedang dalam proses peminjaman/dipinjam. Hubungi koordinator.' });
+  const [r] = await pool.query(
+    `INSERT INTO equipment_loans (device_id, unit_id, borrower_name, borrower_unit, borrower_phone, purpose, loan_date, expected_return)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [a.id, a.unit_id, b.borrower_name.trim(), b.borrower_unit?.trim() || null, b.borrower_phone?.trim() || null,
+     b.purpose?.trim() || null, b.loan_date, /^\d{4}-\d{2}-\d{2}$/.test(b.expected_return || '') ? b.expected_return : null]
+  );
+  try {
+    await notifyRoles(['koordinator', 'admin'], {
+      type: 'loan_request', title: `Permohonan pinjam alat: ${a.name}`,
+      message: `${b.borrower_name.trim()}${b.borrower_unit ? ` (${b.borrower_unit})` : ''} — mohon persetujuan.`,
+      refId: r.insertId, refType: 'loan', link: '/peminjaman',
+    }, { unitId: a.unit_id });
+  } catch { /* abaikan */ }
+  res.status(201).json({ id: r.insertId });
+}
+
+// Daftar peminjaman (koordinator/teknisi) — ter-scope unit. ?status= filter.
+export async function listLoans(req, res) {
+  const uf = unitFilter(req.unitId, 'l.unit_id');
+  const params = [...uf.params];
+  let statusClause = '';
+  if (['menunggu', 'dipinjam', 'dikembalikan', 'ditolak'].includes(req.query.status)) { statusClause = ' AND l.status = ?'; params.push(req.query.status); }
+  const [rows] = await pool.query(
+    `SELECT l.*, d.name AS device_name, d.merk, d.serial
+       FROM equipment_loans l JOIN devices d ON d.id = l.device_id
+      WHERE 1=1${uf.clause}${statusClause}
+      ORDER BY FIELD(l.status,'menunggu','dipinjam','dikembalikan','ditolak'), l.created_at DESC`,
+    params
+  );
+  res.json({ loans: rows });
+}
+
+// Ubah status peminjaman: setujui (dipinjam) / tolak (ditolak) / kembalikan (dikembalikan).
+export async function updateLoan(req, res) {
+  const id = Number(req.params.id);
+  const [[l]] = await pool.query('SELECT * FROM equipment_loans WHERE id = ?', [id]);
+  if (!l || !rowInUnit(l, req.unitId)) return res.status(404).json({ error: 'Peminjaman tidak ditemukan' });
+  const action = req.body.action;
+  const note = req.body.note?.trim() || null;
+  if (action === 'approve') {
+    if (l.status !== 'menunggu') return res.status(400).json({ error: 'Hanya permohonan menunggu yang bisa disetujui.' });
+    await pool.query("UPDATE equipment_loans SET status='dipinjam', approved_by=?, approver_name=?, approved_at=NOW(), note=COALESCE(?,note) WHERE id=?", [req.user.id, req.user.name, note, id]);
+  } else if (action === 'reject') {
+    if (l.status !== 'menunggu') return res.status(400).json({ error: 'Hanya permohonan menunggu yang bisa ditolak.' });
+    await pool.query("UPDATE equipment_loans SET status='ditolak', approved_by=?, approver_name=?, approved_at=NOW(), note=COALESCE(?,note) WHERE id=?", [req.user.id, req.user.name, note, id]);
+  } else if (action === 'return') {
+    if (l.status !== 'dipinjam') return res.status(400).json({ error: 'Hanya alat yang sedang dipinjam yang bisa dikembalikan.' });
+    await pool.query("UPDATE equipment_loans SET status='dikembalikan', returned_at=NOW(), note=COALESCE(?,note) WHERE id=?", [note, id]);
+  } else {
+    return res.status(400).json({ error: 'Aksi tidak valid.' });
+  }
+  const [[updated]] = await pool.query('SELECT * FROM equipment_loans WHERE id = ?', [id]);
+  res.json({ loan: updated });
 }
