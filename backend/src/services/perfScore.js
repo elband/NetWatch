@@ -30,7 +30,7 @@ const TIP_MAP = {
   persetujuan: (c) => `Putuskan pengajuan tim lebih cepat (≤ 2 hari kerja) — baru ${c.num} dari ${c.den} tepat waktu.`,
   uptimeUnit: (c) => `Tingkatkan ketersediaan alat unit (kini ${c.value}%) — percepat pemulihan gangguan & jalankan PM rutin.`,
   eskalasi: (c) => `Tuntaskan insiden yang tereskalasi — baru ${c.num} dari ${c.den} tertangani.`,
-  jadwal: (c) => `Lengkapi jadwal dinas — baru ${c.num} dari ${c.den} hari terisi petugas.`,
+  dokumen: (c) => `Lengkapi & perbarui dokumen unit — baru ${c.num} dari ${c.den} dokumen sah & berlaku (sahkan draft, perbarui yang kadaluarsa).`,
 };
 
 // Gabungkan komponen dgn normalisasi bobot atas komponen AKTIF (value != null).
@@ -149,16 +149,17 @@ export async function scoreKoordinator(userId, start, end, unitId) {
        FROM incidents WHERE coord_alerted=1 AND created_at>=? AND created_at<?${uf.clause}`,
     [start, end, ...uf.params]
   );
-  // 4) Kelengkapan jadwal: hari yang ada shift kerja ÷ hari yang seharusnya (elapsed utk bulan berjalan).
-  const ufs = unitFilter(unitId, 's.unit_id');
-  const [[jd]] = await pool.query(
-    `SELECT COUNT(DISTINCT s.shift_date) d FROM shifts s
-      WHERE s.shift_type IN ('pagi','siang','malam') AND s.shift_date>=? AND s.shift_date<?${ufs.clause}`,
-    [start, end, ...ufs.params]
+  // 4) Kelengkapan dokumen unit: dokumen sah & masih berlaku ÷ total dokumen aktif (bukan arsip).
+  const ufDoc = unitFilter(unitId, 'unit_id');
+  const [[doc]] = await pool.query(
+    `SELECT COUNT(*) total,
+            SUM(status IN ('aktif','disetujui') AND (tanggal_review IS NULL OR tanggal_review >= CURDATE())) ok
+       FROM documents WHERE status <> 'arsip'${ufDoc.clause}`,
+    ufDoc.params
   );
-  const expectedDays = expectedDaysInRange(start, end);
+  const docTotal = Number(doc.total) || 0, docOk = Number(doc.ok) || 0;
 
-  const esMasuk = Number(es.masuk) || 0, esSelesai = Number(es.selesai) || 0, jdDays = Number(jd.d) || 0;
+  const esMasuk = Number(es.masuk) || 0, esSelesai = Number(es.selesai) || 0;
   return combine([
     { key: 'persetujuan', label: 'Kecepatan Persetujuan', weight: 30, value: pct(apOnTime, apTotal), num: apOnTime, den: apTotal,
       note: apTotal ? `${apOnTime} dari ${apTotal} pengajuan diputus ≤ 2 hari kerja` : 'Tidak ada pengajuan diputus bulan ini' },
@@ -166,20 +167,9 @@ export async function scoreKoordinator(userId, start, end, unitId) {
       note: upBase > 0 ? 'Rata-rata ketersediaan perangkat unit dari pemantauan' : 'Belum ada data pemantauan' },
     { key: 'eskalasi', label: 'Penanganan Eskalasi', weight: 25, value: pct(esSelesai, esMasuk), num: esSelesai, den: esMasuk,
       note: esMasuk ? `${esSelesai} dari ${esMasuk} insiden eskalasi tertangani` : 'Tidak ada eskalasi bulan ini' },
-    { key: 'jadwal', label: 'Kelengkapan Jadwal Dinas', weight: 15, value: pct(jdDays, expectedDays), num: Math.min(jdDays, expectedDays), den: expectedDays,
-      note: `${Math.min(jdDays, expectedDays)} dari ${expectedDays} hari sudah terisi jadwal` },
+    { key: 'dokumen', label: 'Kelengkapan Dokumen', weight: 15, value: pct(docOk, docTotal), num: docOk, den: docTotal,
+      note: docTotal ? `${docOk} dari ${docTotal} dokumen sah & masih berlaku` : 'Belum ada dokumen di unit' },
   ]);
-}
-
-// Jumlah hari yang "seharusnya" ada dalam rentang [start,end): untuk bulan berjalan
-// hanya sampai hari ini (jangan hukum hari yang belum tiba).
-function expectedDaysInRange(start, end) {
-  const s = new Date(`${start}T00:00:00`);
-  const e = new Date(`${end}T00:00:00`);
-  const now = new Date();
-  const cap = now < e ? now : e;
-  if (cap <= s) return 0;
-  return Math.max(0, Math.round((cap - s) / 86400000));
 }
 
 // Skor sesuai peran. roles: array/string. Koordinator diutamakan bila punya kedua peran.
