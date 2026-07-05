@@ -1050,3 +1050,25 @@ CREATE TABLE IF NOT EXISTS water_chemical_usage (
   INDEX idx_wcu_unit_date (unit_id, usage_date),
   CONSTRAINT fk_wcu_chem FOREIGN KEY (chemical_id) REFERENCES water_chemicals(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+-- Peminjaman peralatan (AAB): pengajuan publik via scan QR di alat.
+CREATE TABLE IF NOT EXISTS equipment_loans (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  unit_id INT DEFAULT NULL,
+  borrower_name VARCHAR(150) NOT NULL,
+  borrower_unit VARCHAR(150) DEFAULT NULL,
+  borrower_phone VARCHAR(30) DEFAULT NULL,
+  purpose VARCHAR(255) DEFAULT NULL,
+  loan_date DATE NOT NULL,
+  expected_return DATE DEFAULT NULL,
+  status ENUM('menunggu','dipinjam','dikembalikan','ditolak') NOT NULL DEFAULT 'menunggu',
+  approved_by INT DEFAULT NULL,
+  approver_name VARCHAR(120) DEFAULT NULL,
+  approved_at DATETIME DEFAULT NULL,
+  returned_at DATETIME DEFAULT NULL,
+  note VARCHAR(255) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_el_device (device_id), INDEX idx_el_unit (unit_id), INDEX idx_el_status (status),
+  CONSTRAINT fk_el_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

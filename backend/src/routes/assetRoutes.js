@@ -9,7 +9,7 @@ import {
   listAssets, getAsset, createAsset, updateAsset, deleteAsset, setAssetStatus, regenerateQr,
   listReadings, latestReadings, addReading,
   listMetricTypes, createMetricType, updateMetricType, deleteMetricType,
-  getPublicAsset,
+  getPublicAsset, submitLoan, listLoans, updateLoan,
 } from '../controllers/assetController.js';
 import {
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
@@ -39,6 +39,7 @@ function withReadingPhoto(req, res, next) {
 
 // ——— Publik (tanpa auth): landing scan QR ———
 router.get('/public/:token', getPublicAsset);
+router.post('/loan/:token', submitLoan); // ajukan peminjaman via scan QR (publik)
 
 // ——— Terlindungi ———
 router.use(requireAuth, unitScope);
@@ -65,6 +66,10 @@ router.post('/facilities', requireRole('admin', 'koordinator'), createFacility);
 router.put('/facilities/:id', requireRole('admin', 'koordinator'), updateFacility);
 router.delete('/facilities/:id', requireRole('admin', 'koordinator'), deleteFacility);
 router.get('/procurement', procurement);
+
+// Peminjaman peralatan (literal → sebelum '/:id'). List semua peran; kelola koordinator/admin.
+router.get('/loans', listLoans);
+router.patch('/loans/:id', requireRole('admin', 'koordinator'), updateLoan);
 
 // Aset fisik
 router.get('/', listAssets);
