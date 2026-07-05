@@ -84,8 +84,8 @@ export default function PmModal({ asset, metricTypes, onClose, onSaved }: {
                 </div>
                 <div className="text-[10px] text-text2 mt-1">
                   {p.trigger_type === 'hours'
-                    ? (s.incomplete ? 'Belum ada pembacaan meter.' : (s.due ? `Terlewat ${Math.abs(Math.round(s.remaining))} jam (kini ${Math.round(s.current)})` : `Sisa ${Math.round(s.remaining)} jam (kini ${Math.round(s.current)} / ${Math.round(s.due_at_value)})`))
-                    : (s.incomplete ? 'Interval belum lengkap.' : (s.due ? `Terlewat ${Math.abs(s.remaining_days)} hari` : `Jatuh tempo ${s.due_date} (${s.remaining_days} hari lagi)`))}
+                    ? (s.incomplete ? 'Belum ada pembacaan meter.' : (s.due ? `Terlewat ${Math.abs(Math.round(s.remaining ?? 0))} jam (kini ${Math.round(s.current ?? 0)})` : `Sisa ${Math.round(s.remaining ?? 0)} jam (kini ${Math.round(s.current ?? 0)} / ${Math.round(s.due_at_value ?? 0)})`))
+                    : (s.incomplete ? 'Interval belum lengkap.' : (s.due ? `Terlewat ${Math.abs(s.remaining_days ?? 0)} hari` : `Jatuh tempo ${s.due_date} (${s.remaining_days ?? 0} hari lagi)`))}
                 </div>
 
                 <div className="mt-2 flex items-center gap-1.5">
