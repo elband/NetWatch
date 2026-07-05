@@ -3,10 +3,10 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import PerformaDetailModal from '../components/PerformaDetailModal';
-import ScoreGauge, { ScoreBreakdown, type ScoreComponent } from '../components/ScoreGauge';
+import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
 import type { PerformaDashboard } from '../types';
 
-interface SkorRow { userId: number; name: string; jabatan: string | null; emoji: string | null; role: 'teknisi' | 'koordinator'; score: number | null; grade: string; components: ScoreComponent[] }
+interface SkorRow { userId: number; name: string; jabatan: string | null; emoji: string | null; role: 'teknisi' | 'koordinator'; score: number | null; grade: string; components: ScoreComponent[]; tips?: string[] }
 
 function recentMonths(count = 12) {
   const now = new Date();
@@ -86,6 +86,7 @@ export default function Performa() {
   const [data, setData] = useState<PerformaDashboard | null>(null);
   const [detailFor, setDetailFor] = useState<number | null>(null);
   const [skor, setSkor] = useState<SkorRow[]>([]);
+  const [explainFor, setExplainFor] = useState<SkorRow | null>(null);
 
   useEffect(() => {
     const q = new URLSearchParams();
@@ -126,14 +127,27 @@ export default function Performa() {
           <div className="text-[11px] text-slate-400 mb-3">Rata-rata pencapaian target per komponen · {month ? months.find((m) => m.value === month)?.label : 'bulan berjalan'}. Komponen tanpa tugas bulan ini tidak dihitung.</div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             {skor.map((p) => (
-              <div key={p.userId} className="rounded-lg border border-slate-700/70 bg-[#0b1220] p-3 flex flex-col items-center">
+              <button key={p.userId} onClick={() => setExplainFor(p)} className="text-left rounded-lg border border-slate-700/70 bg-[#0b1220] p-3 flex flex-col items-center hover:border-accent/50 hover:bg-[#0d1526] transition-colors">
                 <div className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: p.role === 'koordinator' ? '#a78bfa' : '#38bdf8' }}>{p.role}</div>
                 <ScoreGauge score={p.score} grade={p.grade} size={112} />
                 <div className="text-[12px] font-semibold text-slate-100 mt-1.5 text-center">{p.emoji ? `${p.emoji} ` : ''}{p.name}</div>
                 {p.jabatan && <div className="text-[10px] text-slate-500 mb-2">{p.jabatan}</div>}
                 <div className="w-full mt-1"><ScoreBreakdown components={p.components} /></div>
-              </div>
+                <div className="text-[10px] text-accent mt-2 font-semibold">📖 Klik untuk penjelasan & saran</div>
+              </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {explainFor && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setExplainFor(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto text-text" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold">📖 Penjelasan Skor · {explainFor.emoji ? `${explainFor.emoji} ` : ''}{explainFor.name}</h3>
+              <button onClick={() => setExplainFor(null)} className="text-text2 hover:text-text text-xl leading-none">×</button>
+            </div>
+            <ScoreExplain score={explainFor.score} grade={explainFor.grade} components={explainFor.components} tips={explainFor.tips} />
           </div>
         </div>
       )}
