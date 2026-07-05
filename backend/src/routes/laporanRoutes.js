@@ -411,4 +411,76 @@ router.get('/aab', requireRole('koordinator', 'admin'), async (req, res) => {
   res.json(await buildAabReport(req.query.month, req.unitId));
 });
 
+// ===== Laporan Bulanan Unjuk Hasil / Kinerja (ELB — unit jaringan) =====
+export async function buildKinerjaReport(monthIn, unitId) {
+  const now = new Date();
+  const month = /^\d{4}-\d{2}$/.test(monthIn) ? monthIn : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [y, m] = month.split('-').map(Number);
+  const p2 = (n) => String(n).padStart(2, '0');
+  const start = `${y}-${p2(m)}-01`;
+  const end = `${m === 12 ? y + 1 : y}-${p2(m === 12 ? 1 : m + 1)}-01`;
+  const lastDay = `${y}-${p2(m)}-${p2(new Date(y, m, 0).getDate())}`;
+  const monthName = `${BULAN[m - 1]} ${y}`;
+  const uf = unitFilter(unitId);            // incidents.unit_id
+  const ufd = unitFilter(unitId, 'd.unit_id');
+
+  // I. KPI insiden
+  const [[inc]] = await pool.query(
+    `SELECT COUNT(*) total, SUM(status='selesai') selesai, SUM(status<>'selesai') aktif,
+            SUM(priority='kritis') kritis, SUM(priority='tinggi') tinggi, SUM(priority='sedang') sedang
+       FROM incidents WHERE created_at>=? AND created_at<?${uf.clause}`, [start, end, ...uf.params]);
+  const [[mt]] = await pool.query(
+    `SELECT ROUND(AVG(duration_min)) mttr FROM incidents WHERE status='selesai' AND resolved_at>=? AND resolved_at<?${uf.clause}`, [start, end, ...uf.params]);
+  const [[rp]] = await pool.query(
+    `SELECT ROUND(AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at))) avgResp,
+            ROUND(100*AVG(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?),1) onTimePct
+       FROM incidents WHERE taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${uf.clause}`, [SLA_MINUTES, start, end, ...uf.params]);
+
+  // II. Uptime/ketersediaan per perangkat (rollup harian)
+  const [devRows] = await pool.query(
+    `SELECT d.id, d.name, d.ip, d.loc,
+            COALESCE(SUM(u.up_samples),0) up_s, COALESCE(SUM(u.samples),0) tot_s,
+            COALESCE(SUM(u.down_seconds),0) down_sec, COALESCE(SUM(u.incidents),0) inc
+       FROM devices d LEFT JOIN device_uptime_daily u ON u.device_id=d.id AND u.day BETWEEN ? AND ?
+      WHERE d.asset_class='network'${ufd.clause}
+      GROUP BY d.id ORDER BY d.name`, [start, lastDay, ...ufd.params]);
+  const devices = devRows.map((d) => ({ id: d.id, name: d.name, ip: d.ip, loc: d.loc, down_sec: Number(d.down_sec), inc: Number(d.inc), uptime: Number(d.tot_s) > 0 ? Math.round(1000 * d.up_s / d.tot_s) / 10 : null }));
+  const withU = devices.filter((d) => d.uptime != null);
+  const avgUptime = withU.length ? Math.round(10 * withU.reduce((s, d) => s + d.uptime, 0) / withU.length) / 10 : null;
+  const worst = [...withU].sort((a, b) => a.uptime - b.uptime).slice(0, 5);
+
+  // III. Perangkat/layanan paling sering bermasalah
+  const [topIssues] = await pool.query(
+    `SELECT COALESCE(NULLIF(device_name,''),'-') nama, COUNT(*) n FROM incidents
+      WHERE created_at>=? AND created_at<?${uf.clause} GROUP BY device_name ORDER BY n DESC LIMIT 8`, [start, end, ...uf.params]);
+
+  // IV. Kinerja teknisi (ranking)
+  const uft = unitFilter(unitId);
+  const [techs] = await pool.query(`SELECT id, name, jabatan FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'"teknisi"'))${uft.clause} ORDER BY name`, uft.params);
+  const teknisi = [];
+  for (const t of techs) { const mm = await metricsFor(t.id, start, end); teknisi.push({ name: t.name, jabatan: t.jabatan, done: mm.done, onTime: mm.onTime, taken: mm.taken, avgResp: mm.avgResp, avgDur: mm.avgDur, pm: mm.pm, dokumentasi: mm.dokumentasi, inspections: mm.inspections, score: mm.score, grade: mm.grade }); }
+  teknisi.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  // V. Pemeliharaan
+  const [[maint]] = await pool.query(`SELECT SUM(status='selesai') done, COUNT(*) total FROM equipment_maintenance WHERE plan_month=?${uf.clause}`, [month, ...uf.params]);
+  const [[insp]] = await pool.query(`SELECT COUNT(*) c FROM equipment_inspections WHERE inspect_date>=? AND inspect_date<?${uf.clause}`, [start, end, ...uf.params]);
+
+  const selesai = Number(inc.selesai) || 0;
+  return {
+    month, monthName,
+    kpi: {
+      total: inc.total, selesai, aktif: Number(inc.aktif) || 0,
+      selesaiPct: inc.total ? Math.round(1000 * selesai / inc.total) / 10 : null,
+      mttr: mt.mttr, avgResp: rp.avgResp, onTimePct: rp.onTimePct, avgUptime,
+      kritis: Number(inc.kritis) || 0, tinggi: Number(inc.tinggi) || 0, sedang: Number(inc.sedang) || 0,
+      jumlahPerangkat: devices.length, maintDone: Number(maint.done) || 0, maintTotal: Number(maint.total) || 0, inspeksi: insp.c,
+    },
+    worst, topIssues, teknisi,
+  };
+}
+
+router.get('/kinerja', requireRole('koordinator', 'admin'), async (req, res) => {
+  res.json(await buildKinerjaReport(req.query.month, req.unitId));
+});
+
 export default router;

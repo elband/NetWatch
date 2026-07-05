@@ -19,6 +19,7 @@ import AsetAvailability from './pages/AsetAvailability';
 import Spareparts from './pages/Spareparts';
 import ObatAir from './pages/ObatAir';
 import LaporanAab from './pages/LaporanAab';
+import LaporanKinerja from './pages/LaporanKinerja';
 import Monitor from './pages/Monitor';
 import DeviceMap from './pages/DeviceMap';
 import SlaReport from './pages/SlaReport';
@@ -116,6 +117,7 @@ export default function App() {
             <Route path="/surat" element={<SuratKeluar />} />
             <Route path="/laporan-bulanan" element={<LaporanBulanan />} />
             <Route path="/laporan-aab" element={<LaporanAab />} />
+            <Route path="/laporan-kinerja" element={<LaporanKinerja />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/pelaporan-qr" element={<PelaporanQR />} />
             <Route path="/skp" element={<Skp />} />
