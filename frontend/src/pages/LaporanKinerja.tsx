@@ -40,7 +40,6 @@ export default function LaporanKinerja() {
 
   const card = 'bg-surface border border-border rounded-xl p-4';
   const upCls = (v: number | null) => v == null ? 'text-text2' : v >= 99 ? 'text-success' : v >= 95 ? 'text-warn' : 'text-danger';
-  const gradeCls = (g: string) => g === 'A' ? 'text-success' : g === 'B' ? 'text-accent' : g === 'C' ? 'text-warn' : 'text-danger';
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
@@ -105,28 +104,8 @@ export default function LaporanKinerja() {
             )}
           </div>
 
-          {/* Kinerja teknisi */}
-          <div className={card}>
-            <div className="text-sm font-bold mb-2">IV. Kinerja Teknisi</div>
-            {data.teknisi.length === 0 ? <div className="text-[12px] text-text2">Belum ada teknisi pada unit ini.</div> : (
-              <div className="overflow-x-auto"><table className="w-full text-xs">
-                <thead><tr className="text-left text-text2 border-b border-border"><th className="px-2 py-1.5">Teknisi</th><th className="px-2 py-1.5">Ditangani</th><th className="px-2 py-1.5">On-time</th><th className="px-2 py-1.5">Respon</th><th className="px-2 py-1.5">Maint/Inspeksi</th><th className="px-2 py-1.5">Skor</th></tr></thead>
-                <tbody>{data.teknisi.map((t, i) => (
-                  <tr key={i} className="border-b border-border/50">
-                    <td className="px-2 py-1.5"><div className="font-medium">{t.name}</div>{t.jabatan && <div className="text-[10px] text-text2">{t.jabatan}</div>}</td>
-                    <td className="px-2 py-1.5">{t.done}{t.taken ? <span className="text-text2"> / {t.taken} diambil</span> : ''}</td>
-                    <td className="px-2 py-1.5">{t.taken ? `${Math.round(100 * t.onTime / t.taken)}%` : '–'}</td>
-                    <td className="px-2 py-1.5">{fmtMin(t.avgResp)}</td>
-                    <td className="px-2 py-1.5">{t.pm} / {t.inspections}</td>
-                    <td className={`px-2 py-1.5 font-bold ${gradeCls(t.grade)}`}>{t.score} <span className="text-[10px]">({t.grade})</span></td>
-                  </tr>
-                ))}</tbody>
-              </table></div>
-            )}
-          </div>
-
           <div className="text-[10px] text-text2">
-            Uptime & downtime dari rollup pemantauan harian. MTTR = rata-rata durasi insiden hingga tuntas · Respon = rata-rata dari terbit hingga diambil teknisi · Skor kinerja mengikuti halaman Performa Teknisi.
+            Uptime & downtime dari rollup pemantauan harian. MTTR = rata-rata durasi insiden hingga tuntas · Respon = rata-rata dari terbit hingga diambil teknisi.
           </div>
         </div>
       )}
