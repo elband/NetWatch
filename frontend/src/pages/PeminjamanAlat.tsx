@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+
+interface AssetLite { id: number; name: string; merk: string | null; model: string | null; serial: string | null; loc: string | null; qr_token: string | null }
 
 // Kelola peminjaman peralatan AAB: setujui / tolak permohonan, dan tandai kembali.
 interface Loan {
@@ -32,6 +35,7 @@ export default function PeminjamanAlat() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [showQr, setShowQr] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -52,9 +56,14 @@ export default function PeminjamanAlat() {
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
-      <div className="mb-4">
-        <h1 className="text-lg font-bold">📦 Peminjaman Peralatan</h1>
-        <p className="text-[12px] text-text2">Permohonan peminjaman alat masuk lewat QR yang ditempel di alat. Setujui, tolak, atau tandai alat sudah dikembalikan.</p>
+      <div className="mb-4 flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-lg font-bold">📦 Peminjaman Peralatan</h1>
+          <p className="text-[12px] text-text2">Permohonan peminjaman alat masuk lewat QR yang ditempel di alat. Setujui, tolak, atau tandai alat sudah dikembalikan.</p>
+        </div>
+        {canManage && (
+          <button onClick={() => setShowQr(true)} className="shrink-0 bg-accent text-bg font-semibold rounded-md px-4 py-2 text-sm">🔳 QR Peminjaman</button>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4">
@@ -117,6 +126,60 @@ export default function PeminjamanAlat() {
           })}
         </div>
       )}
+
+      {showQr && <QrPinjamModal onClose={() => setShowQr(false)} />}
+    </div>
+  );
+}
+
+// Pilih alat → tampilkan & cetak QR peminjaman (URL publik /pinjam?alat=<token>).
+function QrPinjamModal({ onClose }: { onClose: () => void }) {
+  const [assets, setAssets] = useState<AssetLite[]>([]);
+  const [sel, setSel] = useState<AssetLite | null>(null);
+  const [dataUrl, setDataUrl] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/aset').then((r) => {
+      const list: AssetLite[] = (r.data.assets || []).filter((a: AssetLite) => a.qr_token);
+      setAssets(list);
+      if (list.length) setSel(list[0]);
+    }).catch(() => setAssets([])).finally(() => setLoading(false));
+  }, []);
+
+  const url = sel ? `${location.origin}/pinjam?alat=${sel.qr_token}` : '';
+  useEffect(() => { if (url) QRCode.toDataURL(url, { width: 320, margin: 2 }).then(setDataUrl).catch(() => setDataUrl('')); }, [url]);
+
+  function print() {
+    if (!sel || !dataUrl) return;
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<html><head><title>QR Peminjaman ${sel.name}</title><style>body{font-family:sans-serif;text-align:center;padding:24px}img{width:320px}h2{margin:8px 0 2px}p{color:#555;margin:2px 0;font-size:13px}</style></head><body><h2>${sel.name}</h2><p>${[sel.merk, sel.model].filter(Boolean).join(' ')}${sel.serial ? ` · SN ${sel.serial}` : ''}</p><img src="${dataUrl}"/><p>Scan untuk pinjam alat</p></body></html>`);
+    w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 text-center" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold">🔳 QR Peminjaman Alat</h3>
+          <button className="text-text2 hover:text-text text-lg" onClick={onClose}>×</button>
+        </div>
+        {loading ? <div className="text-text2 text-sm py-10">Memuat aset…</div> : assets.length === 0 ? (
+          <div className="text-text2 text-sm py-8">Belum ada aset ber-QR. Tambahkan aset & buat QR-nya di halaman <b>Peralatan</b> dulu.</div>
+        ) : (
+          <>
+            <select className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm mb-3"
+              value={sel?.id ?? ''} onChange={(e) => setSel(assets.find((a) => a.id === Number(e.target.value)) || null)}>
+              {assets.map((a) => <option key={a.id} value={a.id}>{a.name}{a.serial ? ` · SN ${a.serial}` : ''}</option>)}
+            </select>
+            {dataUrl ? <img src={dataUrl} alt="QR" className="w-56 h-56 mx-auto bg-white rounded-lg p-2" /> : <div className="text-text2 text-sm py-10">Membuat QR…</div>}
+            <div className="text-[11px] text-text2 mt-1">Scan untuk mengisi form peminjaman</div>
+            <div className="text-[10px] text-text2 mt-1 break-all">{url}</div>
+            <button onClick={print} className="mt-3 w-full bg-accent text-bg font-semibold rounded-md px-4 py-2 text-sm">🖨️ Cetak Stiker</button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
