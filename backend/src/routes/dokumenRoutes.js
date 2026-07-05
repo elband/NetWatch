@@ -5,15 +5,15 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { unitScope, unitFilterShared, rowInUnit } from '../middleware/unitScope.js';
+import { unitScope, unitFilter, rowInUnit } from '../middleware/unitScope.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 const router = Router();
 router.use(requireAuth);
-// Scoping multi-unit. Dokumen bersifat global-capable: unit_id NULL = dokumen
-// bersama (terlihat semua unit) — karena itu list memakai unitFilterShared.
+// Scoping multi-unit KETAT: setiap dokumen milik satu unit; tiap unit hanya melihat
+// dokumennya sendiri (tidak ada dokumen "bersama" lintas unit).
 router.use(unitScope);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +47,7 @@ async function syncTags(id, tags) {
 }
 // unitId: hanya koordinator unit tsb (+ super admin). null = semua (dokumen global).
 async function notifyCoords(message, unitId = null) {
+  // Penerima notifikasi: koordinator unit tsb + super admin (unit NULL). Bukan filter visibilitas data.
   const clause = unitId != null ? ' AND (unit_id IS NULL OR unit_id = ?)' : '';
   const [c] = await pool.query(`SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"'))${clause}`, unitId != null ? [unitId] : []);
   for (const x of c) {
@@ -57,7 +58,7 @@ async function notifyCoords(message, unitId = null) {
 
 // ===== Kategori =====
 router.get('/categories', async (req, res) => {
-  const uf = unitFilterShared(req.unitId, 'd.unit_id');
+  const uf = unitFilter(req.unitId, 'd.unit_id');
   const [rows] = await pool.query(`SELECT c.*, (SELECT COUNT(*) FROM documents d WHERE d.kategori=c.name${uf.clause}) AS jumlah FROM document_categories c ORDER BY sort_order, name`, uf.params);
   res.json({ categories: rows });
 });
@@ -73,8 +74,8 @@ router.delete('/categories/:id', requireRole('admin'), async (req, res) => {
 
 // ===== Dashboard statistik =====
 router.get('/stats', async (req, res) => {
-  const uf = unitFilterShared(req.unitId); // kolom polos unit_id
-  const ufd = unitFilterShared(req.unitId, 'd.unit_id');
+  const uf = unitFilter(req.unitId); // kolom polos unit_id
+  const ufd = unitFilter(req.unitId, 'd.unit_id');
   const [[s]] = await pool.query(
     `SELECT COUNT(*) total,
             SUM(kategori='SOP') sop,
@@ -105,7 +106,7 @@ router.get('/stats', async (req, res) => {
 router.get('/', async (req, res) => {
   let sql = 'SELECT * FROM documents WHERE 1=1';
   const params = [];
-  const uf = unitFilterShared(req.unitId);
+  const uf = unitFilter(req.unitId);
   sql += uf.clause; params.push(...uf.params);
   if (req.query.q) { const k = `%${req.query.q}%`; sql += ' AND (judul LIKE ? OR deskripsi LIKE ? OR tags LIKE ? OR nomor LIKE ? OR catatan_revisi LIKE ?)'; params.push(k, k, k, k, k); }
   if (req.query.kategori) { sql += ' AND kategori=?'; params.push(req.query.kategori); }
@@ -120,12 +121,12 @@ router.get('/', async (req, res) => {
 
 // Bookmark & riwayat milik sendiri.
 router.get('/favorites', async (req, res) => {
-  const uf = unitFilterShared(req.unitId, 'd.unit_id');
+  const uf = unitFilter(req.unitId, 'd.unit_id');
   const [rows] = await pool.query(`SELECT d.* FROM document_favorites f JOIN documents d ON d.id=f.document_id WHERE f.user_id=?${uf.clause} ORDER BY f.id DESC`, [req.user.id, ...uf.params]);
   res.json({ documents: rows });
 });
 router.get('/recent', async (req, res) => {
-  const uf = unitFilterShared(req.unitId, 'd.unit_id');
+  const uf = unitFilter(req.unitId, 'd.unit_id');
   const [rows] = await pool.query(`SELECT d.*, MAX(v.created_at) last_view FROM document_views v JOIN documents d ON d.id=v.document_id WHERE v.user_id=?${uf.clause} GROUP BY d.id ORDER BY last_view DESC LIMIT 15`, [req.user.id, ...uf.params]);
   res.json({ documents: rows });
 });
@@ -135,7 +136,7 @@ router.post('/assistant', async (req, res) => {
   const q = String(req.body.q || '').trim();
   if (!q) return res.json({ answer: 'Silakan ketik pertanyaan, mis. "Bagaimana prosedur restart FIDS?"', docs: [] });
   const terms = q.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter((t) => t.length > 2);
-  const uf = unitFilterShared(req.unitId);
+  const uf = unitFilter(req.unitId);
   const [rows] = await pool.query(`SELECT id, judul, kategori, deskripsi, tags, status FROM documents WHERE status IN ('aktif','disetujui')${uf.clause} LIMIT 500`, uf.params);
   const scored = rows.map((d) => {
     const hay = `${d.judul} ${d.kategori} ${d.deskripsi || ''} ${d.tags || ''}`.toLowerCase();

@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { unitScope, unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
+import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { computeServices } from '../services/servicesStatus.js';
 
 const router = Router();
@@ -120,7 +120,7 @@ router.delete('/services/:id', requireRole('admin'), async (req, res) => {
 // ===================== LOCATIONS / PETA GANGGUAN =====================
 // Termasuk jumlah insiden aktif per lokasi.
 router.get('/locations', async (req, res) => {
-  const uf = unitFilterShared(req.unitId, 'l.unit_id'); // NULL = lokasi milik bersama
+  const uf = unitFilter(req.unitId, 'l.unit_id'); // NULL = lokasi milik bersama
   const ufi = unitFilter(req.unitId, 'i.unit_id');
   const [rows] = await pool.query(
     `SELECT l.*, (SELECT COUNT(*) FROM incidents i WHERE i.location_id = l.id AND i.status != 'selesai'${ufi.clause}) AS active_count
@@ -148,8 +148,9 @@ router.post('/locations/map', requireRole('admin'), (req, res) => {
 router.post('/locations', requireRole('admin'), async (req, res) => {
   const { name, icon, sortOrder } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Nama lokasi wajib diisi' });
-  // Master bersama: NULL = global, hanya terjadi saat admin mode "Semua Unit".
+  // Isolasi ketat: lokasi selalu milik satu unit. Admin mode "Semua Unit" harus pilih unit.
   const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const [r] = await pool.query(
     'INSERT INTO locations (unit_id, name, icon, sort_order) VALUES (?, ?, ?, ?)',
     [unitId, name.trim(), icon || '📍', sortOrder || 0]
@@ -159,7 +160,7 @@ router.post('/locations', requireRole('admin'), async (req, res) => {
 
 router.put('/locations/:id', requireRole('admin'), async (req, res) => {
   const { name, icon, sortOrder } = req.body;
-  const uf = unitFilterShared(req.unitId);
+  const uf = unitFilter(req.unitId);
   await pool.query(
     `UPDATE locations SET name=COALESCE(?,name), icon=COALESCE(?,icon), sort_order=COALESCE(?,sort_order) WHERE id=?${uf.clause}`,
     [name || null, icon || null, sortOrder ?? null, req.params.id, ...uf.params]
@@ -171,7 +172,7 @@ router.put('/locations/:id', requireRole('admin'), async (req, res) => {
 // Peta live: kirim lat/lng (null = hapus). Legacy gambar: kirim mapX/mapY persen 0–100.
 router.put('/locations/:id/marker', requireRole('admin'), async (req, res) => {
   const { mapX, mapY, lat, lng } = req.body;
-  const uf = unitFilterShared(req.unitId);
+  const uf = unitFilter(req.unitId);
   if (lat !== undefined || lng !== undefined) {
     const la = lat == null ? null : Number(lat);
     const ln = lng == null ? null : Number(lng);
@@ -185,7 +186,7 @@ router.put('/locations/:id/marker', requireRole('admin'), async (req, res) => {
 });
 
 router.delete('/locations/:id', requireRole('admin'), async (req, res) => {
-  const uf = unitFilterShared(req.unitId);
+  const uf = unitFilter(req.unitId);
   await pool.query(`DELETE FROM locations WHERE id = ?${uf.clause}`, [req.params.id, ...uf.params]);
   res.json({ ok: true });
 });
@@ -193,7 +194,7 @@ router.delete('/locations/:id', requireRole('admin'), async (req, res) => {
 // ===================== DEVICE TYPES / TIPE PERANGKAT =====================
 // Dipakai sebagai sumber dropdown "Tipe" pada form perangkat (variabel terhubung).
 router.get('/device-types', async (req, res) => {
-  const uf = unitFilterShared(req.unitId); // NULL = tipe milik bersama
+  const uf = unitFilter(req.unitId); // NULL = tipe milik bersama
   const [rows] = await pool.query(`SELECT * FROM device_types WHERE 1=1${uf.clause} ORDER BY sort_order, name`, uf.params);
   res.json({ deviceTypes: rows });
 });
@@ -201,8 +202,9 @@ router.get('/device-types', async (req, res) => {
 router.post('/device-types', requireRole('admin'), async (req, res) => {
   const { name, icon, sortOrder } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Nama tipe wajib diisi' });
-  // Master bersama: NULL = global, hanya terjadi saat admin mode "Semua Unit".
+  // Isolasi ketat: tipe perangkat selalu milik satu unit. Admin "Semua Unit" harus pilih unit.
   const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   try {
     const [r] = await pool.query(
       'INSERT INTO device_types (unit_id, name, icon, sort_order) VALUES (?, ?, ?, ?)',
@@ -217,7 +219,7 @@ router.post('/device-types', requireRole('admin'), async (req, res) => {
 
 router.put('/device-types/:id', requireRole('admin'), async (req, res) => {
   const { name, icon, sortOrder } = req.body;
-  const uf = unitFilterShared(req.unitId);
+  const uf = unitFilter(req.unitId);
   try {
     // Bila nama diubah, sinkronkan perangkat yang masih memakai nama lama.
     if (name?.trim()) {

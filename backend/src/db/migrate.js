@@ -208,15 +208,17 @@ async function migrate() {
   }
   const [[elb]] = await conn.query("SELECT id FROM units WHERE code = 'ELB' LIMIT 1");
 
-  // Tabel operasional: wajib ber-unit (backfill ke ELB).
-  // Tabel master global (locations, device_types, documents, wa_log): unit_id NULL = milik bersama, TANPA backfill.
+  // Tabel operasional & master: wajib ber-unit (backfill baris NULL lama ke ELB).
+  // ISOLASI KETAT: locations, device_types, documents kini per-unit (tiap unit hanya
+  // melihat miliknya) — data lama = ELB. Hanya wa_log yang tetap global (log WA sistem).
   const UNIT_SCOPED = [
     'users', 'devices', 'incidents', 'shifts', 'attendance', 'absence_reviews', 'leave_requests',
     'maintenance_windows', 'public_reports', 'pengajuan_diklat', 'diklat_history',
     'kegiatan_non_rutin', 'nota_dinas', 'activities', 'equipment_inspections',
     'equipment_maintenance', 'equipment_poweron', 'skp', 'assets', 'services', 'rooms',
+    'locations', 'device_types', 'documents',
   ];
-  const UNIT_GLOBAL = ['locations', 'device_types', 'documents', 'wa_log'];
+  const UNIT_GLOBAL = ['wa_log'];
   for (const table of [...UNIT_SCOPED, ...UNIT_GLOBAL]) {
     await addColumnIfMissing(conn, env.db.database, table, 'unit_id', 'INT DEFAULT NULL');
     await addIndexIfMissing(conn, env.db.database, table, `idx_${table}_unit`, '(unit_id)');
