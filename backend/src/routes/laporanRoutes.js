@@ -454,6 +454,29 @@ export async function buildKinerjaReport(monthIn, unitId) {
     `SELECT COALESCE(NULLIF(device_name,''),'-') nama, COUNT(*) n FROM incidents
       WHERE created_at>=? AND created_at<?${uf.clause} GROUP BY device_name ORDER BY n DESC LIMIT 8`, [start, end, ...uf.params]);
 
+  // IV. Daftar SEMUA aset unit + status. Aturan: perangkat TANPA IP dianggap "aktif",
+  // kecuali ada insiden aktif (mis. dari laporan publik) → "rusak". Perangkat ber-IP ikut
+  // pemantauan (uptime/ping); insiden aktif menurunkan status ke "gangguan".
+  const [assetRows] = await pool.query(
+    `SELECT d.id, d.name, d.ip, d.loc, d.type, d.status AS live, d.monitor_enabled, d.asset_class,
+            COALESCE(SUM(u.up_samples),0) up_s, COALESCE(SUM(u.samples),0) tot_s,
+            (SELECT COUNT(*) FROM incidents i WHERE i.device_id=d.id AND i.status<>'selesai') open_inc
+       FROM devices d LEFT JOIN device_uptime_daily u ON u.device_id=d.id AND u.day BETWEEN ? AND ?
+      WHERE 1=1${ufd.clause}
+      GROUP BY d.id ORDER BY d.name`, [start, lastDay, ...ufd.params]);
+  const assets = assetRows.map((d) => {
+    const noIp = !d.ip || /^n\/?a/i.test(String(d.ip));
+    const uptime = Number(d.tot_s) > 0 ? Math.round(1000 * d.up_s / d.tot_s) / 10 : null;
+    const openInc = Number(d.open_inc) || 0;
+    let status;
+    if (noIp) status = openInc > 0 ? 'rusak' : 'aktif';               // tanpa IP: aktif kecuali dilaporkan rusak
+    else if (uptime != null) status = uptime >= 95 ? 'aktif' : 'gangguan';
+    else status = d.live === 'up' ? 'aktif' : d.live === 'down' ? 'rusak' : 'tidak_dipantau';
+    if (!noIp && openInc > 0 && status === 'aktif') status = 'gangguan'; // ber-IP + ada insiden aktif
+    return { id: d.id, name: d.name, ip: noIp ? null : d.ip, loc: d.loc, type: d.type, hasIp: !noIp, uptime, openInc, status };
+  });
+  const assetSummary = assets.reduce((a, x) => { a[x.status] = (a[x.status] || 0) + 1; return a; }, {});
+
   // IV. Kinerja teknisi (ranking)
   const uft = unitFilter(unitId);
   const [techs] = await pool.query(`SELECT id, name, jabatan FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'"teknisi"'))${uft.clause} ORDER BY name`, uft.params);
@@ -475,7 +498,7 @@ export async function buildKinerjaReport(monthIn, unitId) {
       kritis: Number(inc.kritis) || 0, tinggi: Number(inc.tinggi) || 0, sedang: Number(inc.sedang) || 0,
       jumlahPerangkat: devices.length, maintDone: Number(maint.done) || 0, maintTotal: Number(maint.total) || 0, inspeksi: insp.c,
     },
-    worst, topIssues, teknisi,
+    worst, topIssues, teknisi, assets, assetSummary,
   };
 }
 
