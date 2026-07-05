@@ -63,11 +63,16 @@ export async function scoreTeknisi(userId, start, end, unitId) {
   const pmDone = Number(pmDoneRow.c) || 0;
   const pmTarget = await pmTargetPerTech(unitId);
 
+  const taken = Number(t.taken) || 0, onTime = Number(t.onTime) || 0, done = Number(d.done) || 0, insC = Number(ins.c) || 0;
   return combine([
-    { key: 'sla', label: 'Ketepatan SLA', weight: 35, value: pct(t.onTime || 0, t.taken) },
-    { key: 'selesai', label: 'Penyelesaian', weight: 25, value: pct(d.done, t.taken) },
-    { key: 'inspeksi', label: 'Inspeksi', weight: 20, value: pct(ins.c, hariDinas) },
-    { key: 'pm', label: 'Pemeliharaan (PM)', weight: 20, value: pct(pmDone, pmTarget) },
+    { key: 'sla', label: 'Ketepatan SLA', weight: 35, value: pct(onTime, taken), num: onTime, den: taken,
+      note: taken ? `${onTime} dari ${taken} tiket diambil ≤ ${SLA_MINUTES} menit` : 'Belum ambil tiket bulan ini' },
+    { key: 'selesai', label: 'Penyelesaian', weight: 25, value: pct(done, taken), num: done, den: taken,
+      note: taken ? `${done} dari ${taken} tiket yang diambil sudah selesai` : 'Belum ambil tiket bulan ini' },
+    { key: 'inspeksi', label: 'Inspeksi', weight: 20, value: pct(insC, hariDinas), num: insC, den: hariDinas,
+      note: hariDinas ? `${insC} inspeksi dari ${hariDinas} hari dinas` : 'Tidak ada hari dinas terjadwal' },
+    { key: 'pm', label: 'Pemeliharaan (PM)', weight: 20, value: pct(pmDone, pmTarget), num: pmDone, den: pmTarget,
+      note: pmTarget ? `${pmDone} PM selesai dari target ${pmTarget}` : 'Tidak ada rencana PM di unit' },
   ]);
 }
 
@@ -131,11 +136,16 @@ export async function scoreKoordinator(userId, start, end, unitId) {
   );
   const expectedDays = expectedDaysInRange(start, end);
 
+  const esMasuk = Number(es.masuk) || 0, esSelesai = Number(es.selesai) || 0, jdDays = Number(jd.d) || 0;
   return combine([
-    { key: 'persetujuan', label: 'Kecepatan Persetujuan', weight: 30, value: pct(apOnTime, apTotal) },
-    { key: 'uptimeUnit', label: 'Ketersediaan Peralatan Unit', weight: 30, value: pct(up.up_ish, upBase) },
-    { key: 'eskalasi', label: 'Penanganan Eskalasi', weight: 25, value: pct(es.selesai || 0, es.masuk) },
-    { key: 'jadwal', label: 'Kelengkapan Jadwal Dinas', weight: 15, value: pct(jd.d, expectedDays) },
+    { key: 'persetujuan', label: 'Kecepatan Persetujuan', weight: 30, value: pct(apOnTime, apTotal), num: apOnTime, den: apTotal,
+      note: apTotal ? `${apOnTime} dari ${apTotal} pengajuan diputus ≤ 2 hari kerja` : 'Tidak ada pengajuan diputus bulan ini' },
+    { key: 'uptimeUnit', label: 'Ketersediaan Peralatan Unit', weight: 30, value: pct(up.up_ish, upBase), num: Number(up.up_ish), den: upBase,
+      note: upBase > 0 ? 'Rata-rata ketersediaan perangkat unit dari pemantauan' : 'Belum ada data pemantauan' },
+    { key: 'eskalasi', label: 'Penanganan Eskalasi', weight: 25, value: pct(esSelesai, esMasuk), num: esSelesai, den: esMasuk,
+      note: esMasuk ? `${esSelesai} dari ${esMasuk} insiden eskalasi tertangani` : 'Tidak ada eskalasi bulan ini' },
+    { key: 'jadwal', label: 'Kelengkapan Jadwal Dinas', weight: 15, value: pct(jdDays, expectedDays), num: Math.min(jdDays, expectedDays), den: expectedDays,
+      note: `${Math.min(jdDays, expectedDays)} dari ${expectedDays} hari sudah terisi jadwal` },
   ]);
 }
 

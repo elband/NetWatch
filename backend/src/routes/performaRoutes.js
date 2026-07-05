@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit } from '../middleware/unitScope.js';
 import { SLA_MINUTES } from '../config/shifts.js';
 import { scoreTeknisi, scoreKoordinator } from '../services/perfScore.js';
@@ -259,8 +259,17 @@ router.get('/breakdown', async (req, res) => {
   });
 });
 
-// Skor performa PERSEN (0–100 + grade) — teknisi & koordinator unit. Sumber gauge.
-router.get('/skor', async (req, res) => {
+// Skor performa PERSEN milik SENDIRI + penjelasan komponen (semua peran).
+router.get('/skor/me', async (req, res) => {
+  const { start, end } = monthRange(req.query.month);
+  const roles = req.user?.roles?.length ? req.user.roles : (req.user?.role ? [req.user.role] : []);
+  const isKoor = roles.includes('koordinator');
+  const s = isKoor ? await scoreKoordinator(req.user.id, start, end, req.unitId) : await scoreTeknisi(req.user.id, start, end, req.unitId);
+  res.json({ month: req.query.month || null, role: isKoor ? 'koordinator' : 'teknisi', name: req.user.name, ...s });
+});
+
+// Skor performa PERSEN semua personel unit (admin/koordinator). Sumber gauge kelola.
+router.get('/skor', requireRole('admin', 'koordinator'), async (req, res) => {
   const { start, end } = monthRange(req.query.month);
   const uf = unitFilter(req.unitId, 'unit_id');
   const [people] = await pool.query(

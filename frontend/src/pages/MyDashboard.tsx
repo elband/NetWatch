@@ -9,7 +9,10 @@ import ActivityModal, { activityStatusBadge } from '../components/ActivityModal'
 import LocationMap from '../components/LocationMap';
 import AbsenCard from '../components/AbsenCard';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
+import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
 import { getSocket } from '../api/socket';
+
+interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[] }
 import { stepLabel, nextStepLabel, progressPct, maxStep } from '../utils/steps';
 import type { Incident, IncidentQueue, PerformaRow, Device, Asset, ServiceItem, LocationItem, MonthlyStats, Activity } from '../types';
 
@@ -53,6 +56,8 @@ export default function MyDashboard() {
   const [showActivity, setShowActivity] = useState(false);
   const [prevPerf, setPrevPerf] = useState<PerformaRow | null>(null);
   const [spark, setSpark] = useState<Record<string, number[]>>({});
+  const [myScore, setMyScore] = useState<MyScore | null>(null);
+  const [showExplain, setShowExplain] = useState(false);
   const month = thisMonth();
   const prevMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
 
@@ -73,6 +78,7 @@ export default function MyDashboard() {
         setPrevPerf(res.data.performa.find((p: PerformaRow) => p.techId === user.id) || null);
       }).catch(() => {});
       api.get(`/performa/sparkline?month=${month}`).then((res) => setSpark(res.data.spark)).catch(() => {});
+      api.get(`/performa/skor/me?month=${month}`).then((res) => setMyScore(res.data)).catch(() => setMyScore(null));
     }
   }
   useEffect(load, [user]);
@@ -173,6 +179,31 @@ export default function MyDashboard() {
           💡 Skor mulai 30 · +2 selesai, +4 tepat SLA, +6 kritis, +3 PM, +5 dokumentasi · −10 pelanggaran SLA (insiden on-duty tak diambil dalam {slaMin} menit), −5 eskalasi, −15 absen (hanya alpa yang dikonfirmasi koordinator) · lokasi/VPN palsu −50%. Dibatasi 0–100.
         </div>
       </div>
+
+      {/* ===== Skor Performa Persen (baru) + penjelasan ===== */}
+      {myScore && (
+        <div className="nw-card border border-accent/25 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+            <span className="text-[13px] font-bold">🎯 Skor Performa Saya (Persen) · {monthLabel}</span>
+            <button onClick={() => setShowExplain(true)} className="border border-accent/40 text-accent rounded-md px-2.5 py-1 text-[11px] font-semibold hover:bg-accent/10">📖 Lihat Penjelasan</button>
+          </div>
+          <div className="flex items-center gap-5 flex-wrap">
+            <ScoreGauge score={myScore.score} grade={myScore.grade} size={120} />
+            <div className="flex-1 min-w-[240px]"><ScoreBreakdown components={myScore.components} /></div>
+          </div>
+        </div>
+      )}
+      {showExplain && myScore && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowExplain(false)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold">📖 Penjelasan Skor Performa Saya · {monthLabel}</h3>
+              <button onClick={() => setShowExplain(false)} className="text-text2 hover:text-text text-xl leading-none">×</button>
+            </div>
+            <ScoreExplain score={myScore.score} grade={myScore.grade} components={myScore.components} />
+          </div>
+        </div>
+      )}
 
       {/* ===== Monitoring infrastruktur — di bawah performa ===== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
