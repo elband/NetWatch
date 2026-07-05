@@ -41,8 +41,9 @@ function locationReasons({ lat, lng, tz, accuracy }, office) {
   return { reasons, dist };
 }
 
-async function notifyCoords(message) {
-  const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+async function notifyCoords(message, unitId = null) {
+  const clause = unitId != null ? ' AND (unit_id IS NULL OR unit_id = ?)' : '';
+  const [coords] = await pool.query(`SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"'))${clause}`, unitId != null ? [unitId] : []);
   let n = 0;
   for (const c of coords) {
     if (!(await isNotifyEnabledForUser('absensi_vpn_lokasi', c.id))) continue;
@@ -140,7 +141,7 @@ router.post('/check-in', async (req, res) => {
       [req.user.id, date, lat ?? null, lng ?? null, dist, acc, ip, deviceId || null, fl, fl, reason, req.user.unit_id ?? null]);
   }
   await audit(req.user, 'attendance_checkin', 'attendance', null, vpn ? `flagged: ${reason}` : 'OK');
-  if (vpn) await notifyCoords(`⚠️ *Absensi Mencurigakan*\n${req.user.name} absen masuk dengan anomali.\nAlasan: ${reason}\nPerforma bulan ini dikurangi 50%.`);
+  if (vpn) await notifyCoords(`⚠️ *Absensi Mencurigakan*\n${req.user.name} absen masuk dengan anomali.\nAlasan: ${reason}\nPerforma bulan ini dikurangi 50%.`, req.user.unit_id ?? null);
   if (deviceId) await checkDuplicateDevice(req.user.id, req.user.name, deviceId, date);
   res.json({ ok: true, vpn, reason, distance: dist, deviceBound: dev.bound || false, warning: vpn ? `Absensi ditandai: ${reason}. Performa bulan ini dikurangi 50% & koordinator diberi tahu.` : null });
 });
@@ -162,7 +163,7 @@ router.post('/check-out', async (req, res) => {
   await pool.query('UPDATE attendance SET check_out_at=NOW(), check_out_lat=?, check_out_lng=?, check_out_ip=?, check_out_vpn=?, flagged=GREATEST(flagged,?), reason=COALESCE(reason,?) WHERE id=?',
     [lat ?? null, lng ?? null, ip, vpn ? 1 : 0, vpn ? 1 : 0, reason, exist[0].id]);
   await audit(req.user, 'attendance_checkout', 'attendance', null, vpn ? `flagged: ${reason}` : 'OK');
-  if (vpn) await notifyCoords(`⚠️ *Absensi Mencurigakan*\n${req.user.name} absen pulang dengan anomali.\nAlasan: ${reason}`);
+  if (vpn) await notifyCoords(`⚠️ *Absensi Mencurigakan*\n${req.user.name} absen pulang dengan anomali.\nAlasan: ${reason}`, req.user.unit_id ?? null);
   res.json({ ok: true, vpn, reason, warning: vpn ? `Absensi ditandai: ${reason}.` : null });
 });
 

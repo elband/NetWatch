@@ -216,7 +216,7 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
 
   // Notifikasi otomatis ke koordinator bahwa perangkat sudah diinspeksi.
   {
-    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [rowUnitId]);
     const stEmoji = st === 'rusak' ? '🔴' : st === 'perhatian' ? '🟡' : '🟢';
     const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
     for (const c of coords) {
@@ -301,7 +301,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
 
   // Notifikasi ke koordinator bahwa peralatan sudah dihidupkan.
   {
-    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [rowUnitId]);
     const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
     for (const c of coords) {
       if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
@@ -371,7 +371,7 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
 
   // Notifikasi ke koordinator bahwa peralatan dimatikan (monitoring dijeda).
   {
-    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))");
+    const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [rowUnitId]);
     const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
     for (const c of coords) {
       if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
@@ -450,8 +450,8 @@ router.put('/maintenance/:id', requireRole('admin', 'koordinator', 'teknisi'), m
       'UPDATE equipment_maintenance SET status=?, note=COALESCE(?, note), doc_url=COALESCE(?, doc_url), done_by=?, done_at=NOW() WHERE id=?',
       [status, note?.trim() || null, docUrl, req.user.id, req.params.id]
     );
-    // Notifikasi ke seluruh koordinator (WA + tercatat di Log WhatsApp).
-    const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+    // Notifikasi ke koordinator unit perangkat (+ super admin), bukan lintas unit.
+    const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [m.unit_id ?? m.device_unit_id ?? null]);
     const when = new Date().toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     const docInfo = pc.c > 0 ? `${pc.c} foto dokumentasi dilampirkan` : 'Dokumentasi telah dilampirkan';
     const msg = `🛠️ *Maintenance Selesai*\nPerangkat: ${m.device_name}\nTugas: ${m.task}\nOleh: ${req.user.name}\nWaktu: ${when}\n${docInfo} di sistem.`;

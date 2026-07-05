@@ -68,7 +68,7 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
     await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?,0,?)', [incId, `Laporan fasilitas via QR (${b.room_code || '-'}): ${b.detail}`]);
     await conn.query('UPDATE public_reports SET incident_id=? WHERE id=?', [incId, id]);
     try { await snapshotAndNotifyOnDuty(conn, { id: incId, priority: prio, deviceName, issue }); } catch { /* abaikan */ }
-    try { await notifyRoles(['koordinator', 'admin'], { type: b.urgensi === 'kritis' ? 'public_critical' : 'public_new', title: `Laporan publik${b.urgensi === 'kritis' ? ' KRITIS' : ''}: ${b.judul.trim()}`, message: `${id} · ${ruang || gedung || 'Umum'} — ${b.jenis}`, refId: id, refType: 'public_report', link: `/incidents?focus=${incId}` }); } catch { /* abaikan */ }
+    try { await notifyRoles(['koordinator', 'admin'], { type: b.urgensi === 'kritis' ? 'public_critical' : 'public_new', title: `Laporan publik${b.urgensi === 'kritis' ? ' KRITIS' : ''}: ${b.judul.trim()}`, message: `${id} · ${ruang || gedung || 'Umum'} — ${b.jenis}`, refId: id, refType: 'public_report', link: `/incidents?focus=${incId}` }, { unitId }); } catch { /* abaikan */ }
     // Notifikasi WA ke pelapor (bila menyertakan nomor HP) — narasi + tautan lacak.
     const reporterPhone = normPhone(b.hp);
     if (reporterPhone) {

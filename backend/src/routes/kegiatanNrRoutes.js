@@ -50,8 +50,10 @@ async function withDetail(rows) {
 async function logApproval(id, user, status, note, poin) {
   await pool.query('INSERT INTO kegiatan_non_rutin_approval (kegiatan_id, user_id, user_name, status, note, poin) VALUES (?,?,?,?,?,?)', [id, user?.id || null, user?.name || null, status, note || null, poin ?? null]);
 }
-async function notifyCoords(message) {
-  const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+// unitId: hanya koordinator unit tsb (+ super admin). null = semua (kompat lama).
+async function notifyCoords(message, unitId = null) {
+  const clause = unitId != null ? ' AND (unit_id IS NULL OR unit_id = ?)' : '';
+  const [c] = await pool.query(`SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"'))${clause}`, unitId != null ? [unitId] : []);
   for (const x of c) {
     if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', x.id))) continue;
     try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ }
@@ -221,8 +223,8 @@ router.patch('/:id/status', async (req, res) => {
   } finally { conn.release(); }
   await audit(req.user, `knr_${next}`, 'kegiatan', id, `${d.nomor} · ${d.judul}`);
   if (next === 'diajukan') {
-    await notifyCoords(`📝 *Kegiatan Non-Rutin Baru*\n${d.petugas_nama}: ${d.judul}\nNo. ${d.nomor}\nMohon ditinjau.`);
-    await notifyRoles(['koordinator', 'admin'], { type: 'knr_new', title: `Kegiatan non-rutin baru: ${d.judul}`, message: `${d.petugas_nama} · ${d.nomor} — mohon ditinjau.`, refId: id, refType: 'kegiatan', link: `/kegiatan-nr?focus=${id}` });
+    await notifyCoords(`📝 *Kegiatan Non-Rutin Baru*\n${d.petugas_nama}: ${d.judul}\nNo. ${d.nomor}\nMohon ditinjau.`, d.unit_id ?? null);
+    await notifyRoles(['koordinator', 'admin'], { type: 'knr_new', title: `Kegiatan non-rutin baru: ${d.judul}`, message: `${d.petugas_nama} · ${d.nomor} — mohon ditinjau.`, refId: id, refType: 'kegiatan', link: `/kegiatan-nr?focus=${id}` }, { unitId: d.unit_id ?? null });
   }
   if (['disetujui', 'ditolak', 'selesai'].includes(next) && d.created_by) { try { if (await isNotifyEnabledForUser('pengajuan_keputusan', d.created_by)) await queueWaNotification({ type: 'other', toUserId: d.created_by, message: `Kegiatan "${d.judul}" (${d.nomor}) berstatus *${next}*${note ? `\nCatatan: ${note}` : ''}.` }); } catch { /* abaikan */ } }
   const [u] = await pool.query('SELECT * FROM kegiatan_non_rutin WHERE id=?', [id]);

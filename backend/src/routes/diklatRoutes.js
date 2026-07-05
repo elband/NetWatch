@@ -57,8 +57,10 @@ async function withDetail(rows) {
 async function logHistory(diklatId, user, status, note, unitId = null) {
   await pool.query('INSERT INTO diklat_history (diklat_id, user_id, user_name, status, note, unit_id) VALUES (?,?,?,?,?,?)', [diklatId, user?.id || null, user?.name || null, status, note || null, unitId]);
 }
-async function notifyCoords(message) {
-  const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+// unitId: hanya koordinator unit tsb (+ super admin). null = semua (kompat lama).
+async function notifyCoords(message, unitId = null) {
+  const clause = unitId != null ? ' AND (unit_id IS NULL OR unit_id = ?)' : '';
+  const [c] = await pool.query(`SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"'))${clause}`, unitId != null ? [unitId] : []);
   for (const x of c) {
     if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', x.id))) continue;
     try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ }
@@ -186,8 +188,8 @@ router.patch('/:id/status', async (req, res) => {
   await audit(req.user, `diklat_${next}`, 'diklat', id, `${d.nomor_pengajuan} · ${d.nama_diklat}`);
   // Notifikasi
   if (next === 'diajukan') {
-    await notifyCoords(`📚 *Pengajuan Diklat Baru*\n${d.pegawai_nama}: ${d.nama_diklat}\nNo. ${d.nomor_pengajuan}\nMohon ditinjau.`);
-    await notifyRoles(['koordinator', 'admin'], { type: 'diklat_new', title: `Pengajuan diklat baru: ${d.nama_diklat}`, message: `${d.pegawai_nama} · ${d.nomor_pengajuan} — mohon ditinjau.`, refId: id, refType: 'diklat', link: `/diklat?focus=${id}` });
+    await notifyCoords(`📚 *Pengajuan Diklat Baru*\n${d.pegawai_nama}: ${d.nama_diklat}\nNo. ${d.nomor_pengajuan}\nMohon ditinjau.`, d.unit_id ?? null);
+    await notifyRoles(['koordinator', 'admin'], { type: 'diklat_new', title: `Pengajuan diklat baru: ${d.nama_diklat}`, message: `${d.pegawai_nama} · ${d.nomor_pengajuan} — mohon ditinjau.`, refId: id, refType: 'diklat', link: `/diklat?focus=${id}` }, { unitId: d.unit_id ?? null });
   }
   if (['disetujui', 'ditolak', 'selesai'].includes(next)) {
     // Beri tahu pengusul (created_by) DAN pegawai yang bersangkutan (pegawai_id), tanpa duplikat.

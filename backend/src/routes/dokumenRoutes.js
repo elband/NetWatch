@@ -45,8 +45,10 @@ async function syncTags(id, tags) {
   await pool.query('DELETE FROM document_tags WHERE document_id=?', [id]);
   for (const t of tags) await pool.query('INSERT INTO document_tags (document_id, tag) VALUES (?,?)', [id, t.slice(0, 60)]);
 }
-async function notifyCoords(message) {
-  const [c] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+// unitId: hanya koordinator unit tsb (+ super admin). null = semua (dokumen global).
+async function notifyCoords(message, unitId = null) {
+  const clause = unitId != null ? ' AND (unit_id IS NULL OR unit_id = ?)' : '';
+  const [c] = await pool.query(`SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"'))${clause}`, unitId != null ? [unitId] : []);
   for (const x of c) {
     if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', x.id))) continue;
     try { await queueWaNotification({ type: 'other', toUserId: x.id, message }); } catch { /* abaikan */ }
@@ -177,7 +179,7 @@ router.post('/', requireRole('admin', 'koordinator'), withDocFile, async (req, r
   await syncTags(r.insertId, tags);
   if (fileUrl) await pool.query('INSERT INTO document_versions (document_id, versi, file_url, catatan, created_by, creator_name) VALUES (?,?,?,?,?,?)', [r.insertId, b.versi || '1.0', fileUrl, 'Versi awal', req.user.id, req.user.name]);
   await audit(req.user, 'doc_create', 'document', r.insertId, b.judul);
-  await notifyCoords(`📄 *Dokumen Baru*\n${b.judul} (${b.kategori}) oleh ${req.user.name}.`);
+  await notifyCoords(`📄 *Dokumen Baru*\n${b.judul} (${b.kategori}) oleh ${req.user.name}.`, req.user.unit_id ?? null);
   const [rows] = await pool.query('SELECT * FROM documents WHERE id=?', [r.insertId]);
   res.status(201).json({ document: rows[0] });
 });

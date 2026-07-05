@@ -37,8 +37,11 @@ router.post('/', upload.single('doc'), async (req, res) => {
     [req.user.id, type, startDate, endDate, reason?.trim() || null, docUrl, req.user.unit_id ?? insertUnitId(req)]
   );
   await audit(req.user, 'leave_request', 'leave', r.insertId, `${type} ${startDate}..${endDate}`);
-  // Beri tahu koordinator.
-  const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"'))");
+  // Beri tahu koordinator unit pengaju saja (+ super admin).
+  const [coords] = await pool.query(
+    "SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)",
+    [req.user.unit_id ?? null]
+  );
   for (const c of coords) {
     if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
     try { await queueWaNotification({ type: 'other', toUserId: c.id, message: `📝 *Pengajuan ${type}*\n${req.user.name}: ${startDate} s/d ${endDate}\nAlasan: ${reason || '-'}\nMohon ditinjau di sistem.` }); } catch { /* abaikan */ }
