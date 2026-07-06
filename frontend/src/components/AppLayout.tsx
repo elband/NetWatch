@@ -19,9 +19,12 @@ const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi · 05.00–13.00', sia
 const ROLE_ORDER: Role[] = ['admin', 'koordinator', 'teknisi', 'viewer'];
 
 // Gabungkan menu dari semua peran user: item unik per id (dan per label, agar
-// "Dashboard" admin & koordinator tidak muncul dobel), dikelompokkan per
-// section (kemunculan pertama), section kosong dibuang.
-function mergedNav(roles: Role[]): NavEntry[] {
+// "Dashboard" admin & koordinator tidak muncul dobel), dikelompokkan per section
+// (kemunculan pertama), section kosong dibuang. Item eksklusif-unit yang bukan
+// unit aktif disaring DI SINI, sebelum dedup label — supaya dua item beda unit
+// yang berbagi label (mis. "Performa Peralatan": equipment=ELB vs
+// aset-availability=AAB) tidak saling menggugurkan. unitCode null = tak disaring.
+function mergedNav(roles: Role[], unitCode: string | null): NavEntry[] {
   const seen = new Set<string>();
   const seenLabels = new Set<string>();
   const groups = new Map<string, Extract<NavEntry, { id: string }>[]>();
@@ -33,7 +36,11 @@ function mergedNav(roles: Role[]): NavEntry[] {
       if ('section' in e && e.section) {
         cur = e.section;
         if (!groups.has(cur)) { groups.set(cur, []); order.push(cur); }
-      } else if ('id' in e && !seen.has(e.id) && !seenLabels.has(e.label)) {
+      } else if ('id' in e) {
+        // Buang item milik unit lain lebih dulu, agar ia tak "mengklaim" id/label
+        // lalu tersaring (bikin menu unit aktif kehilangan item berlabel sama).
+        if (unitCode && UNIT_ONLY[e.id] && !UNIT_ONLY[e.id].includes(unitCode)) continue;
+        if (seen.has(e.id) || seenLabels.has(e.label)) continue;
         seen.add(e.id);
         seenLabels.add(e.label);
         if (!groups.has(cur)) { groups.set(cur, []); order.push(cur); }
@@ -45,23 +52,6 @@ function mergedNav(roles: Role[]): NavEntry[] {
   for (const title of order) {
     const its = groups.get(title)!;
     if (its.length) { out.push({ section: title }); out.push(...its); }
-  }
-  return out;
-}
-
-// Saring menu sesuai unit aktif (kode). null = tampil semua (mis. super admin "Semua Unit"
-// atau unit belum termuat). Header section yang jadi kosong dibuang.
-function filterNavByUnit(items: NavEntry[], code: string | null): NavEntry[] {
-  if (!code) return items;
-  const kept = items.filter((e) => ('section' in e) || !UNIT_ONLY[e.id] || UNIT_ONLY[e.id].includes(code));
-  const out: NavEntry[] = [];
-  for (let i = 0; i < kept.length; i++) {
-    const e = kept[i];
-    if ('section' in e) {
-      let j = i + 1, has = false;
-      while (j < kept.length && !('section' in kept[j])) { has = true; j++; }
-      if (has) out.push(e);
-    } else out.push(e);
   }
   return out;
 }
@@ -93,12 +83,13 @@ export default function AppLayout() {
 
   if (!user) return null;
   const allRoles = userRoles(user);
-  const baseNav = mergedNav(allRoles).length ? mergedNav(allRoles) : NAV_ITEMS.viewer;
   // Unit aktif: super admin pakai pilihan switcher (null = Semua Unit → tak disaring);
   // role lain terkunci ke unitnya sendiri. Kode unit dipetakan dari daftar unit.
   const effUnitId = hasRole(user, 'admin') ? getActiveUnitId() : (user.unit_id ?? null);
   const effUnitCode = effUnitId ? (unitList.find((u) => u.id === effUnitId)?.code ?? null) : null;
-  const navItems = filterNavByUnit(baseNav, effUnitCode);
+  // Penyaringan per unit terjadi di dalam mergedNav (sebelum dedup label).
+  const merged = mergedNav(allRoles, effUnitCode);
+  const navItems = merged.length ? merged : NAV_ITEMS.viewer;
   const currentId = location.pathname.replace('/', '') || navItems.find((n): n is Extract<NavEntry, { id: string }> => 'id' in n)?.id;
   const title = PAGE_TITLES[currentId || ''] || 'Dashboard';
   const firstName = (user.name || '').split(' ')[0];
