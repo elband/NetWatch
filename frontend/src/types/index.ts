@@ -679,6 +679,44 @@ export interface Activity {
   created_at: string;
 }
 
+export interface UnitPlan {
+  id: number;
+  unit_id: number | null;
+  tahun: number;
+  kuartal: number; // 0 = tahunan, 1..4 = Triwulan I..IV
+  kategori: string;
+  judul: string;
+  deskripsi: string | null;
+  prioritas: 'tinggi' | 'sedang' | 'rendah';
+  status: 'rencana' | 'berjalan' | 'selesai' | 'tertunda' | 'batal';
+  progres: number;
+  estimasi_biaya: number;
+  realisasi_biaya: number | null;
+  target_date: string | null;
+  pic_user_id: number | null;
+  pic_nama: string | null;
+  catatan: string | null;
+  created_by: number | null;
+  creator_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UnitKpi {
+  id: number;
+  unit_id: number | null;
+  tahun: number;
+  label: string;
+  satuan: string | null;
+  target: number | null;
+  realisasi: number | null;
+  arah: 'naik' | 'turun';
+  catatan: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Asset {
   id: number;
   name: string;

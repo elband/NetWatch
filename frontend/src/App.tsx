@@ -28,6 +28,7 @@ import MyIncidents from './pages/MyIncidents';
 import Reports from './pages/Reports';
 import Jadwal from './pages/Jadwal';
 import Performa from './pages/Performa';
+import Perencanaan from './pages/Perencanaan';
 import Users from './pages/Users';
 import WaLog from './pages/WaLog';
 import Settings from './pages/Settings';
@@ -116,6 +117,7 @@ export default function App() {
             <Route path="/maintenance" element={<Navigate to="/equipment" replace />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/performa" element={<Performa />} />
+            <Route path="/perencanaan" element={<Perencanaan />} />
             <Route path="/wa" element={<WaLog />} />
             <Route path="/publik-reports" element={<PublicReports />} />
             <Route path="/surat" element={<SuratKeluar />} />

@@ -10,6 +10,7 @@ import { DeviceStatusBadge } from '../components/StatusBadge';
 import { promptDialog } from '../components/dialog';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
 import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
+import { openImage } from '../components/ImageLightbox';
 import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity } from '../types';
 
 interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[]; tips?: string[] }
@@ -180,7 +181,9 @@ export default function CoordDashboard() {
                   return (
                     <tr key={a.id} className="border-b border-border/40">
                       <td className="px-2 py-2 whitespace-nowrap">{a.user_emoji} {a.user_name}</td>
-                      <td className="px-2 py-2"><div className="font-semibold capitalize">{a.type} · {a.title}</div>{a.detail && <div className="text-text2 text-[10px] truncate max-w-[220px]">{a.detail}</div>}{a.bukti_url && <a href={a.bukti_url} target="_blank" rel="noreferrer" className="text-accent2 text-[10px] hover:underline">📎 Lihat bukti dukung</a>}</td>
+                      <td className="px-2 py-2"><div className="font-semibold capitalize">{a.type} · {a.title}</div>{a.detail && <div className="text-text2 text-[10px] truncate max-w-[220px]">{a.detail}</div>}{a.bukti_url && (a.bukti_url.toLowerCase().endsWith('.pdf')
+                        ? <a href={a.bukti_url} target="_blank" rel="noreferrer" className="text-accent2 text-[10px] hover:underline">📎 Lihat bukti dukung (PDF)</a>
+                        : <button type="button" onClick={() => openImage(a.bukti_url!)} className="text-accent2 text-[10px] hover:underline">📎 Lihat bukti dukung</button>)}</td>
                       <td className="px-2 py-2 font-mono text-[10px] whitespace-nowrap">{a.activity_date}{a.start_time ? ` ${a.start_time}${a.end_time ? `–${a.end_time}` : ''}` : ''}</td>
                       <td className="px-2 py-2"><span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${b.bg} ${b.c}`}>{b.t}</span></td>
                       <td className="px-2 py-2">

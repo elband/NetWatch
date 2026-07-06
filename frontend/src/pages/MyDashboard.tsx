@@ -10,6 +10,7 @@ import LocationMap from '../components/LocationMap';
 import AbsenCard from '../components/AbsenCard';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
 import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
+import { openImage } from '../components/ImageLightbox';
 import { getSocket } from '../api/socket';
 
 interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[]; tips?: string[] }
@@ -448,7 +449,9 @@ export default function MyDashboard() {
                   return (
                     <div key={a.id} className="flex items-center gap-2 py-1 border-b border-border/30 last:border-0">
                       <div className="flex-1 min-w-0">
-                        <div className="text-[11px] truncate">{a.title}{a.bukti_url && <a href={a.bukti_url} target="_blank" rel="noreferrer" title="Bukti dukung" className="ml-1 text-accent2">📎</a>}</div>
+                        <div className="text-[11px] truncate">{a.title}{a.bukti_url && (a.bukti_url.toLowerCase().endsWith('.pdf')
+                          ? <a href={a.bukti_url} target="_blank" rel="noreferrer" title="Bukti dukung (PDF)" className="ml-1 text-accent2">📎</a>
+                          : <button type="button" onClick={() => openImage(a.bukti_url!)} title="Lihat bukti dukung" className="ml-1 text-accent2">📎</button>)}</div>
                         <div className="text-[9px] text-text2 capitalize">{a.type} · {a.activity_date}{a.start_time ? ` ${a.start_time}` : ''}</div>
                       </div>
                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${b.bg} ${b.c}`}>{b.t}</span>

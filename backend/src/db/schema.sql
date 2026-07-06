@@ -507,6 +507,50 @@ CREATE TABLE IF NOT EXISTS kegiatan_non_rutin_approval (
   FOREIGN KEY (kegiatan_id) REFERENCES kegiatan_non_rutin(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- ===== Perencanaan Unit (Program Kerja / Rencana Kerja tingkat unit) =====
+CREATE TABLE IF NOT EXISTS unit_plans (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  tahun SMALLINT NOT NULL,
+  kuartal TINYINT NOT NULL DEFAULT 0,                 -- 0 = tahunan, 1..4 = Triwulan I..IV
+  kategori VARCHAR(24) NOT NULL DEFAULT 'lainnya',    -- pemeliharaan|pengadaan|sdm|pengembangan|administrasi|lainnya
+  judul VARCHAR(200) NOT NULL,
+  deskripsi TEXT DEFAULT NULL,
+  prioritas VARCHAR(8) NOT NULL DEFAULT 'sedang',     -- tinggi|sedang|rendah
+  status VARCHAR(12) NOT NULL DEFAULT 'rencana',      -- rencana|berjalan|selesai|tertunda|batal
+  progres TINYINT NOT NULL DEFAULT 0,                 -- 0..100
+  estimasi_biaya BIGINT NOT NULL DEFAULT 0,           -- rupiah
+  realisasi_biaya BIGINT DEFAULT NULL,                -- rupiah (kosong = belum terealisasi)
+  target_date DATE DEFAULT NULL,
+  pic_user_id INT DEFAULT NULL,                       -- opsional: tautan ke user (untuk fase lanjut)
+  pic_nama VARCHAR(120) DEFAULT NULL,
+  catatan VARCHAR(500) DEFAULT NULL,
+  created_by INT DEFAULT NULL,
+  creator_name VARCHAR(120) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_unit_plans_unit (unit_id),
+  INDEX idx_unit_plans_tahun (tahun)
+) ENGINE=InnoDB;
+
+-- Target & KPI unit (Tahap 2 Perencanaan): target + realisasi per tahun.
+CREATE TABLE IF NOT EXISTS unit_kpi_targets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  tahun SMALLINT NOT NULL,
+  label VARCHAR(120) NOT NULL,
+  satuan VARCHAR(20) DEFAULT NULL,
+  target DECIMAL(12,2) DEFAULT NULL,
+  realisasi DECIMAL(12,2) DEFAULT NULL,
+  arah VARCHAR(8) NOT NULL DEFAULT 'naik',            -- 'naik' = makin tinggi makin baik; 'turun' = makin rendah makin baik (mis. MTTR)
+  catatan VARCHAR(300) DEFAULT NULL,
+  sort_order INT DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_ukt_unit (unit_id),
+  INDEX idx_ukt_tahun (tahun)
+) ENGINE=InnoDB;
+
 -- ===== Manajemen Dokumen / Knowledge Base =====
 CREATE TABLE IF NOT EXISTS document_categories (
   id INT AUTO_INCREMENT PRIMARY KEY,

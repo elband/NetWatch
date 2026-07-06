@@ -41,6 +41,7 @@ import unitRoutes from './routes/unitRoutes.js';
 import assetRoutes from './routes/assetRoutes.js';
 import sparepartRoutes from './routes/sparepartRoutes.js';
 import waterChemRoutes from './routes/waterChemRoutes.js';
+import perencanaanRoutes from './routes/perencanaanRoutes.js';
 
 // Membangun & mengembalikan instance Express (tanpa listen/socket/worker) agar
 // bisa dipakai ulang oleh server.js (produksi) maupun test (supertest).
@@ -129,6 +130,7 @@ export function createApp() {
   app.use('/api/diklat', diklatRoutes);
   app.use('/api/dokumen', dokumenRoutes);
   app.use('/api/kegiatan-nr', kegiatanNrRoutes);
+  app.use('/api/perencanaan', perencanaanRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/notification-prefs', notificationPrefsRoutes);
   app.use('/api/sla', slaRoutes);

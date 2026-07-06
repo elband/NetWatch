@@ -113,7 +113,9 @@ export async function buildLaporanData(monthIn, unitId = null) {
     [start, end, start, end, ...ufI.params]
   );
   const [actDay] = await pool.query(
-    `SELECT a.activity_date, a.type, a.title, a.start_time, u.name FROM activities a JOIN users u ON u.id=a.user_id WHERE a.activity_date>=? AND a.activity_date<?${ufA.clause} ORDER BY a.activity_date`,
+    // Hanya kegiatan yang SUDAH DISETUJUI koordinator yang masuk laporan resmi —
+    // yang masih 'menunggu' atau 'ditolak' tidak dicantumkan di log harian.
+    `SELECT a.activity_date, a.type, a.title, a.start_time, u.name FROM activities a JOIN users u ON u.id=a.user_id WHERE a.status='disetujui' AND a.activity_date>=? AND a.activity_date<?${ufA.clause} ORDER BY a.activity_date`,
     [start, end, ...ufA.params]
   );
   const [maintDay] = await pool.query(
