@@ -38,7 +38,7 @@ export function laporanMonthOf(s: Surat): string | null {
   return `${m[2]}-${String(idx).padStart(2, '0')}`;
 }
 
-// Halaman lampiran bukti dukung (gambar tampil, PDF sebagai tautan).
+// Halaman lampiran bukti dukung (gambar & PDF ditampilkan langsung inline).
 export function lampiranHtml(s: Surat, origin: string): string {
   const lp = s.lampiran || [];
   if (!lp.length) return '';
@@ -46,9 +46,15 @@ export function lampiranHtml(s: Surat, origin: string): string {
   const items = lp.map((l, i) => {
     const url = `${origin}${l.file_url}`;
     const isImg = (l.mimetype || '').startsWith('image');
-    return `<div style="margin:8px 0;page-break-inside:avoid"><div style="font-size:11px;font-weight:bold">${i + 1}. ${e(l.filename || 'Lampiran')}</div>${isImg ? `<img src="${url}" style="max-width:100%;max-height:230px;border:1px solid #999;margin-top:3px">` : `<div style="font-size:10px">📄 Berkas PDF: <a href="${url}">${e(l.filename || url)}</a></div>`}</div>`;
+    // PDF di-embed <iframe> agar tampil langsung DI LAYAR (tinggi ~A4 1123px @96dpi).
+    // Saat DICETAK/di-render Puppeteer (media print), iframe disembunyikan — halaman
+    // PDF asli digabung di sisi server (pdf-lib) sehingga isinya tetap ikut di unduhan.
+    const body = isImg
+      ? `<img src="${url}" style="max-width:100%;max-height:230px;border:1px solid #999;margin-top:3px">`
+      : `<iframe class="lamp-pdf" src="${url}#toolbar=0&navpanes=0" style="width:100%;height:1123px;border:1px solid #999;margin-top:3px" title="${e(l.filename || 'PDF')}"></iframe><div class="lamp-pdf-note" style="font-size:10px;color:#555;margin-top:3px">📄 Berkas PDF: <b>${e(l.filename || 'Lampiran')}</b> — terlampir pada halaman berikutnya.</div>`;
+    return `<div style="margin:8px 0${i > 0 ? ';page-break-before:always' : ''}"><div style="font-size:11px;font-weight:bold">${i + 1}. ${e(l.filename || 'Lampiran')}</div>${body}</div>`;
   }).join('');
-  return `<div style="page-break-before:always;margin-top:20px"><div style="text-align:center;font-weight:bold;font-size:14px;text-decoration:underline;text-transform:uppercase;margin-bottom:10px">Lampiran Bukti Dukung</div>${items}</div>`;
+  return `<style>.lamp-pdf-note{display:none}@media print{.lamp-pdf{display:none!important}.lamp-pdf-note{display:block!important}}</style><div style="page-break-before:always;margin-top:20px"><div style="text-align:center;font-weight:bold;font-size:14px;text-decoration:underline;text-transform:uppercase;margin-bottom:10px">Lampiran Bukti Dukung</div>${items}</div>`;
 }
 
 // Render Surat Pernyataan Lembur: 3 halaman (SPL + Dokumentasi + Laporan Hasil).
@@ -259,6 +265,8 @@ export function suratHtml(s: Surat, qr: string, lkp: LkpHead, origin: string): s
   const esc = (t: string) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
   const tgl = new Date(s.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
   const isi = s.body?.trim() || `Dengan ini disampaikan ${s.hal} dan mohon persetujuannya guna proses lebih lanjut.`;
+  // Hindari kalimat penutup dobel: hanya tambahkan bila body belum memuatnya.
+  const closing = /demikian disampaikan/i.test(isi) ? '' : '<div class="isi">Demikian disampaikan, atas perhatiannya diucapkan terima kasih.</div>';
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.jenis)} ${esc(s.nomor)}</title>
       <style>body{font-family:'Times New Roman',serif;color:#000;background:#fff;max-width:190mm;margin:24mm auto;font-size:13px;line-height:1.6}
       .judul{text-align:center;font-weight:bold;font-size:16px;text-decoration:underline;letter-spacing:1px;text-transform:uppercase}
@@ -273,7 +281,7 @@ export function suratHtml(s: Surat, qr: string, lkp: LkpHead, origin: string): s
         <tr><td class="l">Tanggal</td><td>:</td><td>${tgl}</td></tr>
       </table>
       <div class="isi">${esc(isi)}</div>
-      <div class="isi">Demikian disampaikan, atas perhatiannya diucapkan terima kasih.</div>
+      ${closing}
       <div class="ttd">${esc(lkp.koord_jabatan)}<br>
         ${qr ? `<div style="margin:6px auto;width:120px"><img src="${qr}" style="width:104px;height:104px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:8px;color:#444">${esc(s.sign_token || '')}</div></div>` : '<br><br><br>'}
         <u><b>${esc(s.signer_name || lkp.koord_nama)}</b></u><br>NIP. ${esc(s.signer_nip || lkp.koord_nip)}</div>
@@ -303,6 +311,7 @@ export function buildCombinedIncidentDoc(s: Surat, notaQr: string, inc: Incident
   const sesudah = fotos.find((n) => /selesai|normal kembali|teratasi|diperbaiki/i.test(n.note)) || (fotos.length > 1 ? fotos[fotos.length - 1] : null);
   const notaTgl = new Date(s.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
   const notaIsi = s.body?.trim() || `Dengan ini disampaikan ${s.hal} dan mohon persetujuannya guna proses lebih lanjut.`;
+  const notaClosing = /demikian disampaikan/i.test(notaIsi) ? '' : '<div class="isi">Demikian disampaikan, atas perhatiannya diucapkan terima kasih.</div>';
   const notaQrBlock = notaQr ? `<div style="margin:6px auto;width:120px"><img src="${notaQr}" style="width:104px;height:104px"><div style="font-size:8px;color:#0a0">✔ TTE Koordinator</div><div style="font-size:8px;color:#444">${esc(s.sign_token || '')}</div></div>` : '<br><br><br>';
   const lkpQrBlock = lkpQr ? `<div style="margin:6px auto;width:120px"><img src="${lkpQr}" style="width:108px;height:108px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:8px;color:#444">Token: ${esc(report?.sign_token || '')}</div><div style="font-size:7px;color:#666">Pindai untuk verifikasi</div></div>` : `<div style="margin:14px 0;font-size:10px;color:#999">(Belum disahkan TTE koordinator)</div>`;
   const kasiQrBlock = kasiQr && s.kasi_status === 'disetujui'
@@ -338,7 +347,7 @@ export function buildCombinedIncidentDoc(s: Surat, notaQr: string, inc: Incident
         <tr><td class="l">Tanggal</td><td>:</td><td>${notaTgl}</td></tr>
       </table>
       <div class="isi">${esc(notaIsi)}</div>
-      <div class="isi">Demikian disampaikan, atas perhatiannya diucapkan terima kasih.</div>
+      ${notaClosing}
       <div class="ttd">${esc(cfg.koord_jabatan)}<br>${notaQrBlock}<u><b>${esc(s.signer_name || cfg.koord_nama)}</b></u><br>NIP. ${esc(s.signer_nip || cfg.koord_nip)}</div>
     </div>
 

@@ -3,10 +3,44 @@
 //
 // Browser di-launch sekali (singleton) dan dipakai ulang antar-request; akan di-relaunch
 // otomatis bila proses Chromium mati/terputus.
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOADS_ROOT = path.join(__dirname, '..', '..', 'uploads');
+
 let browserPromise = null;
+
+// Gabungkan lampiran PDF (surat_lampiran) ke AKHIR PDF utama memakai pdf-lib, agar
+// isi lampiran ikut di file unduhan TTE (Puppeteer tidak bisa me-render iframe PDF).
+// `lampiran`: array {file_url, mimetype}; hanya application/pdf yang digabung.
+// Fail-soft: bila pdf-lib tak ada / file rusak → kembalikan PDF utama apa adanya.
+export async function mergeAttachmentPdfs(mainBuffer, lampiran = []) {
+  const pdfs = (lampiran || []).filter((l) => l?.mimetype === 'application/pdf' && l.file_url);
+  if (!pdfs.length) return mainBuffer;
+  let PDFDocument;
+  try { ({ PDFDocument } = await import('pdf-lib')); }
+  catch { logger?.warn?.('pdf-lib belum terpasang — lampiran PDF tidak digabung'); return mainBuffer; }
+  try {
+    const out = await PDFDocument.load(mainBuffer);
+    for (const l of pdfs) {
+      try {
+        const rel = String(l.file_url).replace(/^\/?uploads\//, '');
+        const bytes = await fs.readFile(path.join(UPLOADS_ROOT, rel));
+        const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        const pages = await out.copyPages(src, src.getPageIndices());
+        for (const pg of pages) out.addPage(pg);
+      } catch (e) { logger?.warn?.({ err: e?.message, file: l.file_url }, 'Gagal menggabungkan satu lampiran PDF'); }
+    }
+    return Buffer.from(await out.save());
+  } catch (e) {
+    logger?.warn?.({ err: e?.message }, 'Gagal merge lampiran PDF — kirim PDF utama saja');
+    return mainBuffer;
+  }
+}
 
 async function launchBrowser() {
   // Import dinamis agar backend tetap bisa start walau puppeteer belum terpasang

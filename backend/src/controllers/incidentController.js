@@ -820,13 +820,22 @@ export async function verifyTteDocPdf(req, res) {
   if (!resolved) return res.status(404).json({ error: 'Dokumen tidak ditemukan untuk token ini.' });
 
   try {
-    const { renderDocPdf } = await import('../services/pdfRenderer.js');
+    const { renderDocPdf, mergeAttachmentPdfs } = await import('../services/pdfRenderer.js');
     const { buffer } = await renderDocPdf(token);
+    // Gabungkan lampiran PDF (bukti dukung) ke akhir dokumen — iframe di HTML
+    // disembunyikan saat print, jadi isinya harus ditempel sebagai halaman asli.
+    // Lampiran dimuat di sini (resolveTteSurat tidak memuatnya).
+    let lampiran = [];
+    if (resolved.surat?.id) {
+      const [lamp] = await pool.query('SELECT file_url, filename, mimetype FROM surat_lampiran WHERE surat_id = ? ORDER BY id', [resolved.surat.id]);
+      lampiran = lamp;
+    }
+    const finalBuffer = await mergeAttachmentPdfs(buffer, lampiran);
     const filename = docFileName(resolved.surat, resolved.incidentId);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', buffer.length);
-    res.send(buffer);
+    res.setHeader('Content-Length', finalBuffer.length);
+    res.send(finalBuffer);
   } catch (err) {
     const msg = /Cannot find module 'puppeteer'|ERR_MODULE_NOT_FOUND/.test(String(err?.message))
       ? 'Modul PDF (puppeteer) belum terpasang di server. Jalankan `npm install` pada backend.'
