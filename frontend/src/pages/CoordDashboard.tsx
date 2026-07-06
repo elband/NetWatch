@@ -55,6 +55,16 @@ export default function CoordDashboard() {
   const [showExplain, setShowExplain] = useState(false);
   const [skorList, setSkorList] = useState<SkorRow[]>([]);
   const [explainRow, setExplainRow] = useState<SkorRow | null>(null);
+  // Filter tanggal panel Persetujuan Kegiatan. Default: hari ini (waktu lokal).
+  // '' = tampilkan semua tanggal.
+  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const [actDate, setActDate] = useState<string>(todayStr);
+  const shiftActDate = (days: number) => {
+    const base = actDate || todayStr;
+    const d = new Date(`${base}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    setActDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  };
   const month = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
   const prevMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
 
@@ -167,8 +177,20 @@ export default function CoordDashboard() {
 
       {/* Persetujuan kegiatan teknisi — di atas */}
       <Panel title={`PERSETUJUAN KEGIATAN${activities.filter((a) => a.status === 'menunggu').length ? ` · ${activities.filter((a) => a.status === 'menunggu').length} menunggu` : ''}`}>
-        {activities.length === 0 ? (
+        {/* Filter tanggal: default hari ini; panah ganti hari; "Semua" = tanpa filter. */}
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <button type="button" onClick={() => shiftActDate(-1)} title="Hari sebelumnya" className="border border-border rounded px-2 py-1 text-xs text-text2 hover:text-text">←</button>
+          <input type="date" value={actDate} onChange={(e) => setActDate(e.target.value)} className="bg-surface2 border border-border rounded-md px-2 py-1 text-xs" />
+          <button type="button" onClick={() => shiftActDate(1)} title="Hari berikutnya" className="border border-border rounded px-2 py-1 text-xs text-text2 hover:text-text">→</button>
+          <button type="button" onClick={() => setActDate(todayStr)} className="border border-border rounded px-2 py-1 text-[11px] text-text2 hover:text-text">Hari ini</button>
+          <button type="button" onClick={() => setActDate('')} className={`rounded px-2 py-1 text-[11px] border ${actDate ? 'border-border text-text2 hover:text-text' : 'border-accent2/40 text-accent2 bg-accent2/10'}`}>Semua tanggal</button>
+        </div>
+        {(() => {
+          const shownActs = (actDate ? activities.filter((a) => String(a.activity_date).slice(0, 10) === actDate) : activities).slice(0, 20);
+          return activities.length === 0 ? (
           <div className="text-center py-4 text-text2 text-xs">Belum ada pengajuan kegiatan.</div>
+        ) : shownActs.length === 0 ? (
+          <div className="text-center py-4 text-text2 text-xs">Tidak ada kegiatan pada {actDate || 'rentang ini'}.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -176,7 +198,7 @@ export default function CoordDashboard() {
                 {['Teknisi', 'Kegiatan', 'Waktu', 'Status', 'Aksi'].map((h) => <th key={h} className="px-2 py-2 text-left">{h}</th>)}
               </tr></thead>
               <tbody>
-                {activities.slice(0, 8).map((a) => {
+                {shownActs.map((a) => {
                   const b = activityStatusBadge(a.status);
                   return (
                     <tr key={a.id} className="border-b border-border/40">
@@ -202,7 +224,8 @@ export default function CoordDashboard() {
               </tbody>
             </table>
           </div>
-        )}
+        );
+        })()}
       </Panel>
 
       {/* Performa koordinator */}
