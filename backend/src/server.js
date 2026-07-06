@@ -32,6 +32,10 @@ function joinUserRoom(socket, token) {
   try {
     const u = jwt.verify(String(token || ''), env.jwtSecret, { algorithms: ['HS256'] });
     if (u?.id) socket.join(`user:${u.id}`);
+    // Room per-unit: dipakai untuk siaran ter-scope (mis. services:update) agar
+    // data unit lain tidak bocor ke dashboard. unit_id dari klaim token; efektif
+    // ulang setelah login/reconnect bila unit user dipindah.
+    if (u?.unit_id != null) socket.join(`unit:${u.unit_id}`);
   } catch { /* token tidak valid — abaikan */ }
 }
 

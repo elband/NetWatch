@@ -235,8 +235,14 @@ export async function checkAllDevices(io) {
   }
 
   // Setelah semua perangkat diperbarui, kirim status layanan kritis terbaru
-  // ke semua klien (kartu Monitoring Layanan Kritis update real-time).
+  // TER-SCOPE per unit ke room masing-masing (io.to('unit:{id}')). Mencegah
+  // kartu/hitungan layanan satu unit bocor ke dashboard unit lain.
   try {
-    io?.emit('services:update', await computeServices());
+    if (io) {
+      const [units] = await pool.query('SELECT id FROM units');
+      for (const u of units) {
+        io.to(`unit:${u.id}`).emit('services:update', await computeServices(u.id));
+      }
+    }
   } catch { /* abaikan */ }
 }

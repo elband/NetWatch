@@ -1,12 +1,24 @@
 import { pool } from '../db/pool.js';
+import { unitFilter } from '../middleware/unitScope.js';
 
-// Hitung daftar layanan kritis dengan status LIVE dari perangkat.
+// Hitung daftar layanan kritis dengan status LIVE dari perangkat — TER-SCOPE per unit.
+//   unitId = null  → lintas unit (admin "Semua Unit").
+//   unitId = <n>   → hanya layanan & perangkat unit tsb (isolasi multi-unit).
 // Layanan terhubung ke perangkat lewat kategori (device.category = service.name):
 // semua perangkat online = OK, ada yang offline = terganggu. Layanan tanpa
 // perangkat terkait memakai status manual yang tersimpan.
-export async function computeServices() {
-  const [rows] = await pool.query('SELECT * FROM services ORDER BY sort_order, id');
-  const [devs] = await pool.query("SELECT category, status, icon FROM devices WHERE category IS NOT NULL AND category <> ''");
+export async function computeServices(unitId = null) {
+  // Saring layanan & perangkat ke unit yang sama. Baris ber-unit lain TIDAK ikut
+  // (mencegah kartu/auto-card serta hitungan bocor antar unit).
+  const uf = unitFilter(unitId, 'unit_id');
+  const [rows] = await pool.query(
+    `SELECT * FROM services WHERE 1=1${uf.clause} ORDER BY sort_order, id`,
+    uf.params
+  );
+  const [devs] = await pool.query(
+    `SELECT category, status, icon FROM devices WHERE category IS NOT NULL AND category <> ''${uf.clause}`,
+    uf.params
+  );
   const byCat = {};
   for (const d of devs) {
     const k = d.category.toLowerCase().trim();
@@ -31,6 +43,7 @@ export async function computeServices() {
   });
 
   // Kategori perangkat yang BELUM punya kartu layanan → otomatis jadi kartu.
+  // Diberi unit_id request agar tetap ter-scope (bukan dianggap milik bersama).
   const known = new Set(rows.map((s) => String(s.name).toLowerCase().trim()));
   let autoId = -1;
   for (const k of Object.keys(byCat)) {
@@ -38,7 +51,7 @@ export async function computeServices() {
     const g = byCat[k];
     const ok = g.offline === 0;
     result.push({
-      id: autoId--, name: g.name, icon: g.icon || '🗂️',
+      id: autoId--, unit_id: unitId, name: g.name, icon: g.icon || '🗂️',
       is_ok: ok ? 1 : 0,
       status: ok ? 'Online' : 'Terganggu',
       detail: `${g.total - g.offline}/${g.total} perangkat online`,

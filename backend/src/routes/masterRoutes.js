@@ -83,8 +83,8 @@ router.delete('/assets/:id', requireRole('admin'), async (req, res) => {
 
 // ===================== SERVICES / LAYANAN KRITIS =====================
 router.get('/services', async (req, res) => {
-  // computeServices() global; saring kartu layanan tersimpan sesuai unit request.
-  const services = (await computeServices()).filter((s) => rowInUnit(s, req.unitId));
+  // Sudah ter-scope per unit di dalam computeServices (layanan + perangkat + auto-card).
+  const services = await computeServices(req.unitId);
   res.json({ services });
 });
 
