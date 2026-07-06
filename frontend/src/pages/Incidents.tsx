@@ -6,6 +6,7 @@ import IncidentReportModal from '../components/IncidentReportModal';
 import ProgressUpdateModal from '../components/ProgressUpdateModal';
 import InviteCollabModal from '../components/InviteCollabModal';
 import IncidentDetailModal from '../components/IncidentDetailModal';
+import IncidentKanban from '../components/IncidentKanban';
 import { confirmDialog } from '../components/dialog';
 import { downtimeMs, fmtDowntime, downtimeColor } from '../utils/downtime';
 import type { Incident } from '../types';
@@ -34,6 +35,8 @@ export default function Incidents() {
   const lastFocus = useRef<string | null>(null);
   const lastAutoRemind = useRef<string | null>(null);
   const [toast, setToast] = useState('');
+  const [view, setView] = useState<'cards' | 'kanban'>('cards');
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 4000); };
 
   function load() {
     api.get('/incidents').then((res) => {
@@ -134,6 +137,9 @@ export default function Incidents() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
+  // Untuk Kanban: kolom mewakili status, jadi hanya saring berdasarkan pencarian.
+  const bySearch = incidents.filter((i) => !q || i.id.toLowerCase().includes(q) || i.device_name.toLowerCase().includes(q) || i.issue.toLowerCase().includes(q));
+
   const cardTint: Record<string, string> = {
     kritis: 'border-danger/30 bg-danger/[0.04] hover:border-danger/50',
     tinggi: 'border-warn/30 bg-warn/[0.03] hover:border-warn/50',
@@ -179,6 +185,12 @@ export default function Incidents() {
             <button className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text2 hover:text-text" onClick={() => setSearch('')}>✕</button>
           )}
         </div>
+        {/* Toggle tampilan Kartu / Kanban */}
+        <div className="flex rounded-md border border-border overflow-hidden">
+          <button onClick={() => setView('cards')} title="Tampilan kartu" className={`px-3 py-2 text-xs font-semibold ${view === 'cards' ? 'bg-accent text-bg' : 'bg-surface2 text-text2 hover:text-text'}`}>▦ Kartu</button>
+          <button onClick={() => setView('kanban')} title="Papan Kanban (tarik-geser)" className={`px-3 py-2 text-xs font-semibold ${view === 'kanban' ? 'bg-accent text-bg' : 'bg-surface2 text-text2 hover:text-text'}`}>▤ Kanban</button>
+        </div>
+        {view === 'cards' && (<>
         <select
           className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs"
           value={filter}
@@ -211,6 +223,7 @@ export default function Incidents() {
             {sortDir === 'asc' ? '↑' : '↓'}
           </button>
         </div>
+        </>)}
         {(filter !== 'all' || search) && (
           <button
             className="text-xs text-text2 hover:text-text border border-border rounded px-2.5 py-1"
@@ -221,8 +234,10 @@ export default function Incidents() {
         )}
       </div>
 
-      {/* ===== Cards ===== */}
-      {loading ? (
+      {/* ===== Cards / Kanban ===== */}
+      {view === 'kanban' ? (
+        <IncidentKanban incidents={bySearch} now={now} onChanged={load} onOpen={setSelected} onToast={showToast} />
+      ) : loading ? (
         <div className="bg-surface border border-border rounded-[10px] py-16 text-center text-text2 text-xs animate-pulse">Memuat data insiden…</div>
       ) : filtered.length === 0 ? (
         <div className="bg-surface border border-border rounded-[10px] py-16 text-center text-text2 text-xs">
@@ -296,7 +311,7 @@ export default function Incidents() {
       )}
 
       {/* ===== Result count ===== */}
-      {!loading && filtered.length > 0 && (
+      {view === 'cards' && !loading && filtered.length > 0 && (
         <div className="text-[10px] text-text2 mt-2 text-right">
           {filtered.length} dari {incidents.length} insiden ditampilkan
         </div>

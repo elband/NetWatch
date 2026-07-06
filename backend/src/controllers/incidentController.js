@@ -307,6 +307,48 @@ export async function takeIncident(req, res) {
   }
 }
 
+// Koordinator/admin menugaskan insiden ke teknisi tertentu (drag Kanban "Baru → Proses"),
+// atau melepas kembali ke pool bila techId kosong ("Proses → Baru"). Berbeda dari `take`
+// (klaim diri sendiri) — di sini manajer memilih teknisi mana pun se-unit.
+export async function assignIncident(req, res) {
+  const id = req.params.id;
+  const techId = Number(req.body.techId) || null;
+  const conn = await pool.getConnection();
+  try {
+    const [rows] = await conn.query('SELECT * FROM incidents WHERE id = ?', [id]);
+    const incident = rows[0];
+    if (!incident || !rowInUnit(incident, req.unitId)) return res.status(404).json({ error: 'Insiden tidak ditemukan' });
+    if (incident.status === 'selesai') return res.status(400).json({ error: 'Insiden sudah selesai.' });
+
+    if (techId) {
+      const [t] = await conn.query('SELECT id, name, unit_id FROM users WHERE id = ? AND active = 1', [techId]);
+      const tech = t[0];
+      if (!tech) return res.status(404).json({ error: 'Teknisi tidak ditemukan.' });
+      if (req.unitId != null && tech.unit_id != null && Number(tech.unit_id) !== Number(req.unitId)) {
+        return res.status(400).json({ error: 'Teknisi berada di unit lain.' });
+      }
+      await conn.query("UPDATE incidents SET tech_id = ?, taken_at = NOW(), status = 'proses' WHERE id = ?", [techId, id]);
+      await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [
+        id, incident.step, `Insiden ditugaskan ke ${tech.name} oleh ${req.user.name}.`,
+      ]);
+      await createNotification({ userId: techId, type: 'ticket_assigned', priority: incident.priority === 'kritis' ? 'kritis' : 'info', title: `Ditugaskan: ${incident.device_name}`, message: `${id} — ${incident.issue}`, refId: id, refType: 'incident', link: '/my-incidents' });
+      if (await isNotifyEnabledForUser('insiden_teknisi', techId)) {
+        await queueWaNotification({ type: 'alert', toUserId: techId, message: `🎯 INSIDEN DITUGASKAN (${(incident.priority || 'sedang').toUpperCase()})\n${id} | ${incident.device_name}\nMasalah: ${incident.issue}\nDitugaskan oleh ${req.user.name}. Mohon segera ditangani.`, relatedIncidentId: id });
+      }
+    } else {
+      await conn.query("UPDATE incidents SET tech_id = NULL, taken_at = NULL, status = 'aktif' WHERE id = ?", [id]);
+      await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)', [
+        id, incident.step, `Insiden dikembalikan ke pool oleh ${req.user.name}.`,
+      ]);
+    }
+    const [updated] = await conn.query('SELECT * FROM incidents WHERE id = ?', [id]);
+    req.app.get('io')?.emit('incident:update', { id, device: incident.device_name });
+    res.json({ incident: (await attachNotes(updated))[0] });
+  } finally {
+    conn.release();
+  }
+}
+
 // Tambah catatan bebas ke kronologi insiden (mis. komentar teknisi dari
 // sesi SSH Terminal). Sumber opsional untuk memberi prefiks pada catatan.
 export async function addIncidentNote(req, res) {
