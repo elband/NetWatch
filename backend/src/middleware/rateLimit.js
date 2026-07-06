@@ -21,6 +21,15 @@ export const pinLimiter = rateLimit({
   message: { error: 'Terlalu banyak percobaan PIN. Coba lagi dalam beberapa menit.' },
 });
 
+// Pembatas untuk reset PIN via OTP WhatsApp — cegah spam kirim WA & brute-force OTP.
+export const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.isProd ? 5 : 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Terlalu banyak permintaan reset. Coba lagi dalam beberapa menit.' },
+});
+
 // Pembatas umum untuk seluruh API (anti abuse/DoS ringan).
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,

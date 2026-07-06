@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../api/client';
 import PanduanModal from '../components/PanduanModal';
 import ThemeToggle from '../components/ThemeToggle';
 
@@ -17,6 +18,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPanduan, setShowPanduan] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
   const { loginPin } = useAuth();
   const navigate = useNavigate();
 
@@ -140,6 +142,9 @@ export default function Login() {
 
           {loading && <div className="text-[11px] text-text2 mt-4">Memverifikasi…</div>}
 
+          <button onClick={() => setShowForgot(true)} className="mt-4 text-[11px] text-text2 hover:text-accent underline">Lupa PIN? Reset via WhatsApp</button>
+
+
           {/* Panduan button — visible on mobile (md:hidden for desktop, covered by left panel) */}
           <button
             onClick={() => setShowPanduan(true)}
@@ -151,6 +156,78 @@ export default function Login() {
       </div>
 
       {showPanduan && <PanduanModal onClose={() => setShowPanduan(false)} />}
+      {showForgot && <ForgotPinModal onClose={() => setShowForgot(false)} />}
+    </div>
+  );
+}
+
+// Modal reset PIN via OTP WhatsApp — 2 langkah: minta OTP → verifikasi + set PIN baru.
+function ForgotPinModal({ onClose }: { onClose: () => void }) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [identifier, setIdentifier] = useState('');
+  const [otp, setOtp] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
+
+  async function requestOtp() {
+    if (!identifier.trim() || busy) return;
+    setBusy(true); setErr(''); setInfo('');
+    try {
+      const { data } = await api.post('/auth/forgot-pin', { identifier: identifier.trim() });
+      setInfo(data?.message || 'Jika akun terdaftar, OTP telah dikirim ke WhatsApp Anda.');
+      setStep(2);
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Gagal mengirim OTP. Coba lagi.');
+    } finally { setBusy(false); }
+  }
+
+  async function doReset() {
+    setErr(''); setInfo('');
+    if (!/^\d{6}$/.test(newPin)) return setErr('PIN baru harus 6 digit angka.');
+    if (newPin !== confirmPin) return setErr('Konfirmasi PIN tidak cocok.');
+    setBusy(true);
+    try {
+      const { data } = await api.post('/auth/reset-pin', { identifier: identifier.trim(), otp: otp.trim(), newPin });
+      setInfo(data?.message || 'PIN berhasil diperbarui. Silakan login dengan PIN baru.');
+      setStep(1); setErr('');
+      setTimeout(onClose, 1800);
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Gagal reset PIN.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-bold">🔐 Reset PIN via WhatsApp</h3>
+          <button onClick={onClose} className="text-text2 hover:text-text text-xl leading-none">×</button>
+        </div>
+        <p className="text-[11px] text-text2 mb-4">{step === 1 ? 'Masukkan username / email / nomor WhatsApp Anda. Kode OTP dikirim ke WhatsApp terdaftar.' : 'Masukkan kode OTP dari WhatsApp lalu PIN baru (6 digit).'}</p>
+
+        {info && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mb-3">{info}</div>}
+        {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+
+        {step === 1 ? (
+          <div className="space-y-3">
+            <input autoFocus value={identifier} onChange={(e) => setIdentifier(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && requestOtp()} placeholder="Username / email / no. WhatsApp" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-accent" />
+            <button disabled={busy || !identifier.trim()} onClick={requestOtp} className="w-full bg-accent text-bg rounded-lg px-3 py-2.5 text-sm font-semibold disabled:opacity-50">{busy ? 'Mengirim…' : 'Kirim OTP'}</button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <input autoFocus value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="Kode OTP (6 digit)" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm tracking-widest text-center outline-none focus:border-accent" />
+            <input type="password" value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="PIN baru (6 digit)" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-accent" />
+            <input type="password" value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={(e) => e.key === 'Enter' && doReset()} inputMode="numeric" placeholder="Ulangi PIN baru" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-accent" />
+            <div className="flex gap-2">
+              <button onClick={() => { setStep(1); setErr(''); setInfo(''); }} className="border border-border text-text2 rounded-lg px-3 py-2.5 text-sm hover:text-text">←</button>
+              <button disabled={busy} onClick={doReset} className="flex-1 bg-accent text-bg rounded-lg px-3 py-2.5 text-sm font-semibold disabled:opacity-50">{busy ? 'Memproses…' : 'Set PIN Baru'}</button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

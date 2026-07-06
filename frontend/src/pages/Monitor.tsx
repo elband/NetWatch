@@ -77,12 +77,15 @@ export default function Monitor() {
           </div>
           <div className="text-[11px] text-text2 mt-0.5">Update real-time via WebSocket</div>
         </div>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="🔍 Cari nama / IP / tipe…"
-          className="bg-surface2 border border-border rounded-lg px-3 py-2 text-xs w-full sm:w-64 outline-none focus:border-accent transition-colors"
-        />
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="🔍 Cari nama / IP / tipe…"
+            className="bg-surface2 border border-border rounded-lg px-3 py-2 text-xs flex-1 sm:w-64 outline-none focus:border-accent transition-colors"
+          />
+          <a href="/wallboard" title="Mode Wallboard / TV (layar dinding NOC)" className="border border-accent2/40 text-accent2 rounded-lg px-3 py-2 text-xs font-semibold hover:bg-accent2/10 whitespace-nowrap">📺 Wallboard</a>
+        </div>
       </div>
 
       {/* Ringkasan status — sekaligus tombol filter */}

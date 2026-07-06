@@ -32,6 +32,8 @@ import Perencanaan from './pages/Perencanaan';
 import Users from './pages/Users';
 import WaLog from './pages/WaLog';
 import Settings from './pages/Settings';
+import AuditLog from './pages/AuditLog';
+import Wallboard from './pages/Wallboard';
 import NotificationSettings from './pages/NotificationSettings';
 import PublicReports from './pages/PublicReports';
 import MasterData from './pages/MasterData';
@@ -80,6 +82,8 @@ export default function App() {
       <Route path="/skp-bukti" element={<SkpBuktiPublic />} />
       <Route path="/pinjam" element={<Pinjam />} />
       <Route element={<RequireAuth />}>
+        {/* Wallboard NOC — butuh login tapi tampil fullscreen tanpa sidebar. */}
+        <Route path="/wallboard" element={<Wallboard />} />
         <Route element={<AppLayout />}>
           {/* Terbuka untuk semua user terautentikasi */}
           <Route path="/" element={<HomeRedirect />} />
@@ -136,6 +140,7 @@ export default function App() {
           <Route element={<ProtectedRoute roles={['admin']} />}>
             <Route path="/settings" element={<Settings />} />
             <Route path="/notification-settings" element={<NotificationSettings />} />
+            <Route path="/audit" element={<AuditLog />} />
           </Route>
         </Route>
       </Route>

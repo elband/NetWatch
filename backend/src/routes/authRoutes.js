@@ -3,9 +3,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { login, loginPin, me, loginAs, updateProfile, logout } from '../controllers/authController.js';
+import { login, loginPin, me, loginAs, updateProfile, logout, forgotPin, resetPin } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/auth.js';
-import { authLimiter, pinLimiter } from '../middleware/rateLimit.js';
+import { authLimiter, pinLimiter, otpLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -20,6 +20,8 @@ const upload = multer({
 
 router.post('/login', authLimiter, login);
 router.post('/login-pin', pinLimiter, loginPin);
+router.post('/forgot-pin', otpLimiter, forgotPin);
+router.post('/reset-pin', otpLimiter, resetPin);
 router.get('/me', requireAuth, me);
 router.put('/profile', requireAuth, upload.single('photo'), updateProfile);
 router.post('/login-as/:id', requireAuth, loginAs);

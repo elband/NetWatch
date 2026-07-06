@@ -1,4 +1,5 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -42,6 +43,7 @@ import assetRoutes from './routes/assetRoutes.js';
 import sparepartRoutes from './routes/sparepartRoutes.js';
 import waterChemRoutes from './routes/waterChemRoutes.js';
 import perencanaanRoutes from './routes/perencanaanRoutes.js';
+import auditRoutes from './routes/auditRoutes.js';
 
 // Membangun & mengembalikan instance Express (tanpa listen/socket/worker) agar
 // bisa dipakai ulang oleh server.js (produksi) maupun test (supertest).
@@ -91,7 +93,22 @@ export function createApp() {
   }));
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+  // Berkas pribadi (cuti/sakit, sertifikat diklat, bukti kegiatan) TIDAK boleh
+  // diakses anonim walau URL-nya bocor. Folder ini tak pernah tampil di halaman
+  // publik, jadi aman digate. Folder lain (kop, foto insiden, bukti SKP publik,
+  // lampiran surat) tetap terbuka karena dipakai Puppeteer & halaman verifikasi publik.
+  const PROTECTED_UPLOADS = ['/leave/', '/diklat/', '/activities/', '/kegiatan/'];
+  app.use('/uploads', (req, res, next) => {
+    if (!PROTECTED_UPLOADS.some((p) => req.path.startsWith(p))) return next();
+    // Izinkan render server (Puppeteer membuka /doc-print dari localhost).
+    const ip = req.ip || '';
+    if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+    // Selain itu wajib sesi valid (cookie HttpOnly / Bearer).
+    const auth = req.headers.authorization || '';
+    const token = req.cookies?.netwatch_token || (auth.startsWith('Bearer ') ? auth.slice(7) : null);
+    try { jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] }); return next(); }
+    catch { return res.status(401).json({ error: 'Perlu login untuk mengakses berkas ini.' }); }
+  }, express.static(path.join(__dirname, '..', 'uploads')));
 
   app.get('/health', (req, res) => res.json({ ok: true }));
   app.use('/api', apiLimiter);
@@ -131,6 +148,7 @@ export function createApp() {
   app.use('/api/dokumen', dokumenRoutes);
   app.use('/api/kegiatan-nr', kegiatanNrRoutes);
   app.use('/api/perencanaan', perencanaanRoutes);
+  app.use('/api/audit', auditRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/notification-prefs', notificationPrefsRoutes);
   app.use('/api/sla', slaRoutes);
