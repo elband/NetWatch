@@ -53,3 +53,29 @@ export function withInspectionPhoto(req, res, next) {
     next();
   });
 }
+
+// Foto perangkat (thumbnail kartu di menu Peralatan): disimpan langsung ke disk.
+export const DEVICE_PHOTO_DIR = path.join(__dirname, '..', '..', 'uploads', 'devices');
+fs.mkdirSync(DEVICE_PHOTO_DIR, { recursive: true });
+
+const deviceStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, DEVICE_PHOTO_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    const safeId = String(req.params.id || 'dev').replace(/[^a-zA-Z0-9_-]/g, '');
+    cb(null, `D${safeId}-${Date.now()}${ext}`);
+  },
+});
+
+const uploadDevicePhoto = multer({
+  storage: deviceStorage,
+  fileFilter: imageFilter,
+  limits: { fileSize: 8 * 1024 * 1024 },
+}).single('photo');
+
+export function withDevicePhoto(req, res, next) {
+  uploadDevicePhoto(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+  });
+}

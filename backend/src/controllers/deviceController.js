@@ -105,6 +105,29 @@ export async function updateDevice(req, res) {
   res.json({ device: rows[0] });
 }
 
+// Foto perangkat: thumbnail kartu di menu Peralatan. Tanpa foto, kartu fallback ke emoji `icon`.
+export async function uploadDevicePhoto(req, res) {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  const device = rows[0];
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  if (!req.file) return res.status(400).json({ error: 'Berkas foto wajib diunggah.' });
+  const photoUrl = `/uploads/devices/${req.file.filename}`;
+  await pool.query('UPDATE devices SET photo_url=? WHERE id=?', [photoUrl, id]);
+  const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  res.json({ device: updated[0] });
+}
+
+export async function removeDevicePhoto(req, res) {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  const device = rows[0];
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  await pool.query('UPDATE devices SET photo_url=NULL WHERE id=?', [id]);
+  const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  res.json({ device: updated[0] });
+}
+
 export async function deleteDevice(req, res) {
   const id = Number(req.params.id);
   const uf = unitFilter(req.unitId);

@@ -32,6 +32,7 @@ export default function Devices() {
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState('');
   const [metricsDevice, setMetricsDevice] = useState<Device | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const canEdit = hasRole(user, 'admin', 'koordinator');
   const canEditDevice = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh edit (bukan hapus)
   const canAdd = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh tambah perangkat
@@ -67,6 +68,34 @@ export default function Devices() {
       alertDialog({ title: 'Alarm dibuat', message: r.data.incidentId ? `Alarm dibuat (${r.data.incidentId}). Notifikasi ke ${r.data.notified} teknisi on-duty.` : 'Perangkat ditandai untuk dialarmkan.', variant: 'success' });
     } catch (e: any) {
       alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mengalarmkan perangkat.', variant: 'danger' });
+    }
+  }
+
+  async function uploadPhoto(file: File) {
+    if (!editId) return;
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append('photo', file);
+      const res = await api.post(`/devices/${editId}/photo`, fd);
+      setDevices((prev) => prev.map((x) => (x.id === editId ? res.data.device : x)));
+    } catch (e: any) {
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal mengunggah foto.', variant: 'danger' });
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  async function removePhoto() {
+    if (!editId) return;
+    setUploadingPhoto(true);
+    try {
+      const res = await api.delete(`/devices/${editId}/photo`);
+      setDevices((prev) => prev.map((x) => (x.id === editId ? res.data.device : x)));
+    } catch (e: any) {
+      alertDialog({ title: 'Gagal', message: e?.response?.data?.error || 'Gagal menghapus foto.', variant: 'danger' });
+    } finally {
+      setUploadingPhoto(false);
     }
   }
 
@@ -173,6 +202,7 @@ export default function Devices() {
   const filtered = devices.filter(
     (d) => d.name.toLowerCase().includes(search.toLowerCase()) || d.ip.includes(search) || d.type.toLowerCase().includes(search.toLowerCase())
   );
+  const editingDevice = editId ? devices.find((x) => x.id === editId) : null;
 
   return (
     <div>
@@ -203,11 +233,18 @@ export default function Devices() {
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {filtered.map((d) => (
             <div key={d.id} className="bg-surface border border-border rounded-xl p-3.5 flex flex-col gap-2.5">
-              {/* Header: nama + status */}
+              {/* Header: foto/ikon + nama + status */}
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm truncate" title={d.name}>{d.icon && <span className="mr-1.5">{d.icon}</span>}{d.name}</div>
-                  <div className="text-[10px] text-text2 font-mono truncate mt-0.5">{d.ip}</div>
+                <div className="flex items-start gap-2.5 min-w-0">
+                  {(d.photo_url || d.icon) && (
+                    <span className="w-10 h-10 rounded-md border border-border bg-surface2 flex items-center justify-center overflow-hidden shrink-0 text-lg">
+                      {d.photo_url ? <img src={d.photo_url} alt="" className="w-full h-full object-cover" /> : d.icon}
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm truncate" title={d.name}>{d.name}</div>
+                    <div className="text-[10px] text-text2 font-mono truncate mt-0.5">{d.ip}</div>
+                  </div>
                 </div>
                 <div className="shrink-0"><DeviceStatusBadge status={d.status} offReason={d.off_reason} monitorEnabled={d.monitor_enabled} underMaintenance={d.under_maintenance} /></div>
               </div>
@@ -348,6 +385,29 @@ export default function Devices() {
                   <datalist id="svc-names">{serviceNames.map((n) => <option key={n} value={n} />)}</datalist>
                 </Field>
                 <div className="text-[10px] text-text2 mt-1">Perangkat dengan kategori = nama layanan akan menentukan status kartu "Monitoring Layanan Kritis" di dashboard.</div>
+              </div>
+              <div className="col-span-2">
+                <Field label="Foto Perangkat">
+                  {editId ? (
+                    <div className="flex items-center gap-3">
+                      <span className="w-14 h-14 rounded-md border border-border bg-surface2 flex items-center justify-center overflow-hidden shrink-0 text-2xl">
+                        {editingDevice?.photo_url ? <img src={editingDevice.photo_url} alt="" className="w-full h-full object-cover" /> : (form.icon || '📦')}
+                      </span>
+                      <div className="flex flex-col gap-1.5">
+                        <label className={`bg-surface2 border border-border rounded-md px-2.5 py-1.5 text-[11px] w-fit hover:border-accent/50 ${uploadingPhoto ? 'opacity-60' : 'cursor-pointer'}`}>
+                          {uploadingPhoto ? 'Mengunggah...' : '📷 Unggah Foto'}
+                          <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto}
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); e.target.value = ''; }} />
+                        </label>
+                        {editingDevice?.photo_url && (
+                          <button type="button" onClick={removePhoto} disabled={uploadingPhoto} className="text-[10px] text-danger text-left hover:underline">Hapus foto</button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-text2 bg-surface2 border border-border rounded-md px-3 py-2">📷 Foto bisa diunggah setelah perangkat disimpan — buka menu Edit.</div>
+                  )}
+                </Field>
               </div>
               <div className="col-span-2">
                 <Field label="Ikon (untuk kartu layanan)">
