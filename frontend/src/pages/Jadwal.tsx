@@ -5,7 +5,7 @@ import { hasRole } from '../utils/roles';
 import type { Shift, User } from '../types';
 
 // Kode & label resmi (selaras dengan Laporan Bulanan): N = Dinas Kantor, P = Pagi, S = Siang, L = Libur.
-const SHIFT_COLOR: Record<string, string> = { pagi: 'text-success bg-success/10', siang: 'text-warn bg-warn/10', malam: 'text-accent2 bg-accent2/10', libur: 'text-text2 bg-border/30', dinas_luar: 'text-[#a78bfa] bg-[#a78bfa]/10', cuti: 'text-[#f472b6] bg-[#f472b6]/10' };
+const SHIFT_COLOR: Record<string, string> = { pagi: 'text-success bg-success/10', siang: 'text-warn bg-warn/10', malam: 'text-accent2 bg-accent2/10', libur: 'text-danger bg-danger/10', dinas_luar: 'text-[#a78bfa] bg-[#a78bfa]/10', cuti: 'text-[#f472b6] bg-[#f472b6]/10' };
 const SHIFT_ABBR: Record<string, string> = { pagi: 'P', siang: 'S', malam: 'N', libur: 'L', dinas_luar: 'DL', cuti: 'C' };
 const SHIFT_LABEL: Record<string, string> = { pagi: 'Dinas Pagi', siang: 'Dinas Siang', malam: 'Dinas Kantor', libur: 'Libur', dinas_luar: 'Dinas Luar', cuti: 'Cuti' };
 // DL (dinas_luar) tidak masuk siklus klik — hanya lewat pengajuan teknisi + persetujuan koordinator.
@@ -186,7 +186,7 @@ export default function Jadwal() {
                     );
                   })}
                   <td className="border-b border-l border-border text-[9px] text-text2 px-1.5 py-1.5 whitespace-nowrap">
-                    <span className="text-success">{c.pagi}</span>/<span className="text-warn">{c.siang}</span>/<span className="text-accent2">{c.malam}</span>/<span className="text-text2">{c.libur}</span>
+                    <span className="text-success">{c.pagi}</span>/<span className="text-warn">{c.siang}</span>/<span className="text-accent2">{c.malam}</span>/<span className="text-danger">{c.libur}</span>
                   </td>
                 </tr>
               );
