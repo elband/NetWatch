@@ -34,6 +34,7 @@ import WaLog from './pages/WaLog';
 import Settings from './pages/Settings';
 import AuditLog from './pages/AuditLog';
 import Wallboard from './pages/Wallboard';
+import Noc from './pages/Noc';
 import NotificationSettings from './pages/NotificationSettings';
 import PublicReports from './pages/PublicReports';
 import MasterData from './pages/MasterData';
@@ -81,6 +82,7 @@ export default function App() {
       <Route path="/skp-publik" element={<SkpPublic />} />
       <Route path="/skp-bukti" element={<SkpBuktiPublic />} />
       <Route path="/pinjam" element={<Pinjam />} />
+      <Route path="/noc" element={<Noc />} />
       <Route element={<RequireAuth />}>
         {/* Wallboard NOC — butuh login tapi tampil fullscreen tanpa sidebar. */}
         <Route path="/wallboard" element={<Wallboard />} />

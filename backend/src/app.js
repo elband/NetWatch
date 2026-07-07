@@ -44,6 +44,7 @@ import sparepartRoutes from './routes/sparepartRoutes.js';
 import waterChemRoutes from './routes/waterChemRoutes.js';
 import perencanaanRoutes from './routes/perencanaanRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
+import nocRoutes from './routes/nocRoutes.js';
 
 // Membangun & mengembalikan instance Express (tanpa listen/socket/worker) agar
 // bisa dipakai ulang oleh server.js (produksi) maupun test (supertest).
@@ -122,6 +123,7 @@ export function createApp() {
   app.post('/api/surat/pelaksana-sign/:token', submitPelaksanaSign);
   app.use('/api/auth', authRoutes);
   app.use('/api/units', unitRoutes);
+  app.use('/api/noc', nocRoutes); // wallboard publik NOC — punya route publik /public (token)
   app.use('/api/aset', assetRoutes); // aset non-IP (Fase 2) — punya route publik /public/:token
   app.use('/api/spareparts', sparepartRoutes); // sparepart & stok (Fase 4)
   app.use('/api/obat-air', waterChemRoutes); // obat air / bahan kimia (Fase 5c, AAB)

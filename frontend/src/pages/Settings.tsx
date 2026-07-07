@@ -20,6 +20,9 @@ export default function Settings() {
   const [form, setForm] = useState({ wa_provider: 'gateway', wa_coord_phone: '', threshold_cpu: 80, threshold_mem: 85, threshold_ping_timeout_ms: 3000, auto_resolve_stable_sec: 300, auto_detect_offline_sec: 120 });
   const [lkp, setLkp] = useState<LkpForm>(LKP_DEFAULT);
   const [saved, setSaved] = useState(false);
+  const [nocToken, setNocToken] = useState('');
+  const [nocUnits, setNocUnits] = useState<{ id: number; code: string; name: string; active: number }[]>([]);
+  const [nocCopied, setNocCopied] = useState('');
   const [tz, setTz] = useState('Asia/Makassar');
   const [srv, setSrv] = useState<{ tz: string; offset: string } | null>(null);
   const [clock, setClock] = useState('—');
@@ -64,8 +67,19 @@ export default function Settings() {
     });
     loadServerTime();
     loadMigStatus();
+    api.get('/noc/token').then((r) => setNocToken(r.data.token)).catch(() => {});
+    api.get('/units').then((r) => setNocUnits((r.data.units || []).filter((u: { active: number }) => u.active !== 0))).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const nocLink = (code: string) => `${location.origin}/noc?unit=${encodeURIComponent(code)}&key=${nocToken}`;
+  async function regenNoc() {
+    if (!(await confirmDialog({ title: 'Ganti token wallboard?', message: 'Semua tautan lama langsung tidak berlaku; layar NOC yang terbuka perlu tautan baru.', confirmText: '🔁 Ganti token', variant: 'danger' }))) return;
+    const r = await api.post('/noc/token/regenerate'); setNocToken(r.data.token);
+  }
+  async function copyNoc(code: string) {
+    try { await navigator.clipboard.writeText(nocLink(code)); setNocCopied(code); setTimeout(() => setNocCopied(''), 1500); } catch { /* abaikan */ }
+  }
 
   // Jam server berdetak: hitung dari epoch server + selisih lokal, format di zona server.
   useEffect(() => {
@@ -227,6 +241,29 @@ export default function Settings() {
           <div className="col-span-2 flex items-center gap-3">
             <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold" onClick={saveLkp}>💾 Simpan Kop LKP</button>
             <span className="text-[10px] text-text2">Nama Koordinator dipakai sebagai penanda tangan elektronik (TTE QR) pada cetakan laporan.</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Wallboard Publik (NOC) — tautan rahasia untuk layar TV tanpa login */}
+      <div className="bg-surface border border-border rounded-[10px] overflow-hidden mt-4">
+        <div className="px-4 py-3 border-b border-border text-[13px] font-semibold">📺 Wallboard Publik (NOC) — Tautan Layar TV</div>
+        <div className="p-4 space-y-3">
+          <p className="text-[10px] text-text2">Tautan rahasia untuk memajang wallboard di layar TV <b>tanpa login</b> (peta lokasi, gangguan real-time, daftar gangguan hari ini). Bagikan hanya ke layar NOC. Ganti token bila tautan bocor — semua tautan lama langsung mati.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] text-text2 w-16">Token</label>
+            <input readOnly className="flex-1 bg-surface2 border border-border rounded-md px-3 py-2 text-xs font-mono" value={nocToken} onFocus={(e) => e.target.select()} />
+            <button onClick={regenNoc} className="border border-danger/50 text-danger rounded-md px-3 py-2 text-xs font-semibold whitespace-nowrap">🔁 Ganti</button>
+          </div>
+          <div className="space-y-1.5">
+            {nocUnits.length === 0 ? <div className="text-[11px] text-text2">Belum ada unit aktif.</div> : nocUnits.map((u) => (
+              <div key={u.id} className="flex items-center gap-2">
+                <span className="text-[11px] text-text2 w-16 truncate" title={u.name}>{u.code}</span>
+                <input readOnly className="flex-1 bg-surface2 border border-border rounded-md px-3 py-1.5 text-[11px] font-mono" value={nocLink(u.code)} onFocus={(e) => e.target.select()} />
+                <button onClick={() => copyNoc(u.code)} className="border border-accent/40 text-accent rounded-md px-3 py-1.5 text-[11px] font-semibold whitespace-nowrap">{nocCopied === u.code ? '✓ Disalin' : '📋 Salin'}</button>
+                <a href={nocLink(u.code)} target="_blank" rel="noreferrer" className="border border-border text-text2 rounded-md px-3 py-1.5 text-[11px] whitespace-nowrap hover:text-text">↗ Buka</a>
+              </div>
+            ))}
           </div>
         </div>
       </div>
