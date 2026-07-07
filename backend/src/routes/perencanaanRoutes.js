@@ -27,18 +27,26 @@ function fields(b, prev = {}) {
   const realisasi = raw == null || raw === ''
     ? (raw === '' ? null : (prev.realisasi_biaya ?? null))   // '' = kosongkan; undefined = pertahankan
     : rupiah(raw);
+  const txt = (v, prevV, max = 500) => (v != null ? (String(v).trim().slice(0, max) || null) : (prevV ?? null));
   return {
     tahun: Number(b.tahun) || prev.tahun || new Date().getFullYear(),
     kuartal: [0, 1, 2, 3, 4].includes(Number(b.kuartal)) ? Number(b.kuartal) : (prev.kuartal ?? 0),
     kategori: KATEGORI.includes(b.kategori) ? b.kategori : (prev.kategori || 'lainnya'),
     judul: (b.judul ?? prev.judul ?? '').toString().trim(),
     deskripsi: b.deskripsi != null ? (String(b.deskripsi).trim() || null) : (prev.deskripsi ?? null),
+    tujuan: txt(b.tujuan, prev.tujuan),
+    keluaran: txt(b.keluaran, prev.keluaran),
+    volume: txt(b.volume, prev.volume, 120),
+    indikator: txt(b.indikator, prev.indikator),
     prioritas: PRIORITAS.includes(b.prioritas) ? b.prioritas : (prev.prioritas || 'sedang'),
     status,
     progres,
     estimasi_biaya: b.estimasi_biaya != null ? rupiah(b.estimasi_biaya) : (prev.estimasi_biaya ?? 0),
     realisasi_biaya: realisasi,
+    sumber_dana: txt(b.sumber_dana, prev.sumber_dana, 40),
+    start_date: b.start_date !== undefined ? (b.start_date || null) : (prev.start_date ?? null),
     target_date: b.target_date !== undefined ? (b.target_date || null) : (prev.target_date ?? null),
+    metode: txt(b.metode, prev.metode, 40),
     pic_nama: b.pic_nama != null ? (String(b.pic_nama).trim() || null) : (prev.pic_nama ?? null),
     catatan: b.catatan != null ? (String(b.catatan).trim() || null) : (prev.catatan ?? null),
   };
@@ -73,9 +81,9 @@ router.post('/', async (req, res) => {
   const unitId = insertUnitId(req);
   if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu (via pemilih unit di header).' });
   const [r] = await pool.query(
-    `INSERT INTO unit_plans (unit_id, tahun, kuartal, kategori, judul, deskripsi, prioritas, status, progres, estimasi_biaya, realisasi_biaya, target_date, pic_nama, catatan, created_by, creator_name)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [unitId, f.tahun, f.kuartal, f.kategori, f.judul, f.deskripsi, f.prioritas, f.status, f.progres, f.estimasi_biaya, f.realisasi_biaya, f.target_date, f.pic_nama, f.catatan, req.user.id, req.user.name]
+    `INSERT INTO unit_plans (unit_id, tahun, kuartal, kategori, judul, deskripsi, tujuan, keluaran, volume, indikator, prioritas, status, progres, estimasi_biaya, realisasi_biaya, sumber_dana, start_date, target_date, metode, pic_nama, catatan, created_by, creator_name)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [unitId, f.tahun, f.kuartal, f.kategori, f.judul, f.deskripsi, f.tujuan, f.keluaran, f.volume, f.indikator, f.prioritas, f.status, f.progres, f.estimasi_biaya, f.realisasi_biaya, f.sumber_dana, f.start_date, f.target_date, f.metode, f.pic_nama, f.catatan, req.user.id, req.user.name]
   );
   const [rows] = await pool.query('SELECT * FROM unit_plans WHERE id=?', [r.insertId]);
   res.status(201).json({ plan: rows[0] });
@@ -90,8 +98,8 @@ router.put('/:id', async (req, res) => {
   const f = fields(req.body, d);
   if (!f.judul) return res.status(400).json({ error: 'Judul rencana wajib diisi.' });
   await pool.query(
-    `UPDATE unit_plans SET tahun=?, kuartal=?, kategori=?, judul=?, deskripsi=?, prioritas=?, status=?, progres=?, estimasi_biaya=?, realisasi_biaya=?, target_date=?, pic_nama=?, catatan=? WHERE id=?`,
-    [f.tahun, f.kuartal, f.kategori, f.judul, f.deskripsi, f.prioritas, f.status, f.progres, f.estimasi_biaya, f.realisasi_biaya, f.target_date, f.pic_nama, f.catatan, id]
+    `UPDATE unit_plans SET tahun=?, kuartal=?, kategori=?, judul=?, deskripsi=?, tujuan=?, keluaran=?, volume=?, indikator=?, prioritas=?, status=?, progres=?, estimasi_biaya=?, realisasi_biaya=?, sumber_dana=?, start_date=?, target_date=?, metode=?, pic_nama=?, catatan=? WHERE id=?`,
+    [f.tahun, f.kuartal, f.kategori, f.judul, f.deskripsi, f.tujuan, f.keluaran, f.volume, f.indikator, f.prioritas, f.status, f.progres, f.estimasi_biaya, f.realisasi_biaya, f.sumber_dana, f.start_date, f.target_date, f.metode, f.pic_nama, f.catatan, id]
   );
   const [u] = await pool.query('SELECT * FROM unit_plans WHERE id=?', [id]);
   res.json({ plan: u[0] });

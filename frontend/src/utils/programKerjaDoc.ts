@@ -81,6 +81,17 @@ function planMonths(kuartal: number): number[] {
   const s = (kuartal - 1) * 3;
   return [s, s + 1, s + 2];
 }
+// Bulan aktif untuk matriks: pakai rentang tanggal mulai→selesai bila ada, jika tidak fallback ke kuartal.
+function activeMonths(p: UnitPlan): number[] {
+  const mk = (s: string | null) => (s ? new Date(s + 'T00:00:00').getMonth() : null);
+  const s = mk(p.start_date), e = mk(p.target_date);
+  if (s == null && e == null) return planMonths(Number(p.kuartal) || 0);
+  const lo = Math.max(0, Math.min(s ?? e ?? 0, e ?? s ?? 0));
+  const hi = Math.min(11, Math.max(s ?? e ?? 0, e ?? s ?? 0));
+  const arr: number[] = [];
+  for (let m = lo; m <= hi; m++) arr.push(m);
+  return arr;
+}
 
 export function buildProgramKerjaHtml(d: PkData, origin: string): string {
   const { cfg, lkp, tahun } = d;
@@ -144,7 +155,22 @@ export function buildProgramKerjaHtml(d: PkData, origin: string): string {
 
   // ---------- IV. Kegiatan (A. Preventif + B. Korektif/Program) ----------
   const korektifItems = d.plans.length
-    ? `<ol class="korektif">${d.plans.map((p) => `<li><b>${esc(p.judul)}</b>${p.deskripsi ? `<div class="just" style="margin-top:2px">${esc(p.deskripsi).replace(/\n/g, '<br>')}</div>` : ''}<div class="small">Kategori: ${esc(KATEGORI_LABEL[p.kategori] || p.kategori)}${p.target_date ? ` · Target: ${esc(p.target_date)}` : ''}${p.pic_nama ? ` · PIC: ${esc(p.pic_nama)}` : ''}</div></li>`).join('')}</ol>`
+    ? `<ol class="korektif">${d.plans.map((p) => {
+        const meta = [
+          `Kategori: ${esc(KATEGORI_LABEL[p.kategori] || p.kategori)}`,
+          (p.start_date || p.target_date) ? `Jadwal: ${esc(p.start_date || '—')} s/d ${esc(p.target_date || '—')}` : '',
+          p.sumber_dana ? `Sumber dana: ${esc(p.sumber_dana)}` : '',
+          p.pic_nama ? `PIC: ${esc(p.pic_nama)}` : '',
+        ].filter(Boolean).join(' · ');
+        return `<li><b>${esc(p.judul)}</b>
+          ${p.deskripsi ? `<div class="just" style="margin-top:2px">${esc(p.deskripsi).replace(/\n/g, '<br>')}</div>` : ''}
+          <div class="pk-detail">
+            ${p.tujuan ? `<div><b>Tujuan:</b> ${esc(p.tujuan)}</div>` : ''}
+            ${p.keluaran ? `<div><b>Output:</b> ${esc(p.keluaran)}${p.volume ? ` (${esc(p.volume)})` : ''}</div>` : ''}
+            ${p.indikator ? `<div><b>Indikator:</b> ${esc(p.indikator)}</div>` : ''}
+          </div>
+          <div class="small">${meta}</div></li>`;
+      }).join('')}</ol>`
     : '<div class="small">Belum ada program kerja terdaftar untuk tahun ini.</div>';
   const kegiatan = `<div class="page">
     ${secTitle('IV', 'Kegiatan')}
@@ -177,7 +203,7 @@ export function buildProgramKerjaHtml(d: PkData, origin: string): string {
   }).join('') || `<tr><td></td><td class="lbl2 small">Belum ada peralatan terdaftar.</td>${emptyCells()}</tr>`;
   // Baris kegiatan (rencana): sel hijau di bulan aktif.
   const kegiatanRows = d.plans.map((p, i) => {
-    const months = new Set(planMonths(Number(p.kuartal) || 0));
+    const months = new Set(activeMonths(p));
     const cells = [];
     for (let m = 0; m < 12; m++) for (let w = 0; w < 4; w++) cells.push(months.has(m) ? cell('#5cb85c') : '<td class="mc"></td>');
     return `<tr><td class="c">${i + 1}</td><td class="lbl2">${esc(p.judul)}</td>${cells.join('')}</tr>`;
@@ -267,6 +293,7 @@ export function buildProgramKerjaHtml(d: PkData, origin: string): string {
     .subsec{font-weight:bold;margin:12px 0 2px;padding-left:8px}
     p.just{margin:6px 0}
     ol.korektif{margin:6px 0 0 0;padding-left:22px}ol.korektif li{margin-bottom:8px;text-align:justify}
+    .pk-detail{margin:3px 0;font-size:11px}.pk-detail div{margin:1px 0}
     .small{font-size:10px;color:#555}
     /* Tabel data */
     table.data{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}

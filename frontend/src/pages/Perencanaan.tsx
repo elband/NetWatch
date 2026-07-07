@@ -39,6 +39,16 @@ const PK_LKP_DEFAULT: PkLkp = {
   koord_jabatan: 'KOORDINATOR UNIT ELEKTRONIKA BANDARA', koord_nama: 'PRAYUDA ELFANDRO', koord_nip: '19930311 202203 1 008',
   nd_kode: 'ELBAND/APTP', nd_yth: 'Kepala BLU Kantor UPBU Kelas I A.P.T. Pranoto-Samarinda', nd_dari: 'Koordinator Elektronika Bandara',
 };
+const SUMBER_DANA = ['BLU', 'DIPA (RM)', 'PNBP', 'Hibah', 'Lainnya'];
+const METODE = ['Swakelola', 'Pengadaan Langsung', 'Tender', 'E-Katalog', 'Lainnya'];
+
+// Kelengkapan data rencana (0–100%) untuk badge/nudge di kartu.
+function completeness(p: UnitPlan): number {
+  const fields: (keyof UnitPlan)[] = ['judul', 'tujuan', 'keluaran', 'indikator', 'sumber_dana', 'start_date', 'target_date', 'pic_nama'];
+  let filled = fields.reduce((n, k) => n + (p[k] != null && String(p[k]).trim() !== '' ? 1 : 0), 0);
+  if (Number(p.estimasi_biaya) > 0) filled++;
+  return Math.round((filled / (fields.length + 1)) * 100);
+}
 
 export default function Perencanaan() {
   const [tab, setTab] = useState<'program' | 'anggaran' | 'pengadaan' | 'kpi'>('program');
@@ -241,16 +251,24 @@ function PlanCard({ p, onEdit, onDelete, onQuick }: { p: UnitPlan; onEdit: () =>
   const kat = katOf(p.kategori);
   const st = stOf(p.status);
   const prio = PRIO[p.prioritas] || PRIO.sedang;
+  const comp = completeness(p);
+  const jadwal = p.start_date || p.target_date ? `📅 ${p.start_date ? p.start_date + '→' : ''}${p.target_date || ''}` : '';
   return (
     <div className="bg-surface border border-border rounded-xl p-3.5 flex flex-col gap-2 hover:border-accent/40 transition-colors">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-semibold text-sm leading-snug">{p.judul}</div>
-          <div className="text-[10px] text-text2 mt-0.5">{kat.icon} {kat.label}{p.target_date ? ` · 📅 ${p.target_date}` : ''}</div>
+          <div className="text-[10px] text-text2 mt-0.5">{kat.icon} {kat.label}{jadwal ? ` · ${jadwal}` : ''}</div>
         </div>
-        <span className={`shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${prio.cls}`}>{prio.label}</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {comp === 100
+            ? <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border text-success bg-success/10 border-success/40" title="Data lengkap">✓ Lengkap</span>
+            : <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border text-warn bg-warn/10 border-warn/40" title="Kelengkapan data rencana">{comp}%</span>}
+          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${prio.cls}`}>{prio.label}</span>
+        </div>
       </div>
-      {p.deskripsi && <div className="text-[11px] text-text2 line-clamp-2">{p.deskripsi}</div>}
+      {(p.tujuan || p.deskripsi) && <div className="text-[11px] text-text2 line-clamp-2">{p.tujuan || p.deskripsi}</div>}
+      {p.keluaran && <div className="text-[10px] text-text2 truncate">📦 {p.keluaran}{p.volume ? ` (${p.volume})` : ''}</div>}
 
       <div>
         <div className="flex items-center justify-between text-[10px] text-text2 mb-1"><span>Progres</span><span className="font-semibold text-text">{p.progres}%</span></div>
@@ -258,7 +276,7 @@ function PlanCard({ p, onEdit, onDelete, onQuick }: { p: UnitPlan; onEdit: () =>
       </div>
 
       <div className="flex items-center justify-between text-[10px] text-text2 gap-2">
-        <span className="truncate">💰 {rp(p.estimasi_biaya)}{p.realisasi_biaya != null ? ` · real ${rp(p.realisasi_biaya)}` : ''}</span>
+        <span className="truncate">💰 {rp(p.estimasi_biaya)}{p.sumber_dana ? ` · ${p.sumber_dana}` : ''}{p.realisasi_biaya != null ? ` · real ${rp(p.realisasi_biaya)}` : ''}</span>
         {p.pic_nama && <span className="truncate max-w-[110px] shrink-0" title={p.pic_nama}>👤 {p.pic_nama}</span>}
       </div>
 
@@ -277,8 +295,10 @@ function PlanCard({ p, onEdit, onDelete, onQuick }: { p: UnitPlan; onEdit: () =>
 
 interface Form {
   tahun: number; kuartal: number; kategori: string; judul: string; deskripsi: string;
+  tujuan: string; keluaran: string; volume: string; indikator: string;
   prioritas: string; status: string; progres: number; estimasi_biaya: number;
-  realisasi_biaya: number | ''; target_date: string; pic_nama: string; catatan: string;
+  realisasi_biaya: number | ''; sumber_dana: string; start_date: string; target_date: string; metode: string;
+  pic_nama: string; catatan: string;
 }
 
 function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | null; tahun: number; seed?: Partial<Form>; onClose: () => void; onSaved: () => void }) {
@@ -288,12 +308,19 @@ function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | n
     kategori: plan?.kategori ?? seed?.kategori ?? 'pemeliharaan',
     judul: plan?.judul ?? seed?.judul ?? '',
     deskripsi: plan?.deskripsi ?? seed?.deskripsi ?? '',
+    tujuan: plan?.tujuan ?? seed?.tujuan ?? '',
+    keluaran: plan?.keluaran ?? seed?.keluaran ?? '',
+    volume: plan?.volume ?? '',
+    indikator: plan?.indikator ?? '',
     prioritas: plan?.prioritas ?? 'sedang',
     status: plan?.status ?? 'rencana',
     progres: plan?.progres ?? 0,
     estimasi_biaya: plan?.estimasi_biaya ?? 0,
     realisasi_biaya: plan?.realisasi_biaya ?? '',
+    sumber_dana: plan?.sumber_dana ?? '',
+    start_date: plan?.start_date ?? '',
     target_date: plan?.target_date ?? '',
+    metode: plan?.metode ?? '',
     pic_nama: plan?.pic_nama ?? '',
     catatan: plan?.catatan ?? '',
   });
@@ -302,7 +329,13 @@ function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | n
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
 
   async function save() {
-    if (!f.judul.trim()) return setErr('Judul rencana wajib diisi.');
+    const miss: string[] = [];
+    if (!f.judul.trim()) miss.push('Judul');
+    if (!f.tujuan.trim()) miss.push('Tujuan');
+    if (!f.keluaran.trim()) miss.push('Output/Keluaran');
+    if (!f.target_date) miss.push('Target selesai');
+    if (!f.pic_nama.trim()) miss.push('PIC');
+    if (miss.length) return setErr('Wajib diisi: ' + miss.join(', ') + '.');
     setBusy(true); setErr('');
     try {
       if (plan) await api.put(`/perencanaan/${plan.id}`, f);
@@ -329,6 +362,19 @@ function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | n
             <select className={inp} value={f.kuartal} onChange={(e) => set('kuartal', Number(e.target.value))}>{KUARTAL.map((k, i) => <option key={i} value={i}>{k}</option>)}</select></div>
         </div>
 
+        {/* Substansi — inti yang mengisi narasi Korektif di dokumen PDF */}
+        <div className="text-[11px] font-semibold text-accent2 mb-2 mt-1">📌 Substansi</div>
+        <label className={lbl}>Tujuan / sasaran <span className="text-danger">*</span></label>
+        <textarea className={`${inp} min-h-[46px] mb-3`} value={f.tujuan} onChange={(e) => set('tujuan', e.target.value)} placeholder="Apa yang ingin dicapai rencana ini…" />
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="col-span-2"><label className={lbl}>Output / Keluaran <span className="text-danger">*</span></label>
+            <input className={inp} value={f.keluaran} onChange={(e) => set('keluaran', e.target.value)} placeholder="mis. APD lengkap teknisi" /></div>
+          <div><label className={lbl}>Volume</label>
+            <input className={inp} value={f.volume} onChange={(e) => set('volume', e.target.value)} placeholder="mis. 10 set" /></div>
+        </div>
+        <label className={lbl}>Indikator keberhasilan</label>
+        <input className={`${inp} mb-3`} value={f.indikator} onChange={(e) => set('indikator', e.target.value)} placeholder="mis. 0 kecelakaan kerja / 100% teknisi ber-APD" />
+
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div><label className={lbl}>Prioritas</label>
             <select className={inp} value={f.prioritas} onChange={(e) => set('prioritas', e.target.value)}><option value="tinggi">Tinggi</option><option value="sedang">Sedang</option><option value="rendah">Rendah</option></select></div>
@@ -336,25 +382,35 @@ function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | n
             <select className={inp} value={f.status} onChange={(e) => set('status', e.target.value)}>{STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div><label className={lbl}>Target selesai</label>
+        {/* Jadwal — rentang mulai→selesai mengisi matriks jadwal tahunan di PDF */}
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div><label className={lbl}>Tanggal mulai</label>
+            <input type="date" className={inp} value={f.start_date || ''} onChange={(e) => set('start_date', e.target.value)} /></div>
+          <div><label className={lbl}>Target selesai <span className="text-danger">*</span></label>
             <input type="date" className={inp} value={f.target_date || ''} onChange={(e) => set('target_date', e.target.value)} /></div>
           <div><label className={lbl}>Progres (%)</label>
             <input type="number" min={0} max={100} className={inp} value={f.progres} onChange={(e) => set('progres', Math.min(100, Math.max(0, Number(e.target.value) || 0)))} /></div>
         </div>
 
+        {/* Anggaran */}
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div><label className={lbl}>Estimasi biaya (Rp)</label>
             <input type="number" min={0} className={inp} value={f.estimasi_biaya} onChange={(e) => set('estimasi_biaya', Math.max(0, Number(e.target.value) || 0))} /></div>
           <div><label className={lbl}>Realisasi biaya (Rp)</label>
             <input type="number" min={0} className={inp} value={f.realisasi_biaya} onChange={(e) => set('realisasi_biaya', e.target.value === '' ? '' : Math.max(0, Number(e.target.value) || 0))} placeholder="kosong = belum" /></div>
         </div>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div><label className={lbl}>Sumber dana</label>
+            <select className={inp} value={f.sumber_dana} onChange={(e) => set('sumber_dana', e.target.value)}><option value="">—</option>{SUMBER_DANA.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+          <div><label className={lbl}>Metode <span className="text-text2/60">(opsional)</span></label>
+            <select className={inp} value={f.metode} onChange={(e) => set('metode', e.target.value)}><option value="">—</option>{METODE.map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
+        </div>
 
-        <label className={lbl}>PIC / Penanggung jawab</label>
+        <label className={lbl}>PIC / Penanggung jawab <span className="text-danger">*</span></label>
         <input className={`${inp} mb-3`} value={f.pic_nama} onChange={(e) => set('pic_nama', e.target.value)} placeholder="Nama penanggung jawab" />
 
-        <label className={lbl}>Deskripsi / sasaran</label>
-        <textarea className={`${inp} min-h-[60px] mb-3`} value={f.deskripsi} onChange={(e) => set('deskripsi', e.target.value)} placeholder="Rincian rencana, sasaran, keterangan…" />
+        <label className={lbl}>Latar belakang / deskripsi</label>
+        <textarea className={`${inp} min-h-[54px] mb-3`} value={f.deskripsi} onChange={(e) => set('deskripsi', e.target.value)} placeholder="Rincian rencana, latar belakang, keterangan…" />
 
         <label className={lbl}>Catatan</label>
         <input className={`${inp} mb-3`} value={f.catatan} onChange={(e) => set('catatan', e.target.value)} />

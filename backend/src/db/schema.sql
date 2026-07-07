@@ -516,12 +516,19 @@ CREATE TABLE IF NOT EXISTS unit_plans (
   kategori VARCHAR(24) NOT NULL DEFAULT 'lainnya',    -- pemeliharaan|pengadaan|sdm|pengembangan|administrasi|lainnya
   judul VARCHAR(200) NOT NULL,
   deskripsi TEXT DEFAULT NULL,
+  tujuan VARCHAR(500) DEFAULT NULL,                   -- sasaran/tujuan rencana
+  keluaran VARCHAR(500) DEFAULT NULL,                 -- output/keluaran konkret
+  volume VARCHAR(120) DEFAULT NULL,                   -- jumlah/satuan (mis. "10 set")
+  indikator VARCHAR(500) DEFAULT NULL,               -- indikator keberhasilan
   prioritas VARCHAR(8) NOT NULL DEFAULT 'sedang',     -- tinggi|sedang|rendah
   status VARCHAR(12) NOT NULL DEFAULT 'rencana',      -- rencana|berjalan|selesai|tertunda|batal
   progres TINYINT NOT NULL DEFAULT 0,                 -- 0..100
   estimasi_biaya BIGINT NOT NULL DEFAULT 0,           -- rupiah
   realisasi_biaya BIGINT DEFAULT NULL,                -- rupiah (kosong = belum terealisasi)
+  sumber_dana VARCHAR(40) DEFAULT NULL,               -- BLU|DIPA (RM)|PNBP|Hibah|Lainnya
+  start_date DATE DEFAULT NULL,
   target_date DATE DEFAULT NULL,
+  metode VARCHAR(40) DEFAULT NULL,                    -- Swakelola|Pengadaan Langsung|Tender|E-Katalog|Lainnya
   pic_user_id INT DEFAULT NULL,                       -- opsional: tautan ke user (untuk fase lanjut)
   pic_nama VARCHAR(120) DEFAULT NULL,
   catatan VARCHAR(500) DEFAULT NULL,

@@ -165,6 +165,15 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'activities', 'doc_note', 'VARCHAR(255) DEFAULT NULL AFTER doc_urls');
   await addColumnIfMissing(conn, env.db.database, 'activities', 'completed_at', 'DATETIME DEFAULT NULL AFTER approved_at');
 
+  // Perencanaan: kelengkapan rencana (tujuan, keluaran, indikator, jadwal mulai, sumber dana, metode).
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'tujuan', 'VARCHAR(500) DEFAULT NULL AFTER deskripsi');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'keluaran', 'VARCHAR(500) DEFAULT NULL AFTER tujuan');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'volume', 'VARCHAR(120) DEFAULT NULL AFTER keluaran');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'indikator', 'VARCHAR(500) DEFAULT NULL AFTER volume');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'sumber_dana', 'VARCHAR(40) DEFAULT NULL AFTER realisasi_biaya');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'start_date', 'DATE DEFAULT NULL AFTER sumber_dana');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'metode', 'VARCHAR(40) DEFAULT NULL AFTER pic_nama');
+
   // SKP bukti dukung: tipe data aplikasi (snapshot beku dari isi NetWatch).
   await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'kind', "VARCHAR(10) NOT NULL DEFAULT 'link' AFTER deskripsi");
   await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'source', 'VARCHAR(40) DEFAULT NULL AFTER kind');
