@@ -25,6 +25,16 @@ const upload = multer({
 
 const TYPES = ['rapat', 'lembur', 'izin', 'dinas-luar', 'lainnya'];
 const TYPE_LABEL = { rapat: 'Rapat', lembur: 'Lembur', izin: 'Izin', 'dinas-luar': 'Dinas Luar', lainnya: 'Kegiatan Lain' };
+// Jenis kegiatan yang WAJIB dilengkapi dokumentasi setelah disetujui agar dianggap "Selesai".
+const DOC_TYPES = ['rapat', 'dinas-luar'];
+const MAX_DOCS = 10;
+
+// doc_urls disimpan sebagai JSON array. mysql2 biasanya sudah mem-parse; jaga-jaga bila string.
+function parseDocUrls(v) {
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'string') { try { const a = JSON.parse(v); return Array.isArray(a) ? a : []; } catch { return []; } }
+  return [];
+}
 
 function fmtWhen(a) {
   const t = a.start_time ? ` ${a.start_time}${a.end_time ? `–${a.end_time}` : ''}` : '';
@@ -108,5 +118,50 @@ async function decide(req, res, status) {
 
 router.patch('/:id/approve', requireRole('koordinator', 'admin'), (req, res) => decide(req, res, 'disetujui'));
 router.patch('/:id/reject', requireRole('koordinator', 'admin'), (req, res) => decide(req, res, 'ditolak'));
+
+// Teknisi mengunggah dokumentasi kegiatan (banyak foto/PDF) untuk MENYELESAIKAN
+// kegiatan Rapat/Dinas Luar yang sudah disetujui → tandai completed (status "Selesai").
+router.post('/:id/documentation', upload.array('docs', MAX_DOCS), async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT * FROM activities WHERE id = ?', [id]);
+  const act = rows[0];
+  if (!act || !rowInUnit(act, req.unitId)) return res.status(404).json({ error: 'Kegiatan tidak ditemukan' });
+  if (act.user_id !== req.user.id) return res.status(403).json({ error: 'Hanya pengaju yang dapat menyelesaikan kegiatan ini.' });
+  if (!DOC_TYPES.includes(act.type)) return res.status(400).json({ error: 'Dokumentasi hanya untuk kegiatan Rapat / Dinas Luar.' });
+  if (act.status !== 'disetujui') return res.status(400).json({ error: 'Kegiatan harus disetujui dulu sebelum dilengkapi dokumentasi.' });
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: 'Unggah minimal satu foto/PDF dokumentasi.' });
+
+  const note = (req.body.note || '').trim() || null;
+  const already = parseDocUrls(act.doc_urls);
+  const merged = [...already, ...files.map((f) => `/uploads/activities/${f.filename}`)].slice(0, MAX_DOCS);
+  const firstCompletion = !act.completed_at;
+
+  await pool.query(
+    'UPDATE activities SET doc_urls=?, doc_note=COALESCE(?, doc_note), completed_at=COALESCE(completed_at, NOW()) WHERE id=?',
+    [JSON.stringify(merged), note, id]
+  );
+
+  // Beri tahu koordinator unit hanya saat kegiatan pertama kali diselesaikan (bukan tiap tambah foto).
+  if (firstCompletion) {
+    const label = TYPE_LABEL[act.type] || 'Kegiatan';
+    const [coords] = await pool.query(
+      "SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)",
+      [act.unit_id ?? null]
+    );
+    for (const c of coords) {
+      if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
+      await queueWaNotification({
+        type: 'other',
+        toUserId: c.id,
+        message: `✅ KEGIATAN SELESAI — ${label}\n${act.title}\nOleh: ${req.user.name}\nWaktu: ${fmtWhen(act)}\n📸 ${merged.length} dokumentasi terlampir.${note ? `\nCatatan: ${note}` : ''}`,
+      });
+    }
+    await notifyRoles(['koordinator', 'admin'], { type: 'activity_done', title: `Kegiatan selesai: ${label}`, message: `${act.title} — dokumentasi oleh ${req.user.name}`, refId: act.id, refType: 'activity', link: '/coord-dashboard' }, { unitId: act.unit_id });
+  }
+
+  const [updated] = await pool.query('SELECT * FROM activities WHERE id = ?', [id]);
+  res.json({ activity: updated[0] });
+});
 
 export default router;

@@ -5,7 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import ProgressUpdateModal from '../components/ProgressUpdateModal';
 import InviteCollabModal from '../components/InviteCollabModal';
 import PerformaDetailModal from '../components/PerformaDetailModal';
-import ActivityModal, { activityStatusBadge } from '../components/ActivityModal';
+import ActivityModal, { activityStateBadge, needsDoc } from '../components/ActivityModal';
+import ActivityDocModal from '../components/ActivityDocModal';
 import LocationMap from '../components/LocationMap';
 import AbsenCard from '../components/AbsenCard';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
@@ -55,6 +56,7 @@ export default function MyDashboard() {
   const [showDetail, setShowDetail] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [showActivity, setShowActivity] = useState(false);
+  const [docActivity, setDocActivity] = useState<Activity | null>(null);
   const [prevPerf, setPrevPerf] = useState<PerformaRow | null>(null);
   const [spark, setSpark] = useState<Record<string, number[]>>({});
   const [myScore, setMyScore] = useState<MyScore | null>(null);
@@ -444,17 +446,30 @@ export default function MyDashboard() {
               {activities.length === 0 ? (
                 <div className="text-[10px] text-text2">Belum ada pengajuan kegiatan.</div>
               ) : (
-                activities.slice(0, 4).map((a) => {
-                  const b = activityStatusBadge(a.status);
+                [...activities].sort((x, y) => (needsDoc(y) ? 1 : 0) - (needsDoc(x) ? 1 : 0)).slice(0, 4).map((a) => {
+                  const b = activityStateBadge(a);
+                  const docs = a.doc_urls || [];
                   return (
-                    <div key={a.id} className="flex items-center gap-2 py-1 border-b border-border/30 last:border-0">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[11px] truncate">{a.title}{a.bukti_url && (a.bukti_url.toLowerCase().endsWith('.pdf')
-                          ? <a href={a.bukti_url} target="_blank" rel="noreferrer" title="Bukti dukung (PDF)" className="ml-1 text-accent2">📎</a>
-                          : <button type="button" onClick={() => openImage(a.bukti_url!)} title="Lihat bukti dukung" className="ml-1 text-accent2">📎</button>)}</div>
-                        <div className="text-[9px] text-text2 capitalize">{a.type} · {a.activity_date}{a.start_time ? ` ${a.start_time}` : ''}</div>
+                    <div key={a.id} className="py-1 border-b border-border/30 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] truncate">{a.title}{a.bukti_url && (a.bukti_url.toLowerCase().endsWith('.pdf')
+                            ? <a href={a.bukti_url} target="_blank" rel="noreferrer" title="Bukti dukung (PDF)" className="ml-1 text-accent2">📎</a>
+                            : <button type="button" onClick={() => openImage(a.bukti_url!)} title="Lihat bukti dukung" className="ml-1 text-accent2">📎</button>)}</div>
+                          <div className="text-[9px] text-text2 capitalize">{a.type} · {a.activity_date}{a.start_time ? ` ${a.start_time}` : ''}</div>
+                        </div>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold whitespace-nowrap ${b.bg} ${b.c}`}>{b.t}</span>
                       </div>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${b.bg} ${b.c}`}>{b.t}</span>
+                      {needsDoc(a) && (
+                        <button onClick={() => setDocActivity(a)} className="mt-1 text-[10px] border border-accent2/50 text-accent2 rounded px-2 py-0.5 hover:bg-accent2/10">📸 Selesaikan · Upload Dokumentasi</button>
+                      )}
+                      {docs.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                          {docs.map((u, i) => (u.toLowerCase().endsWith('.pdf')
+                            ? <a key={i} href={u} target="_blank" rel="noreferrer" className="text-[9px] text-accent2 hover:underline">📄 Dok {i + 1}</a>
+                            : <button key={i} type="button" onClick={() => openImage(u)} className="text-[9px] text-accent2 hover:underline">📷 Dok {i + 1}</button>))}
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -526,6 +541,7 @@ export default function MyDashboard() {
       {inviteFor && <InviteCollabModal incident={inviteFor} onClose={() => setInviteFor(null)} onDone={load} />}
       {showDetail && user && <PerformaDetailModal techId={user.id} month={month} onClose={() => setShowDetail(false)} />}
       {showActivity && <ActivityModal onClose={() => setShowActivity(false)} onDone={load} />}
+      {docActivity && <ActivityDocModal activity={docActivity} onClose={() => setDocActivity(null)} onDone={load} />}
     </div>
   );
 }

@@ -671,10 +671,13 @@ export interface Activity {
   start_time: string | null;
   end_time: string | null;
   bukti_url: string | null;
+  doc_urls?: string[] | null;
+  doc_note?: string | null;
   status: ActivityStatus;
   approved_by: number | null;
   approver_name: string | null;
   approved_at: string | null;
+  completed_at?: string | null;
   coord_note: string | null;
   created_at: string;
 }

@@ -89,3 +89,20 @@ export function activityStatusBadge(status: string) {
   if (status === 'ditolak') return { c: 'text-danger', bg: 'bg-danger/15', t: '✕ Ditolak' };
   return { c: 'text-warn', bg: 'bg-warn/15', t: '⏳ Menunggu' };
 }
+
+// Jenis kegiatan yang wajib dilengkapi dokumentasi setelah disetujui (selaras backend DOC_TYPES).
+export const DOC_TYPES = ['rapat', 'dinas-luar'];
+export function needsDoc(a: { type: string; status: string; completed_at?: string | null }) {
+  return DOC_TYPES.includes(a.type) && a.status === 'disetujui' && !a.completed_at;
+}
+
+// Badge status "efektif": untuk Rapat/Dinas Luar yang sudah disetujui, bedakan
+// "Perlu Dokumentasi" (belum lengkap) vs "Selesai" (dokumentasi sudah diunggah).
+export function activityStateBadge(a: { type: string; status: string; completed_at?: string | null }) {
+  if (DOC_TYPES.includes(a.type) && a.status === 'disetujui') {
+    return a.completed_at
+      ? { c: 'text-success', bg: 'bg-success/15', t: '✅ Selesai' }
+      : { c: 'text-accent2', bg: 'bg-accent2/15', t: '📸 Perlu Dokumentasi' };
+  }
+  return activityStatusBadge(a.status);
+}

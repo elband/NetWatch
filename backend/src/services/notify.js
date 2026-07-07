@@ -23,6 +23,7 @@ const TYPE_META = {
   sop_expiring: { priority: 'warning', link: '/dokumen' },
   knr_new: { priority: 'info', link: '/kegiatan-nr' },
   approval_pending: { priority: 'warning', link: '/coord-dashboard' },
+  activity_done: { priority: 'selesai', link: '/coord-dashboard' },
 };
 
 // Buat satu notifikasi untuk satu user + kirim real-time + update unread count.

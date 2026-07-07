@@ -160,6 +160,10 @@ async function migrate() {
   }
   // Pengajuan kegiatan lain: lampiran bukti dukung (foto/PDF).
   await addColumnIfMissing(conn, env.db.database, 'activities', 'bukti_url', 'VARCHAR(255) DEFAULT NULL AFTER end_time');
+  // Kegiatan Rapat/Dinas Luar: dokumentasi kegiatan (banyak foto/PDF) untuk penyelesaian setelah disetujui.
+  await addColumnIfMissing(conn, env.db.database, 'activities', 'doc_urls', 'JSON DEFAULT NULL AFTER bukti_url');
+  await addColumnIfMissing(conn, env.db.database, 'activities', 'doc_note', 'VARCHAR(255) DEFAULT NULL AFTER doc_urls');
+  await addColumnIfMissing(conn, env.db.database, 'activities', 'completed_at', 'DATETIME DEFAULT NULL AFTER approved_at');
 
   // SKP bukti dukung: tipe data aplikasi (snapshot beku dari isi NetWatch).
   await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'kind', "VARCHAR(10) NOT NULL DEFAULT 'link' AFTER deskripsi");
