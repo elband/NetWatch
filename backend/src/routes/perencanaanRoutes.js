@@ -199,4 +199,48 @@ router.delete('/kpi/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ===== Data untuk cetak dokumen resmi "Program Kerja Unit" =====
+// Personil (dari akun), peralatan per kategori (devices), & jadwal perawatan nyata
+// (maintenance_windows tahun ini → month/week). Rencana & KPI diambil via endpoint lain.
+router.get('/program-kerja-data', async (req, res) => {
+  const tahun = Number(req.query.tahun) || new Date().getFullYear();
+  const uf = unitFilter(req.unitId, 'unit_id');
+
+  // Personil: koordinator + teknisi aktif (ter-scope unit), koordinator diurut lebih dulu.
+  const ufU = unitFilter(req.unitId, 'unit_id');
+  const [users] = await pool.query(
+    `SELECT id, name, nip, pangkat, ttl, jabatan FROM users
+     WHERE active=1 AND (role IN ('koordinator','teknisi') OR JSON_CONTAINS(roles,'"koordinator"') OR JSON_CONTAINS(roles,'"teknisi"'))${ufU.clause}
+     ORDER BY (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"')) DESC, name`,
+    ufU.params
+  );
+  const personil = users.map((u, i) => ({ no: i + 1, name: u.name, nip: u.nip, pangkat: u.pangkat, ttl: u.ttl, jabatan: u.jabatan }));
+
+  // Peralatan dikelompokkan per kategori (fallback: type).
+  const [devs] = await pool.query(
+    `SELECT id, name, type, category, loc FROM devices WHERE 1=1${uf.clause} ORDER BY category, name`, uf.params);
+  const groups = new Map();
+  const devIds = new Set();
+  for (const d of devs) {
+    devIds.add(d.id);
+    const cat = d.category || d.type || 'Lainnya';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push({ id: d.id, name: d.name, type: d.type, loc: d.loc });
+  }
+  const equipment = [...groups.entries()].map(([category, items]) => ({ category, items }));
+
+  // Jadwal perawatan nyata dari maintenance_windows tahun ini (hanya untuk perangkat unit).
+  const [mw] = await pool.query(
+    'SELECT device_id, starts_at FROM maintenance_windows WHERE device_id IS NOT NULL AND starts_at >= ? AND starts_at < ?',
+    [`${tahun}-01-01`, `${tahun + 1}-01-01`]);
+  const maintenance = mw
+    .filter((w) => devIds.has(w.device_id))
+    .map((w) => {
+      const dt = new Date(w.starts_at);
+      return { device_id: w.device_id, month: dt.getMonth(), week: Math.min(3, Math.floor((dt.getDate() - 1) / 7)) };
+    });
+
+  res.json({ personil, equipment, maintenance });
+});
+
 export default router;

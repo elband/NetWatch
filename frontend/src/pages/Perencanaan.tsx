@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { confirmDialog } from '../components/dialog';
 import type { UnitPlan, UnitKpi } from '../types';
+import { buildProgramKerjaHtml, type PkLkp, type ProgramKerjaCfg } from '../utils/programKerjaDoc';
 
 // ===== Konstanta tampilan =====
 const KATEGORI = [
@@ -31,12 +32,23 @@ const rp = (n: number | null | undefined) => 'Rp ' + new Intl.NumberFormat('id-I
 const thisYear = new Date().getFullYear();
 const tabBtn = (active: boolean) => `px-3 py-1.5 text-xs rounded-md ${active ? 'bg-accent text-bg font-semibold' : 'text-text2'}`;
 
+// Kop/identitas unit untuk dokumen cetak (fallback bila /settings.lkp belum diisi).
+const PK_LKP_DEFAULT: PkLkp = {
+  kantor: 'BANDAR UDARA A.P.T. PRANOTO - SAMARINDA', unit: 'UNIT ELEKTRONIKA BANDARA', kota: 'Samarinda', fasilitas: 'Elektronika Bandara',
+  kepala_jabatan: 'KEPALA SEKSI TEKNIK DAN OPERASI', kepala_nama: 'MURDOKO', kepala_nip: '19780319 200012 1 001',
+  koord_jabatan: 'KOORDINATOR UNIT ELEKTRONIKA BANDARA', koord_nama: 'PRAYUDA ELFANDRO', koord_nip: '19930311 202203 1 008',
+  nd_kode: 'ELBAND/APTP', nd_yth: 'Kepala BLU Kantor UPBU Kelas I A.P.T. Pranoto-Samarinda', nd_dari: 'Koordinator Elektronika Bandara',
+};
+
 export default function Perencanaan() {
   const [tab, setTab] = useState<'program' | 'anggaran' | 'pengadaan' | 'kpi'>('program');
   const [tahun, setTahun] = useState(thisYear);
   const [plans, setPlans] = useState<UnitPlan[]>([]);
   const [years, setYears] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
+  const [lkp, setLkp] = useState<PkLkp>(PK_LKP_DEFAULT);
+  const [pk, setPk] = useState<ProgramKerjaCfg>({});
+  const [printing, setPrinting] = useState(false);
 
   function load() {
     setLoading(true);
@@ -45,6 +57,33 @@ export default function Perencanaan() {
       .finally(() => setLoading(false));
   }
   useEffect(load, [tahun]);
+  useEffect(() => { api.get('/settings').then((r) => {
+    if (r.data.settings?.lkp) setLkp((l) => ({ ...l, ...r.data.settings.lkp }));
+    if (r.data.settings?.program_kerja) setPk(r.data.settings.program_kerja);
+  }).catch(() => {}); }, []);
+
+  // Cetak dokumen resmi "Program Kerja Unit" (Nota Dinas + naratif I–V + matriks jadwal + TTD) ke PDF.
+  async function generatePdf() {
+    setPrinting(true);
+    try {
+      const [pkRes, kpiRes] = await Promise.all([
+        api.get(`/perencanaan/program-kerja-data?tahun=${tahun}`),
+        api.get(`/perencanaan/kpi?tahun=${tahun}`).catch(() => ({ data: { kpi: [] } })),
+      ]);
+      const html = buildProgramKerjaHtml({
+        tahun, cfg: pk, lkp,
+        personil: pkRes.data.personil || [],
+        equipment: pkRes.data.equipment || [],
+        maintenance: pkRes.data.maintenance || [],
+        plans, kpi: kpiRes.data.kpi || [],
+      }, window.location.origin);
+      const w = window.open('', '_blank');
+      if (!w) { setPrinting(false); return; }
+      w.document.write(html); w.document.close();
+      // Beri jeda agar gambar kop (bila ada) termuat sebelum dialog cetak muncul.
+      setTimeout(() => { try { w.focus(); w.print(); } catch { /* diabaikan */ } }, 500);
+    } finally { setPrinting(false); }
+  }
 
   const yearOptions = useMemo(() => {
     const s = new Set<number>([thisYear, thisYear + 1, tahun, ...years]);
@@ -70,6 +109,7 @@ export default function Perencanaan() {
             <button className={tabBtn(tab === 'pengadaan')} onClick={() => setTab('pengadaan')}>Pengadaan</button>
             <button className={tabBtn(tab === 'kpi')} onClick={() => setTab('kpi')}>Target/KPI</button>
           </div>
+          <button onClick={generatePdf} disabled={printing || loading} title="Cetak seluruh rencana kerja tahun ini ke PDF" className="border border-accent2/40 text-accent2 hover:bg-accent2/10 rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50 whitespace-nowrap">🖨️ {printing ? 'Menyiapkan…' : 'Generate PDF'}</button>
         </div>
       </div>
       {tab === 'program' && <ProgramTab plans={plans} tahun={tahun} loading={loading} onChange={load} />}

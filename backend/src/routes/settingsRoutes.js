@@ -41,10 +41,13 @@ router.get('/', unitScope, async (req, res) => {
     }
     map[r.setting_key] = value;
   }
-  // Fase 4: untuk unit aktif, timpa field surat per-unit (kode/kop/koordinator) ke lkp.
+  // Fase 4: untuk unit aktif, timpa field surat per-unit (kode/kop/koordinator) ke lkp,
+  // dan sajikan naratif Program Kerja per-unit (terisolasi per unit; kosong = pakai bawaan).
   if (req.unitId != null) {
-    map.lkp = mergeUnitLkp(map.lkp || {}, await getUnitConfig(req.unitId));
-    map.unit_config = await getUnitConfig(req.unitId); // agar editor bisa tampilkan nilai override saja
+    const uc = await getUnitConfig(req.unitId);
+    map.lkp = mergeUnitLkp(map.lkp || {}, uc);
+    map.unit_config = uc; // agar editor bisa tampilkan nilai override saja
+    map.program_kerja = uc.program_kerja || {};
   }
   res.json({ settings: map });
 });

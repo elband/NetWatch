@@ -5,6 +5,16 @@ import { hasRole } from '../utils/roles';
 import LocationMap from '../components/LocationMap';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import type { Asset, ServiceItem, LocationItem, Unit, User } from '../types';
+import { PK_DEFAULT_CFG, type ProgramKerjaCfg } from '../utils/programKerjaDoc';
+
+// Editor naratif Program Kerja per-unit (di tab Identitas Surat) — kolom pendek + panjang.
+const PK_SHORT: [keyof ProgramKerjaCfg, string][] = [
+  ['nd_nomor', 'Nomor Nota Dinas'], ['nd_perihal', 'Perihal Nota Dinas'], ['tgl_dokumen', 'Tanggal Dokumen (mis. Mei 2026)'],
+];
+const PK_LONG: [keyof ProgramKerjaCfg, string][] = [
+  ['latar_belakang', 'I. Latar Belakang'], ['tujuan', 'II. Tujuan'], ['personil_pengantar', 'III. Personil — pengantar'],
+  ['preventif', 'IV.A Preventif (Pemeliharaan)'], ['korektif_pengantar', 'IV.B Korektif — pengantar'], ['penutup', 'V. Penutup'],
+];
 
 type Tab = 'aset' | 'layanan' | 'lokasi' | 'tipe' | 'metrik' | 'checklist' | 'fasilitas' | 'surat-id' | 'unit';
 interface DeviceTypeItem { id: number; name: string; icon: string | null; sort_order: number }
@@ -333,22 +343,24 @@ function SuratIdentityTab() {
   const isAdmin = hasRole(user, 'admin');
   const uid = isAdmin ? getActiveUnitId() : (user?.unit_id ?? null);
   const [cfg, setCfg] = useState<Record<string, string>>({});
+  const [pk, setPk] = useState<ProgramKerjaCfg>({});
   const [kopUrl, setKopUrl] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
   useEffect(() => {
     if (!uid) return;
-    api.get(`/units/${uid}/config`).then((r) => { setCfg(r.data.config || {}); setKopUrl(r.data.config?.kop_url || null); }).catch(() => {});
+    api.get(`/units/${uid}/config`).then((r) => { setCfg(r.data.config || {}); setPk(r.data.config?.program_kerja || {}); setKopUrl(r.data.config?.kop_url || null); }).catch(() => {});
   }, [uid]);
 
   if (!uid) return <div className="text-[12px] text-text2 bg-surface2 border border-border rounded-md px-3 py-4">Pilih satu unit di switcher header untuk mengatur identitas suratnya.</div>;
 
   async function save() {
     setErr(''); setMsg('');
-    try { await api.put(`/units/${uid}/config`, cfg); setMsg('✅ Identitas surat unit tersimpan.'); }
+    try { await api.put(`/units/${uid}/config`, { ...cfg, program_kerja: pk }); setMsg('✅ Identitas surat unit tersimpan.'); }
     catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
   }
+  const setPkField = (k: keyof ProgramKerjaCfg, v: string) => setPk((p) => ({ ...p, [k]: v }));
   async function uploadKop(file: File) {
     setErr(''); setMsg('');
     const fd = new FormData(); fd.append('kop', file);
@@ -374,6 +386,34 @@ function SuratIdentityTab() {
               📤 Unggah kop<input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) uploadKop(e.target.files[0]); }} />
             </label>
           </div>
+        </div>
+      </div>
+      <div className="bg-surface border border-border rounded-lg p-4 mt-4 max-w-3xl">
+        <div className="text-[12px] font-semibold mb-1">📄 Naratif Program Kerja (PDF) — unit ini</div>
+        <div className="text-[11px] text-text2 mb-3">Teks untuk dokumen <b>Generate PDF</b> Program Kerja di halaman Perencanaan. Terisolasi <b>per unit</b>; kosongkan = pakai teks standar bawaan (lihat placeholder).</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+          {PK_SHORT.map(([k, label]) => (
+            <label key={k} className="block">
+              <span className="text-[11px] text-text2">{label}</span>
+              <input className={`${inputCls} w-full`} value={(pk[k] as string) || ''} placeholder={String((PK_DEFAULT_CFG as Record<string, unknown>)[k] ?? '')} onChange={(e) => setPkField(k, e.target.value)} />
+            </label>
+          ))}
+          <label className="block">
+            <span className="text-[11px] text-text2">Kepadatan jadwal perawatan (matriks)</span>
+            <select className={`${inputCls} w-full`} value={pk.perawatan_cadence || 'mingguan'} onChange={(e) => setPkField('perawatan_cadence', e.target.value)}>
+              <option value="mingguan">Mingguan (tiap minggu)</option>
+              <option value="dwiminggu">Dua mingguan</option>
+              <option value="bulanan">Bulanan</option>
+            </select>
+          </label>
+        </div>
+        <div className="space-y-3">
+          {PK_LONG.map(([k, label]) => (
+            <label key={k} className="block">
+              <span className="text-[11px] text-text2">{label}</span>
+              <textarea className={`${inputCls} w-full min-h-[64px]`} value={(pk[k] as string) || ''} placeholder={String((PK_DEFAULT_CFG as Record<string, unknown>)[k] ?? '')} onChange={(e) => setPkField(k, e.target.value)} />
+            </label>
+          ))}
         </div>
       </div>
       {msg && <div className="text-[12px] text-success mt-2">{msg}</div>}

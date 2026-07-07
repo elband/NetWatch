@@ -139,6 +139,17 @@ router.put('/:id/config', requireAuth, async (req, res) => {
       if (v === '' || v == null) delete cur[k]; else cur[k] = String(v).slice(0, 255);
     }
   }
+  // Naratif Program Kerja per-unit (objek nested; hanya field non-kosong yang disimpan).
+  if (req.body && typeof req.body.program_kerja === 'object' && req.body.program_kerja !== null) {
+    const PK_KEYS = ['nd_nomor', 'nd_perihal', 'tgl_dokumen', 'perawatan_cadence', 'latar_belakang', 'tujuan', 'personil_pengantar', 'preventif', 'korektif_pengantar', 'penutup'];
+    const pkIn = req.body.program_kerja, pkOut = {};
+    for (const k of PK_KEYS) {
+      const v = pkIn[k];
+      if (v == null || String(v).trim() === '') continue;
+      pkOut[k] = String(v).slice(0, 8000);
+    }
+    if (Object.keys(pkOut).length) cur.program_kerja = pkOut; else delete cur.program_kerja;
+  }
   await writeUnitConfig(id, cur);
   await audit(req.user, 'update_unit_config', 'unit', id, 'Ubah identitas surat unit');
   res.json({ config: cur });
