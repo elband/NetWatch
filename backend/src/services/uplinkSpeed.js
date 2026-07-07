@@ -16,7 +16,8 @@ function toNum(v) {
   if (v == null) return null;
   if (typeof v === 'number') return v;
   if (typeof v === 'bigint') return Number(v);
-  if (Buffer.isBuffer(v)) { try { return Number(v.readBigUInt64BE(Math.max(0, v.length - 8))); } catch { return null; } }
+  // Counter64 datang sebagai Buffer dengan panjang bervariasi → baca big-endian apa adanya.
+  if (Buffer.isBuffer(v)) { let x = 0n; for (const b of v) x = (x << 8n) | BigInt(b); return Number(x); }
   const nn = Number(v);
   return Number.isFinite(nn) ? nn : null;
 }
