@@ -41,7 +41,7 @@ const esc = (t: unknown) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g,
 const paras = (text: string) => text.split(/\n{2,}/).map((p) => `<p class="just">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
 
 // ===== Teks naratif standar (fallback bila belum diisi di Pengaturan) =====
-export const PK_DEFAULT_CFG: Required<Omit<ProgramKerjaCfg, 'tgl_dokumen' | 'nd_nomor'>> & { nd_nomor: string; tgl_dokumen: string } = {
+export const PK_DEFAULT_CFG: Required<Omit<ProgramKerjaCfg, 'tgl_dokumen'>> = {
   nd_nomor: '     /TO/APTP/     /20  ',
   nd_perihal: 'Program Kerja Unit Elektronika Bandara',
   latar_belakang:
