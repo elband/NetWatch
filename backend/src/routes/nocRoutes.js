@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { getUplinkSpeed } from '../services/uplinkSpeed.js';
 
 // Wallboard Publik (NOC): halaman layar-dinding TANPA login, digerbangi token rahasia
 // di URL (?key=…) & di-scope ke satu unit (?unit=KODE). Data lengkap (dgn IP) sesuai
@@ -45,7 +46,7 @@ router.get('/public', async (req, res) => {
   const uid = v.unit.id;
 
   const [devices] = await pool.query(
-    `SELECT id, name, ip, type, category, icon, loc, location_id, status, cpu, mem, ping_ms, lat, lng, last_checked_at, offline_since
+    `SELECT id, name, ip, type, category, icon, loc, location_id, status, cpu, mem, ping_ms, lat, lng, last_checked_at, offline_since, is_uplink
        FROM devices WHERE unit_id = ? AND (asset_class = 'network' OR asset_class IS NULL) ORDER BY name`, [uid]);
   const [locations] = await pool.query(
     'SELECT id, name, icon, lat, lng, sort_order FROM locations WHERE unit_id = ? ORDER BY sort_order, name', [uid]);
@@ -59,6 +60,12 @@ router.get('/public', async (req, res) => {
        FROM incidents i LEFT JOIN devices d ON d.id = i.device_id LEFT JOIN users u ON u.id = i.tech_id
       WHERE i.unit_id = ? AND i.status <> 'selesai'
       ORDER BY FIELD(i.priority,'kritis','tinggi','sedang'), i.created_at ASC`, [uid]);
+
+  // Perangkat TANPA IP tidak bisa di-ping → dianggap UP, KECUALI ada LAPORAN PUBLIK aktif
+  // yang menyatakannya down (selaras aturan "aktif kecuali dilaporkan rusak").
+  const publicDown = new Set(activeInc.filter((i) => i.public_report_id && i.device_id).map((i) => i.device_id));
+  const noIp = (ip) => !ip || String(ip).toUpperCase().startsWith('N/A');
+  for (const d of devices) { if (noIp(d.ip)) d.status = publicDown.has(d.id) ? 'offline' : 'online'; }
   // Aktivitas inspeksi teknisi HARI INI (rinci) — untuk panel feed di wallboard.
   const [inspections] = await pool.query(
     `SELECT ei.id, ei.status, ei.slot, ei.note, ei.inspector_name, ei.verified, ei.created_at, d.name AS device_name, d.icon AS device_icon
@@ -72,25 +79,27 @@ router.get('/public', async (req, res) => {
        FROM users u
       WHERE u.active = 1 AND u.unit_id = ? AND (u.role = 'teknisi' OR JSON_CONTAINS(u.roles, '"teknisi"'))
       ORDER BY u.name`, [uid, uid]);
-  const [statRows] = await pool.query(
-    `SELECT COALESCE(NULLIF(category,''), NULLIF(type,''), 'Lainnya') AS kategori,
-        COUNT(*) total, SUM(status='online') online, SUM(status='warning') warning, SUM(status='offline') offline
-       FROM devices WHERE unit_id = ? AND (asset_class='network' OR asset_class IS NULL)
-      GROUP BY kategori ORDER BY total DESC`, [uid]);
-  const [locStat] = await pool.query(
-    `SELECT l.id, l.name, l.icon,
-        (SELECT COUNT(*) FROM devices d WHERE d.location_id = l.id) total,
-        (SELECT COUNT(*) FROM devices d WHERE d.location_id = l.id AND d.status='offline') offline
-       FROM locations l WHERE l.unit_id = ?`, [uid]);
   const [services] = await pool.query(
     'SELECT id, name, icon, status, is_ok, detail FROM services WHERE unit_id = ? ORDER BY sort_order, name', [uid]);
   const [trendRows] = await pool.query(
     `SELECT DATE(created_at) d, COUNT(*) c FROM incidents
       WHERE unit_id = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) GROUP BY DATE(created_at)`, [uid]);
 
-  const deviceStats = statRows.map((r) => ({ kategori: r.kategori, total: n(r.total), online: n(r.online), warning: n(r.warning), offline: n(r.offline) }));
-  const topLocations = locStat.map((r) => ({ id: r.id, name: r.name, icon: r.icon, total: n(r.total), offline: n(r.offline) }))
-    .filter((r) => r.offline > 0).sort((a, b) => b.offline - a.offline).slice(0, 8);
+  // Statistik & top lokasi dihitung dari status EFEKTIF (setelah override perangkat tanpa IP).
+  const statMap = new Map();
+  for (const d of devices) {
+    const k = (d.category && d.category.trim()) || (d.type && d.type.trim()) || 'Lainnya';
+    const g = statMap.get(k) || { kategori: k, total: 0, online: 0, warning: 0, offline: 0 };
+    g.total++; g[d.status] = (g[d.status] || 0) + 1; statMap.set(k, g);
+  }
+  const deviceStats = [...statMap.values()].sort((a, b) => b.total - a.total);
+  const locMap = new Map(locations.map((l) => [l.id, { id: l.id, name: l.name, icon: l.icon, total: 0, offline: 0 }]));
+  for (const d of devices) {
+    if (d.location_id == null) continue;
+    const g = locMap.get(d.location_id); if (!g) continue;
+    g.total++; if (d.status === 'offline') g.offline++;
+  }
+  const topLocations = [...locMap.values()].filter((r) => r.offline > 0).sort((a, b) => b.offline - a.offline).slice(0, 8);
   // Tren 7 hari (jumlah insiden/hari).
   const trendMap = {}; for (const r of trendRows) trendMap[String(r.d).slice(0, 10)] = n(r.c);
   const trend = []; const base = new Date();
@@ -103,17 +112,22 @@ router.get('/public', async (req, res) => {
   const teknisiOn = techs.filter((t) => ['pagi', 'siang', 'malam'].includes(t.shift_type)).length;
   const kpi = { total, online, warning, offline, activeInc: activeInc.length, teknisiOn, availability: total ? Math.round((online / total) * 100) : 100 };
 
-  // Sumber internet / uplink (Mikrotik/SFP/WAN): perangkat yang namanya/tipe/kategorinya
-  // menandakan uplink internet — dipantau via ping. Status "UP" bila minimal satu online.
+  // Sumber internet / uplink (Mikrotik/SFP/WAN): utamakan perangkat yang DITANDAI is_uplink
+  // (idealnya 1 per unit). Bila belum ada yang ditandai, jatuh ke deteksi nama/tipe/kategori.
+  const flagged = devices.filter((d) => d.is_uplink);
   const UPLINK_RE = /mikrotik|uplink|internet|wan|gateway|sfp|isp/i;
-  const uplink = devices
-    .filter((d) => UPLINK_RE.test(`${d.name} ${d.type || ''} ${d.category || ''}`))
-    .map((d) => ({ id: d.id, name: d.name, ip: d.ip, type: d.type, status: d.status, ping_ms: d.ping_ms }));
+  const uplinkDevs = flagged.length ? flagged : devices.filter((d) => UPLINK_RE.test(`${d.name} ${d.type || ''} ${d.category || ''}`));
+  const uplink = uplinkDevs.map((d) => ({ id: d.id, name: d.name, ip: d.ip, type: d.type, status: d.status, ping_ms: d.ping_ms }));
   const internetSvc = services.find((s) => /internet/i.test(s.name));
   const upPings = uplink.filter((u) => u.status === 'online').map((u) => u.ping_ms).sort((a, b) => a - b);
+  // Kecepatan real dari SNMP perangkat uplink (Mikrotik) bila dikonfigurasi (uplink_ifindex).
+  const primaryUplink = flagged[0] || uplinkDevs[0];
+  const spd = primaryUplink ? getUplinkSpeed(primaryUplink.id) : null;
   const internet = {
     ok: uplink.length ? uplink.some((u) => u.status === 'online') : (internetSvc ? !!internetSvc.is_ok : null),
     ping: upPings.length ? upPings[0] : null,
+    rxBps: spd?.rxBps ?? null,
+    txBps: spd?.txBps ?? null,
   };
 
   res.json({ unit: v.unit, devices, locations, today, activeIncidents: activeInc, technicians: techs, deviceStats, topLocations, services, trend, kpi, uplink, internet, inspections, ts: Date.now() });

@@ -174,6 +174,10 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'start_date', 'DATE DEFAULT NULL AFTER sumber_dana');
   await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'metode', 'VARCHAR(40) DEFAULT NULL AFTER pic_nama');
 
+  // Wallboard NOC: tandai satu perangkat sebagai sumber internet/uplink (Mikrotik) per unit.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'is_uplink', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER inspect_required');
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'uplink_ifindex', 'INT DEFAULT NULL AFTER is_uplink');
+
   // SKP bukti dukung: tipe data aplikasi (snapshot beku dari isi NetWatch).
   await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'kind', "VARCHAR(10) NOT NULL DEFAULT 'link' AFTER deskripsi");
   await addColumnIfMissing(conn, env.db.database, 'skp_bukti', 'source', 'VARCHAR(40) DEFAULT NULL AFTER kind');

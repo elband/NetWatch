@@ -7,6 +7,7 @@ import { createApp } from './app.js';
 import { setNotifyIo } from './services/notify.js';
 import { attachSshNamespace } from './services/sshBridge.js';
 import { startCoordWatcher } from './services/coordWatcher.js';
+import { startUplinkSpeed } from './services/uplinkSpeed.js';
 import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
 import { purgeOldWaLogs } from './jobs/waQueue.js';
@@ -62,6 +63,7 @@ if (isPrimary) {
   startMaintenanceReminderWorker();
   startMetricsWorker();
   startCoordWatcher(io);
+  startUplinkSpeed(); // sampel SNMP kecepatan internet perangkat uplink (Mikrotik)
   await schedulePingSweep();
   // Pengingat WA harian (08:00) ke teknisi dinas ttg maintenance peralatan terjadwal.
   await scheduleMaintenanceReminder();

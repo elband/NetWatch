@@ -19,7 +19,8 @@ interface NService { id: number; name: string; icon: string; status: string; is_
 interface NTrend { date: string; count: number }
 interface NKpi { total: number; online: number; warning: number; offline: number; activeInc: number; teknisiOn: number; availability: number }
 interface NUplink { id: number; name: string; ip: string; type: string | null; status: 'online' | 'warning' | 'offline'; ping_ms: number }
-interface NData { unit: { id: number; code: string; name: string; icon: string }; devices: NDevice[]; locations: NLoc[]; today: NInc[]; activeIncidents: NInc[]; technicians: NTech[]; deviceStats: NStat[]; topLocations: NTopLoc[]; services: NService[]; trend: NTrend[]; kpi: NKpi; uplink: NUplink[]; internet: { ok: boolean | null; ping: number | null }; inspections: NInsp[]; ts: number }
+interface NInternet { ok: boolean | null; ping: number | null; rxBps?: number | null; txBps?: number | null }
+interface NData { unit: { id: number; code: string; name: string; icon: string }; devices: NDevice[]; locations: NLoc[]; today: NInc[]; activeIncidents: NInc[]; technicians: NTech[]; deviceStats: NStat[]; topLocations: NTopLoc[]; services: NService[]; trend: NTrend[]; kpi: NKpi; uplink: NUplink[]; internet: NInternet; inspections: NInsp[]; ts: number }
 interface Metric { status: string; ping_ms: number; cpu: number | null; mem: number | null; recorded_at: string }
 
 const C = { online: '#22c55e', warning: '#f59e0b', offline: '#ef4444', dim: '#64748b', bg: '#070b10', panel: '#0f1620', panel2: '#0b1017', border: '#1e293b', accent: '#38bdf8', text: '#e2e8f0' };
@@ -29,15 +30,17 @@ const worst = (ds: NDevice[]) => (ds.some((d) => d.status === 'offline') ? 'offl
 const stColor = (s: string) => (s === 'offline' ? C.offline : s === 'warning' ? C.warning : s === 'online' ? C.online : C.dim);
 const incColor = (s: string) => (s === 'aktif' ? C.offline : s === 'proses' ? C.warning : C.online);
 const prioColor = (p: string) => (p === 'kritis' ? C.offline : p === 'tinggi' ? C.warning : C.dim);
-const shiftInfo = (s: string | null): { label: string; c: string } => {
-  if (s === 'pagi') return { label: '🌅 Pagi', c: C.online };
-  if (s === 'siang') return { label: '☀️ Siang', c: C.online };
-  if (s === 'malam') return { label: '🌙 Malam', c: C.online };
-  if (s === 'dinas_luar') return { label: '🚗 Dinas Luar', c: C.accent };
-  if (s === 'cuti') return { label: '🏖️ Cuti', c: C.dim };
-  return { label: '💤 Libur', c: C.dim };
+// Kode shift bandara: P=Pagi, S=Siang, N=Malam(Dinas Kantor), L=Libur, DL=Dinas Luar, C=Cuti.
+const shiftInfo = (s: string | null): { label: string; c: string; on: boolean } => {
+  if (s === 'pagi') return { label: 'P', c: C.online, on: true };
+  if (s === 'siang') return { label: 'S', c: C.online, on: true };
+  if (s === 'malam') return { label: 'N', c: C.online, on: true };
+  if (s === 'dinas_luar') return { label: 'DL', c: C.accent, on: false };
+  if (s === 'cuti') return { label: 'C', c: C.dim, on: false };
+  return { label: 'L', c: C.dim, on: false };
 };
 const fmtTime = (s: string | null) => (s ? new Date(s).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—');
+const fmtMbps = (bps: number) => { const m = bps / 1e6; return m >= 100 ? String(Math.round(m)) : m >= 10 ? m.toFixed(1) : m.toFixed(2); };
 const ago = (s: string | null) => {
   if (!s) return '—';
   const m = Math.max(0, Math.round((Date.now() - new Date(s).getTime()) / 60000));
@@ -58,18 +61,22 @@ function useAutoScroll(dep: number) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    let paused = false, pos = el.scrollTop;
+    let paused = false, raf = 0, last = 0, pos = el.scrollTop;
     const enter = () => { paused = true; }, leave = () => { paused = false; };
     el.addEventListener('mouseenter', enter); el.addEventListener('mouseleave', leave);
-    const id = window.setInterval(() => {
+    const SPEED = 16; // px/detik — halus & berbasis waktu (bukan per-tick)
+    const step = (t: number) => {
+      raf = requestAnimationFrame(step);
+      const dt = last ? Math.min((t - last) / 1000, 0.1) : 0; last = t;
       if (paused) return;
       const overflow = el.scrollHeight - el.clientHeight;
       if (overflow <= 4) { pos = 0; return; }
-      pos += 0.7;
-      if (pos >= overflow + 24) pos = 0; // jeda kecil di bawah sebelum balik ke atas
+      pos += SPEED * dt;
+      if (pos >= overflow + 18) pos = 0; // jeda kecil di bawah sebelum balik ke atas
       el.scrollTop = Math.min(pos, overflow);
-    }, 40);
-    return () => { window.clearInterval(id); el.removeEventListener('mouseenter', enter); el.removeEventListener('mouseleave', leave); };
+    };
+    raf = requestAnimationFrame(step);
+    return () => { cancelAnimationFrame(raf); el.removeEventListener('mouseenter', enter); el.removeEventListener('mouseleave', leave); };
   }, [dep]);
   return ref;
 }
@@ -114,13 +121,19 @@ export default function Noc() {
   const devices = useMemo(() => data?.devices || [], [data]);
   const locations = useMemo(() => data?.locations || [], [data]);
   const kpi = data?.kpi || { total: 0, online: 0, warning: 0, offline: 0, activeInc: 0, teknisiOn: 0, availability: 100 };
-  const internet: { ok: boolean | null; ping: number | null } = data?.internet || { ok: null, ping: null };
+  const internet: NInternet = data?.internet || { ok: null, ping: null };
   const cats = useMemo(() => Array.from(new Set(devices.map((d) => d.category || d.type || 'Lainnya'))).sort(), [devices]);
   const visible = useMemo(() => devices.filter((d) => !hidden.has(d.category || d.type || 'Lainnya')), [devices, hidden]);
   const byLoc = useMemo(() => { const m = new Map<number, NDevice[]>(); for (const d of visible) { const k = d.location_id ?? -1; if (!m.has(k)) m.set(k, []); m.get(k)!.push(d); } return m; }, [visible]);
   const locWithCoord = useMemo(() => locations.filter((l) => l.lat != null && l.lng != null), [locations]);
   const locWithDevices = useMemo(() => locWithCoord.filter((l) => (byLoc.get(l.id) || []).length > 0), [locWithCoord, byLoc]);
   const focusLoc = locWithDevices.length ? locWithDevices[focusIdx % locWithDevices.length] : null;
+  // Tanda-tangan marker (nilai biasa, bukan hook): hanya berubah saat isi peta benar-benar
+  // berubah (jumlah/status/fokus), bukan tiap polling — marker tak digambar ulang & berkedip.
+  const markerSig = locWithCoord.map((l) => {
+    const ds = byLoc.get(l.id) || [];
+    return `${l.id}.${ds.length}.${worst(ds)}.${ds.filter((d) => d.status === 'offline').length}`;
+  }).join('|') + '#' + (focusLoc?.id ?? '');
 
   // Deteksi gangguan baru → toast + popup 30 dtk.
   const prev = useRef<Record<number, string>>({});
@@ -192,7 +205,7 @@ export default function Noc() {
       mk.addTo(layer);
     }
     if (!fitted.current && pts.length) { if (pts.length === 1) map.setView(pts[0], 16); else map.fitBounds(L.latLngBounds(pts).pad(0.3)); fitted.current = true; }
-  }, [locWithCoord, byLoc, focusLoc?.id]);
+  }, [markerSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rotasi otomatis fokus lokasi (bergiliran) — jeda saat pilih perangkat / hover peta / popup gangguan.
   useEffect(() => {
@@ -268,7 +281,7 @@ export default function Noc() {
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '260px 1fr 320px', gap: 10, padding: 10, minHeight: 0 }}>
 
         {/* SIDEBAR KIRI */}
-        <div className="noc-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflowY: 'auto', paddingRight: 2 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, overflow: 'hidden' }}>
           <div style={card}>
             <div style={cardTitle}>🧩 LAYER PERANGKAT</div>
             <div style={{ padding: '6px 10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px' }}>
@@ -318,10 +331,12 @@ export default function Noc() {
             <div style={{ padding: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (data?.uplink?.length || 0) ? 8 : 0 }}>
                 <span style={{ fontSize: 17, fontWeight: 900, color: internet.ok == null ? C.dim : internet.ok ? C.online : C.offline }}>{internet.ok == null ? '— N/A' : internet.ok ? '● INTERNET UP' : '○ INTERNET DOWN'}</span>
-                {internet.ping != null && <span className="mono" style={{ fontSize: 12, color: internet.ping < 60 ? C.online : C.warning }}>{internet.ping} ms</span>}
+                {internet.rxBps != null
+                  ? <span className="mono" style={{ fontSize: 11, color: C.online, whiteSpace: 'nowrap', textAlign: 'right' }}>↓ {fmtMbps(internet.rxBps)} · ↑ {fmtMbps(internet.txBps || 0)}<br /><span style={{ color: C.dim, fontSize: 9 }}>Mbps{internet.ping != null ? ` · ${internet.ping}ms` : ''}</span></span>
+                  : (internet.ping != null && <span className="mono" style={{ fontSize: 12, color: internet.ping < 60 ? C.online : C.warning }}>{internet.ping} ms</span>)}
               </div>
               {(data?.uplink || []).length === 0
-                ? <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.5 }}>Belum ada perangkat uplink terdeteksi. Beri nama/kategori perangkat sumber internet dengan kata <b style={{ color: C.text }}>mikrotik / uplink / internet / wan / sfp</b> agar terpantau di sini.</div>
+                ? <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.4 }}>Tandai perangkat sumbernya: menu <b style={{ color: C.text }}>Perangkat → centang "Sumber Internet/Uplink"</b>.</div>
                 : data!.uplink.map((u) => (
                   <div key={u.id} onClick={() => { const d = devices.find((x) => x.id === u.id); if (d) setSel(d); }} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, padding: '3px 0', cursor: 'pointer' }}>
                     <span style={{ width: 8, height: 8, borderRadius: 999, background: stColor(u.status), boxShadow: `0 0 6px ${stColor(u.status)}` }} />
@@ -331,7 +346,7 @@ export default function Noc() {
                 ))}
             </div>
           </div>
-          <div style={{ ...card, height: 232, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ ...card, flex: 1, minHeight: 84, display: 'flex', flexDirection: 'column' }}>
             <div style={cardTitle}>🔍 INSPEKSI TEKNISI HARI INI · {data?.inspections?.length || 0} <span style={{ fontWeight: 500, color: C.dim }}>· auto-scroll</span></div>
             <div ref={inspScrollRef} className="noc-scroll" style={{ overflow: 'auto', flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {(data?.inspections || []).length === 0
@@ -457,7 +472,10 @@ export default function Noc() {
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
                     <span style={{ width: 9, height: 9, borderRadius: 999, background: busy ? C.warning : si.c, boxShadow: `0 0 6px ${busy ? C.warning : si.c}` }} />
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.emoji || '👤'} {t.name}</span>
-                    <span style={{ marginLeft: 'auto', fontSize: 10, color: busy ? C.warning : si.c, whiteSpace: 'nowrap' }}>{busy ? `🛠️ ${t.handling} tiket` : si.label}</span>
+                    <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                      {busy && <span style={{ fontSize: 10, color: C.warning }}>🛠 {t.handling}</span>}
+                      <span className="mono" title="Kode shift hari ini" style={{ fontSize: 10, fontWeight: 800, color: si.c, border: `1px solid ${si.c}66`, borderRadius: 4, padding: '0 5px', minWidth: 16, textAlign: 'center' }}>{si.label}</span>
+                    </span>
                   </div>
                 );
               })}

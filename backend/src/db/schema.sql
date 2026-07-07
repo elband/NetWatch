@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS devices (
   loc VARCHAR(150) DEFAULT NULL,
   location_id INT DEFAULT NULL,
   inspect_required TINYINT(1) NOT NULL DEFAULT 1,
+  is_uplink TINYINT(1) NOT NULL DEFAULT 0,          -- sumber internet/uplink (Mikrotik) — 1 per unit
+  uplink_ifindex INT DEFAULT NULL,                  -- ifIndex SNMP interface WAN/SFP untuk baca kecepatan real
   always_on TINYINT(1) NOT NULL DEFAULT 0,
   status ENUM('online','warning','offline') NOT NULL DEFAULT 'offline',
   ping_ms INT DEFAULT 0,

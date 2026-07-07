@@ -16,7 +16,7 @@ function meterColor(v: number) {
 const DEVICE_TYPES = ['Switch', 'Router', 'Firewall', 'AP', 'Server', 'NAS', 'CCTV', 'PC Client', 'Printer'];
 // Pustaka ikon (emoji) untuk perangkat / kartu layanan.
 const ICONS = ['🖥️', '🔀', '📶', '🧱', '🖧', '💾', '📹', '🌐', '🔗', '📺', '🚪', '📢', '✈️', '🛰️', '📡', '🛜', '📱', '💻', '🔌', '⚙️', '🟢', '🗂️'];
-const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', location_id: null as number | null, ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161' };
+const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', location_id: null as number | null, ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, is_uplink: false, uplink_ifindex: '', check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161' };
 const NO_IP = 'N/A (Tanpa IP)';
 
 export default function Devices() {
@@ -113,6 +113,8 @@ export default function Devices() {
       ssh_host: d.ssh_host || '', ssh_port: String(d.ssh_port ?? 22), ssh_username: d.ssh_username || '',
       lat: d.lat != null ? String(d.lat) : '', lng: d.lng != null ? String(d.lng) : '',
       inspect_required: d.inspect_required == null ? true : !!d.inspect_required,
+      is_uplink: !!d.is_uplink,
+      uplink_ifindex: d.uplink_ifindex != null ? String(d.uplink_ifindex) : '',
       check_type: d.check_type || 'ping', check_port: d.check_port != null ? String(d.check_port) : '', check_url: d.check_url || '',
       snmp_enabled: !!d.snmp_enabled, snmp_community: d.snmp_community || 'public', snmp_port: String(d.snmp_port ?? 161),
     });
@@ -147,6 +149,8 @@ export default function Devices() {
       lat: form.lat.trim() || null,
       lng: form.lng.trim() || null,
       inspect_required: form.inspect_required,
+      is_uplink: form.is_uplink,
+      uplink_ifindex: form.uplink_ifindex.trim() ? Number(form.uplink_ifindex) : null,
       check_type: form.check_type,
       check_port: form.check_type === 'tcp' ? (Number(form.check_port) || null) : null,
       check_url: form.check_type === 'http' ? (form.check_url.trim() || null) : null,
@@ -472,6 +476,22 @@ export default function Devices() {
                     <span className="block text-[10px] text-text2">Bila aktif, perangkat muncul di daftar inspeksi rutin teknisi. Nonaktifkan untuk perangkat yang tidak perlu inspeksi (mis. PC Client).</span>
                   </span>
                 </label>
+              </div>
+              <div className="col-span-2">
+                <label className="flex items-start gap-2 cursor-pointer bg-surface2 border border-border rounded-md px-3 py-2.5">
+                  <input type="checkbox" className="mt-0.5" checked={form.is_uplink} onChange={(e) => setForm({ ...form, is_uplink: e.target.checked })} />
+                  <span>
+                    <span className="block text-[12px] font-semibold">🌐 Sumber Internet / Uplink (Mikrotik)</span>
+                    <span className="block text-[10px] text-text2">Tandai perangkat ini sebagai sumber internet unit. Panel "INTERNET / UPLINK" di Wallboard NOC akan mengikuti status &amp; ping perangkat ini. Hanya <b>satu</b> per unit (menandai yang baru otomatis melepas yang lama).</span>
+                  </span>
+                </label>
+                {form.is_uplink && (
+                  <div className="mt-2 pl-1">
+                    <label className="text-[11px] text-text2 block mb-1">ifIndex interface WAN/SFP (SNMP) <span className="text-text2/60">— untuk kecepatan real</span></label>
+                    <input type="number" min={1} className="w-40 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.uplink_ifindex} onChange={(e) => setForm({ ...form, uplink_ifindex: e.target.value })} placeholder="mis. 1" />
+                    <div className="text-[10px] text-text2 mt-1">Aktifkan <b>SNMP</b> di atas, lalu isi <b>ifIndex</b> port internet Mikrotik (RouterOS: <code>/interface print</code> → kolom #, atau via SNMP ifDescr). Kecepatan ↓/↑ dibaca dari ifHCIn/OutOctets tiap 5 dtk.</div>
+                  </div>
+                )}
               </div>
             </div>
             </div>

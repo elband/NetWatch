@@ -43,7 +43,7 @@ function validateCheckUrl(u) {
 }
 
 export async function createDevice(req, res) {
-  const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
+  const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required, is_uplink, uplink_ifindex,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   if (!name || !ip || !type) return res.status(400).json({ error: 'Nama, IP, tipe wajib diisi' });
   const urlErr = validateCheckUrl(check_url);
@@ -53,21 +53,23 @@ export async function createDevice(req, res) {
   const inspReq = inspect_required == null ? 1 : (inspect_required ? 1 : 0);
   const locId = location_id === '' || location_id == null ? null : Number(location_id);
   const [result] = await pool.query(
-    `INSERT INTO devices (unit_id, name, ip, type, category, icon, loc, location_id, inspect_required, status, ssh_host, ssh_port, ssh_username, lat, lng,
+    `INSERT INTO devices (unit_id, name, ip, type, category, icon, loc, location_id, inspect_required, is_uplink, uplink_ifindex, status, ssh_host, ssh_port, ssh_username, lat, lng,
        check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [unitId, name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, locId, inspReq, ssh_host || ip, ssh_port || 22, ssh_username || null,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [unitId, name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, locId, inspReq, is_uplink ? 1 : 0, uplink_ifindex ? Number(uplink_ifindex) : null, ssh_host || ip, ssh_port || 22, ssh_username || null,
      lat === '' || lat == null ? null : Number(lat), lng === '' || lng == null ? null : Number(lng),
      normCheckType(check_type), check_port ? Number(check_port) : null, check_url?.trim() || null,
      snmp_enabled ? 1 : 0, snmp_community?.trim() || 'public', snmp_port ? Number(snmp_port) : 161]
   );
+  // Hanya satu uplink per unit: bila perangkat ini ditandai uplink, matikan flag di perangkat lain.
+  if (is_uplink) await pool.query('UPDATE devices SET is_uplink=0 WHERE unit_id=? AND id<>?', [unitId, result.insertId]);
   const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [result.insertId]);
   res.status(201).json({ device: rows[0] });
 }
 
 export async function updateDevice(req, res) {
   const id = Number(req.params.id);
-  const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required,
+  const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required, is_uplink, uplink_ifindex,
     check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
   if (check_url !== undefined) {
     const urlErr = validateCheckUrl(check_url);
@@ -76,7 +78,7 @@ export async function updateDevice(req, res) {
   const [existing] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   if (!existing[0] || !rowInUnit(existing[0], req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   await pool.query(
-    `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, location_id=?, inspect_required=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=?,
+    `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, location_id=?, inspect_required=?, is_uplink=?, uplink_ifindex=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=?,
        check_type=?, check_port=?, check_url=?, snmp_enabled=?, snmp_community=?, snmp_port=? WHERE id=?`,
     [
       name ?? existing[0].name,
@@ -87,6 +89,8 @@ export async function updateDevice(req, res) {
       loc ?? existing[0].loc,
       location_id === undefined ? existing[0].location_id : (location_id === '' || location_id == null ? null : Number(location_id)),
       inspect_required == null ? existing[0].inspect_required : (inspect_required ? 1 : 0),
+      is_uplink === undefined ? existing[0].is_uplink : (is_uplink ? 1 : 0),
+      uplink_ifindex === undefined ? existing[0].uplink_ifindex : (uplink_ifindex === '' || uplink_ifindex == null ? null : Number(uplink_ifindex)),
       ssh_host ?? existing[0].ssh_host,
       ssh_port ?? existing[0].ssh_port,
       ssh_username ?? existing[0].ssh_username,
@@ -101,6 +105,8 @@ export async function updateDevice(req, res) {
       id,
     ]
   );
+  // Hanya satu uplink per unit.
+  if (is_uplink) await pool.query('UPDATE devices SET is_uplink=0 WHERE unit_id=? AND id<>?', [existing[0].unit_id, id]);
   const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   res.json({ device: rows[0] });
 }

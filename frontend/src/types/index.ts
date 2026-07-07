@@ -58,6 +58,8 @@ export interface Device {
   location_lat?: number | null;
   location_lng?: number | null;
   inspect_required?: number;
+  is_uplink?: number;
+  uplink_ifindex?: number | null;
   always_on?: number;
   status: DeviceStatus;
   off_reason?: string | null;
