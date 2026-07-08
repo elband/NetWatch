@@ -40,6 +40,76 @@ function usePhotoCapture(contextLines: string[]) {
   }
   return { file, preview, geo, capturedAt, processing, geoErr, pick };
 }
+
+// Tangkap foto LANGSUNG dari kamera (getUserMedia) — unggah dari galeri dinonaktifkan.
+// Menghasilkan File dari frame video via kanvas, lalu diteruskan ke onCapture (yang
+// akan menggeotag lewat usePhotoCapture.pick). Butuh konteks aman (HTTPS/localhost).
+function CameraCapture({ onCapture, hasPhoto }: { onCapture: (f: File) => void; hasPhoto: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [active, setActive] = useState(false);
+  const [err, setErr] = useState('');
+
+  function stop() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setActive(false);
+  }
+  // Wiring stream → <video> setelah elemen ter-render; plus hentikan kamera saat unmount.
+  useEffect(() => {
+    if (active && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [active]);
+  useEffect(() => () => stop(), []);
+
+  async function start() {
+    setErr('');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErr('Kamera tidak didukung di browser/perangkat ini. Buka lewat HP dengan kamera (koneksi HTTPS).');
+      return;
+    }
+    try {
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      setActive(true);
+    } catch {
+      setErr('Tidak bisa mengakses kamera. Izinkan akses kamera di browser lalu coba lagi. (Unggah dari galeri dinonaktifkan untuk inspeksi.)');
+    }
+  }
+
+  function snap() {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (blob) onCapture(new File([blob], `kamera-${Date.now()}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }));
+      stop();
+    }, 'image/jpeg', 0.92);
+  }
+
+  if (active) {
+    return (
+      <div className="mb-1">
+        <video ref={videoRef} playsInline muted className="w-full rounded border border-border bg-black max-h-64 object-contain" />
+        <div className="flex gap-2 mt-1">
+          <button type="button" onClick={snap} className="flex-1 bg-accent text-bg rounded-md py-2 text-xs font-semibold">📸 Ambil Foto</button>
+          <button type="button" onClick={stop} className="border border-border text-text2 rounded-md py-2 px-3 text-xs">Tutup</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-1">
+      <button type="button" onClick={start} className="w-full border border-accent/40 text-accent rounded-md py-2 text-xs font-semibold hover:bg-accent/10">📷 {hasPhoto ? 'Ambil Ulang dari Kamera' : 'Buka Kamera'}</button>
+      {err && <div className="mt-1 text-[10px] text-danger">⚠️ {err}</div>}
+    </div>
+  );
+}
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 
@@ -78,6 +148,7 @@ function InspeksiTab() {
   const [openSlots, setOpenSlots] = useState<string[]>([]);
   const [isToday, setIsToday] = useState(true);
   const [canInput, setCanInput] = useState(false);
+  const [attended, setAttended] = useState(true); // sudah absen masuk hari ini? (default true agar tak berkedip)
   const [edit, setEdit] = useState<{ dev: EquipmentRow; slot: '09' | '12' | '15' } | null>(null);
   const [powerOn, setPowerOn] = useState<EquipmentRow | null>(null);
   const [powerOff, setPowerOff] = useState<EquipmentRow | null>(null);
@@ -92,6 +163,7 @@ function InspeksiTab() {
       setOpenSlots(res.data.openSlots || []);
       setIsToday(res.data.isToday);
       setCanInput(res.data.canInput);
+      setAttended(res.data.attended !== false);
     });
   }
   useEffect(load, [date]);
@@ -126,6 +198,12 @@ function InspeksiTab() {
         {!isToday && <span className="text-[11px] text-text2">🔒 Hanya hari ini yang bisa diisi (slot lampau terkunci)</span>}
       </div>
       <div className="text-[10px] text-text2 mb-3">🔒 Tiap slot hanya bisa diisi pada jamnya (09:00 → 08:30–11:00, 12:00 → 11:00–14:00, 15:00 → 14:00–17:00). Foto wajib & tidak boleh foto yang sudah pernah dipakai.</div>
+
+      {canInput && isToday && !attended && (
+        <div className="mb-3 rounded-md px-3 py-2 text-[11px] border bg-warn/10 border-warn/30 text-warn flex items-center gap-2">
+          <span>⏰ Anda belum <b>absen masuk</b> hari ini. Absen masuk dulu untuk bisa <b>menghidupkan peralatan</b> — buka <b>Dashboard → Absensi</b>.</span>
+        </div>
+      )}
 
       {/* Pencarian + filter status inspeksi (mengacu slot berjalan) */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -191,6 +269,7 @@ function InspeksiTab() {
                 </div>
               ) : (() => {
                 const canPress = canInput && isToday;
+                const canHidupkan = canPress && attended; // wajib sudah absen masuk dulu
                 const isOn = d.monitor_enabled !== 0;
                 const bukti = isOn ? d.poweron : d.poweroff; // bukti sesuai state terkini
                 return (
@@ -207,14 +286,14 @@ function InspeksiTab() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button
-                        disabled={!canPress || isOn}
-                        onClick={() => canPress && !isOn && setPowerOn(d)}
-                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : isOn ? 'Peralatan sudah hidup & dimonitor' : 'Hidupkan + mulai monitoring (wajib foto dokumentasi)'}
+                        disabled={!canHidupkan || isOn}
+                        onClick={() => canHidupkan && !isOn && setPowerOn(d)}
+                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : !attended ? 'Absen masuk dulu untuk bisa menghidupkan peralatan' : isOn ? 'Peralatan sudah hidup & dimonitor' : 'Hidupkan + mulai monitoring (wajib foto dokumentasi)'}
                         className={`flex-1 border rounded px-2 py-1.5 text-[11px] font-semibold ${isOn
                           ? 'bg-success/15 border-success/40 text-success cursor-default'
-                          : canPress ? 'border-accent/40 text-accent hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
+                          : canHidupkan ? 'border-accent/40 text-accent hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
                       >
-                        {!canPress && !isOn ? '🔒 ' : ''}⚡ {isOn ? 'Hidup' : 'Hidupkan'}
+                        {!canHidupkan && !isOn ? '🔒 ' : ''}⚡ {isOn ? 'Hidup' : 'Hidupkan'}
                       </button>
                       <button
                         disabled={!canPress || !isOn}
@@ -279,21 +358,45 @@ function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: 
   const [err, setErr] = useState('');
   const cap = usePhotoCapture([`Inspeksi ${SLOT_LABEL[slot]} · ${dev.name}`]);
 
+  // Kirim ke server; `confirmSuspicious` memaksa simpan foto yang gagal verifikasi.
+  function submit(confirmSuspicious: boolean) {
+    const fd = new FormData();
+    fd.append('deviceId', String(dev.id));
+    fd.append('slot', slot);
+    fd.append('status', status);
+    fd.append('note', note);
+    fd.append('date', date);
+    fd.append('photo', cap.file as File);
+    if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
+    if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
+    if (confirmSuspicious) fd.append('confirmSuspicious', '1');
+    return api.post('/equipment/inspections', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  }
+
   async function save() {
-    if (!cap.file) return setErr('Foto dokumentasi wajib diunggah (hasil pengecekan saat ini).');
+    if (!cap.file) return setErr('Foto wajib diambil langsung dari kamera.');
     setBusy(true); setErr('');
     try {
-      const fd = new FormData();
-      fd.append('deviceId', String(dev.id));
-      fd.append('slot', slot);
-      fd.append('status', status);
-      fd.append('note', note);
-      fd.append('date', date);
-      fd.append('photo', cap.file);
-      if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
-      if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
-      const res = await api.post('/equipment/inspections', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
+      let res;
+      try {
+        res = await submit(false);
+      } catch (e: any) {
+        const data = e?.response?.data;
+        if (!data?.needConfirm) throw e;
+        // Foto mencurigakan → konfirmasi eksplisit sebelum menyimpan (kena penalti 20%).
+        const ok = await confirmDialog({
+          title: 'Foto Mencurigakan',
+          message: `${data.warning}\n\nApakah Anda yakin menyimpan foto ini? Foto mencurigakan yang tetap disimpan akan mengurangi skor performa Anda 20% bulan ini.`,
+          confirmText: 'Ya, tetap simpan',
+          cancelText: 'Batal',
+          variant: 'danger',
+        });
+        if (!ok) return; // dibatalkan; finally mematikan status "menyimpan"
+        res = await submit(true);
+      }
+      if (res.data?.flagged) {
+        await alertDialog({ title: 'Tersimpan · Ditandai', message: `Foto disimpan namun ditandai mencurigakan:\n${res.data.warning || ''}\n\nSkor performa bulan ini dikurangi 20% & koordinator diberi tahu.`, variant: 'warning' });
+      }
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -310,18 +413,12 @@ function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: 
             <button key={s} onClick={() => setStatus(s)} className={`flex-1 border rounded-md px-2 py-2 text-xs font-semibold ${status === s ? ST_META[s].bg + ' ' + ST_META[s].c : 'border-border text-text2'}`}>{ST_META[s].t}</button>
           ))}
         </div>
-        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span></label>
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="block w-full text-[11px] text-text2 mb-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-accent file:text-bg file:text-[11px] file:font-semibold"
-          onChange={(e) => cap.pick(e.target.files?.[0] || null)}
-        />
+        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span> <span className="text-text2">(wajib dari kamera)</span></label>
+        <CameraCapture onCapture={(f) => cap.pick(f)} hasPhoto={!!cap.file} />
         <GeoTagStatus cap={cap} />
         {cap.preview && <img src={cap.preview} alt="preview" className="mt-1 mb-2 max-h-40 rounded border border-border object-contain" />}
         <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[60px] mb-2 mt-1" placeholder="Catatan kondisi (opsional)…" value={note} onChange={(e) => setNote(e.target.value)} />
-        <div className="text-[10px] text-text2 mb-3">⚠️ Ambil foto langsung dari kamera. Waktu tangkap & lokasi GPS otomatis dibakar ke foto (geotag). Izinkan akses lokasi saat diminta. Foto lama/yang sudah pernah dipakai akan ditolak/ditandai.</div>
+        <div className="text-[10px] text-text2 mb-3">📷 Foto WAJIB diambil langsung dari kamera (unggah galeri dinonaktifkan). Waktu &amp; lokasi GPS dibakar ke foto. Foto yang lokasinya jauh dari perangkat / tanpa GPS dianggap <b>mencurigakan</b> — bila tetap disimpan, performa bulan ini berkurang 20%.</div>
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>

@@ -705,6 +705,7 @@ CREATE TABLE IF NOT EXISTS equipment_inspections (
   photo_hash CHAR(64) DEFAULT NULL,
   verified TINYINT(1) NOT NULL DEFAULT 0,
   distance_m INT DEFAULT NULL,
+  flagged TINYINT(1) NOT NULL DEFAULT 0,
   inspected_by INT DEFAULT NULL,
   inspector_name VARCHAR(120) DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

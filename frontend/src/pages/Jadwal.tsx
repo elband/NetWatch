@@ -290,7 +290,7 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button>
         </div>
         <p className="text-[11px] text-text2 mb-4 leading-relaxed">
-          Jam dinas <b>khusus unit ini</b>. Menentukan siapa teknisi <b>on-duty</b> (penerima insiden &amp; SLA), dan jam mulai ini juga membuka <b>absensi masuk</b> &amp; <b>menghidupkan peralatan</b> 30 menit sebelumnya. Pagi &amp; Siang wajib; Dinas Kantor (N) opsional. Libur, Dinas Luar, dan Cuti tidak punya jam dinas.
+          Jam dinas <b>khusus unit ini</b>. Menentukan siapa teknisi <b>on-duty</b> (penerima insiden &amp; SLA), dan jam mulai ini juga membuka <b>absensi masuk</b> &amp; <b>menghidupkan peralatan</b> 1 jam sebelumnya. Pagi &amp; Siang wajib; Dinas Kantor (N) opsional. Libur, Dinas Luar, dan Cuti tidak punya jam dinas.
         </p>
 
         {!wins ? (

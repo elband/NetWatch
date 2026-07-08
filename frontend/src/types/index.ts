@@ -469,6 +469,8 @@ export interface PerformaRow {
   inspections: number;
   vpnDays?: number;
   vpnFlag?: boolean;
+  suspInspDays?: number;
+  suspInspFlag?: boolean;
   raw: number;
   scoreBeforePenalty?: number;
   score: number;

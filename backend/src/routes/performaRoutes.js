@@ -71,14 +71,20 @@ export async function metricsFor(id, start, end, unitId = null) {
   // Pelanggaran lokasi/VPN saat absensi → penalti 50% pada skor akhir.
   const [[vp]] = await pool.query('SELECT COUNT(*) c FROM attendance WHERE user_id=? AND flagged=1 AND work_date>=? AND work_date<?', [id, start, end]);
   const vpnDays = vp.c, vpnFlag = vp.c > 0;
+  // Foto inspeksi mencurigakan yang tetap disimpan (dikonfirmasi teknisi) → penalti 20%.
+  const [[si]] = await pool.query('SELECT COUNT(*) c FROM equipment_inspections WHERE inspected_by=? AND flagged=1 AND inspect_date>=? AND inspect_date<?', [id, start, end]);
+  const suspInspDays = si.c, suspInspFlag = si.c > 0;
 
   const m = {
     done: d.done, active: a.active, taken: t.taken, onTime: Number(t.onTime) || 0, kritisDone: Number(d.kritis) || 0,
     pm: pm.c, dokumentasi: dk.c, breaches: br.c, eskalasi: es.c, reopen: 0, absen, inspections: ins.c,
-    vpnDays, vpnFlag, avgResp: Math.round(t.avgResp), avgDur: Math.round(d.avgDur),
+    vpnDays, vpnFlag, suspInspDays, suspInspFlag, avgResp: Math.round(t.avgResp), avgDur: Math.round(d.avgDur),
   };
   const { raw, score: base } = calcScore(m);
-  const score = vpnFlag ? Math.round(base * 0.5) : base;
+  // Penalti berganda diterapkan berurutan (multiplikatif): VPN −50%, foto inspeksi mencurigakan −20%.
+  let score = base;
+  if (vpnFlag) score = Math.round(score * 0.5);
+  if (suspInspFlag) score = Math.round(score * 0.8);
   const g = gradeOf(score);
   return { ...m, raw, scoreBeforePenalty: base, score, grade: g.grade, gradeLabel: g.label };
 }

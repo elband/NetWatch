@@ -122,6 +122,18 @@ async function canInspect(user) {
   return false;
 }
 
+// Sudah absen masuk hari ini? Koordinator/admin dikecualikan (tidak wajib absen).
+// Dipakai untuk menggerbang "menghidupkan peralatan" — teknisi harus absen dulu.
+async function hasAttendedToday(user) {
+  const roles = user.roles?.length ? user.roles : (user.role ? [user.role] : []);
+  if (roles.includes('admin') || roles.includes('koordinator')) return true;
+  const [rows] = await pool.query(
+    'SELECT 1 FROM attendance WHERE user_id=? AND work_date=? AND check_in_at IS NOT NULL LIMIT 1',
+    [user.id, dateKey(new Date())]
+  );
+  return rows.length > 0;
+}
+
 // ===================== INSPEKSI HARIAN =====================
 router.get('/inspections', async (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : dateKey(new Date());
@@ -151,6 +163,7 @@ router.get('/inspections', async (req, res) => {
     currentSlot: currentSlot(),
     openSlots: openSlots(),
     canInput: await canInspect(req.user),
+    attended: await hasAttendedToday(req.user),
     devices: list,
   });
 });
@@ -199,6 +212,15 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
     return res.status(422).json({ error: `Verifikasi gagal: ${warning}` });
   }
 
+  // Foto mencurigakan (gagal verifikasi lokasi/kesegaran) → minta konfirmasi eksplisit
+  // sebelum disimpan. Bila teknisi tetap yakin menyimpan, foto ditandai (flagged=1) dan
+  // performa bulan ini dipotong 20% (lihat performaRoutes/metricsFor).
+  const confirmSuspicious = req.body.confirmSuspicious === '1' || req.body.confirmSuspicious === 'true';
+  if (!verified && !confirmSuspicious) {
+    return res.status(409).json({ needConfirm: true, suspicious: true, warning: warning || 'Foto tidak lolos verifikasi lokasi/kesegaran.' });
+  }
+  const flagged = (!verified && confirmSuspicious) ? 1 : 0;
+
   // Tulis file ke disk setelah lolos validasi.
   const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
   const filename = `insp-${deviceId}-${date}-${slot}-${Date.now()}${ext}`;
@@ -206,19 +228,19 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   const photoUrl = `/uploads/inspections/${filename}`;
 
   await pool.query(
-    `INSERT INTO equipment_inspections (device_id, inspect_date, slot, status, note, photo_url, photo_hash, verified, distance_m, inspected_by, inspector_name, unit_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO equipment_inspections (device_id, inspect_date, slot, status, note, photo_url, photo_hash, verified, distance_m, flagged, inspected_by, inspector_name, unit_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE status=VALUES(status), note=VALUES(note),
        photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash), verified=VALUES(verified),
-       distance_m=VALUES(distance_m), inspected_by=VALUES(inspected_by), inspector_name=VALUES(inspector_name), unit_id=VALUES(unit_id)`,
-    [deviceId, date, String(slot), st, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name, rowUnitId]
+       distance_m=VALUES(distance_m), flagged=VALUES(flagged), inspected_by=VALUES(inspected_by), inspector_name=VALUES(inspector_name), unit_id=VALUES(unit_id)`,
+    [deviceId, date, String(slot), st, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
   );
 
   // Notifikasi otomatis ke koordinator bahwa perangkat sudah diinspeksi.
   {
     const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [rowUnitId]);
     const stEmoji = st === 'rusak' ? '🔴' : st === 'perhatian' ? '🟡' : '🟢';
-    const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
+    const verifyTag = verified ? '✅ terverifikasi' : (flagged ? '🚫 mencurigakan — disimpan atas konfirmasi teknisi (performa −20%)' : '⚠️ belum terverifikasi');
     for (const c of coords) {
       if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
       await queueWaNotification({
@@ -233,7 +255,7 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
     'SELECT * FROM equipment_inspections WHERE device_id=? AND inspect_date=? AND slot=?',
     [deviceId, date, String(slot)]
   );
-  res.json({ inspection: rows[0], verified, distance, warning });
+  res.json({ inspection: rows[0], verified, distance, warning, flagged });
 });
 
 // ===================== MENGHIDUPKAN PERALATAN (HARIAN) =====================
@@ -243,13 +265,15 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
 router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const { deviceId, note } = req.body;
   if (!deviceId) return res.status(400).json({ error: 'Perangkat wajib valid.' });
-  // Gate: teknisi hanya bisa menghidupkan peralatan mulai 30 menit sebelum jam dinasnya
+  // Gate: teknisi hanya bisa menghidupkan peralatan mulai 1 jam sebelum jam dinasnya
   // (per unit). Koordinator/admin dikecualikan.
   const roles = req.user.roles?.length ? req.user.roles : (req.user.role ? [req.user.role] : []);
   if (!roles.includes('admin') && !roles.includes('koordinator')) {
     const gate = await shiftOpenGate(pool, req.user.id);
     if (!gate.hasShift) return res.status(403).json({ error: 'Anda tidak terjadwal dinas hari ini.' });
-    if (!gate.allowed) return res.status(403).json({ error: `Menghidupkan peralatan dibuka pukul ${gate.opensAt} (30 menit sebelum jam dinas Anda).` });
+    if (!gate.allowed) return res.status(403).json({ error: `Menghidupkan peralatan dibuka pukul ${gate.opensAt} (1 jam sebelum jam dinas Anda).` });
+    // Gate: wajib absen masuk dulu sebelum menghidupkan peralatan (absensi buka 1 jam sebelum jam dinas).
+    if (!(await hasAttendedToday(req.user))) return res.status(403).json({ error: 'Absen masuk dulu sebelum menghidupkan peralatan. Buka Dashboard → Absensi.' });
   }
 
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)

@@ -38,6 +38,7 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'equipment_inspections', 'photo_hash', 'CHAR(64) DEFAULT NULL AFTER photo_url');
   await addColumnIfMissing(conn, env.db.database, 'equipment_inspections', 'verified', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER photo_hash');
   await addColumnIfMissing(conn, env.db.database, 'equipment_inspections', 'distance_m', 'INT DEFAULT NULL AFTER verified');
+  await addColumnIfMissing(conn, env.db.database, 'equipment_inspections', 'flagged', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER distance_m');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'lat', 'DECIMAL(10,7) DEFAULT NULL AFTER ssh_username');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'lng', 'DECIMAL(10,7) DEFAULT NULL AFTER lat');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'category', 'VARCHAR(80) DEFAULT NULL AFTER type');

@@ -161,6 +161,11 @@ export default function Performa() {
               ⚠️ Penalti aktif: terdeteksi {s.vpnDays} hari absensi memakai VPN / lokasi tidak sesuai. Skor performa bulan ini dikurangi 50% (dari {s.scoreBeforePenalty} → {s.score}).
             </div>
           )}
+          {s.suspInspFlag && (
+            <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 px-4 py-3 text-[12px] font-semibold">
+              ⚠️ Penalti aktif: {s.suspInspDays} foto inspeksi mencurigakan (lokasi jauh dari perangkat / GPS mati) tetap disimpan atas konfirmasi. Skor performa bulan ini dikurangi 20%.
+            </div>
+          )}
           {/* Baris 1: Gauge + Stat cards */}
           <div className="grid lg:grid-cols-[300px_1fr] gap-4">
             <div className="nw-card rounded-2xl border border-slate-800 bg-[#0b1220] p-5 flex flex-col items-center justify-center">

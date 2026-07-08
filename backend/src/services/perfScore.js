@@ -26,7 +26,7 @@ const TIP_MAP = {
   sla: (c) => `Ambil tiket lebih sigap saat on-duty — baru ${c.num}/${c.den} tiket diambil tepat waktu. Setiap tiket telat menurunkan skor terbesar.`,
   selesai: (c) => `Tuntaskan tiket yang masih terbuka — ${Math.max(0, c.den - c.num)} dari ${c.den} tiket yang diambil belum selesai.`,
   inspeksi: (c) => `Lakukan & catat inspeksi harian — baru ${c.num} dari ${c.den} hari dinas terisi inspeksi.`,
-  pm: (c) => `Kerjakan pemeliharaan (PM) yang jatuh tempo — baru ${c.num} dari ${c.den} PM selesai.`,
+  pm: (c) => `Selesaikan maintenance bulanan yang direncanakan — baru ${c.num} dari ${c.den} tugas selesai.`,
   persetujuan: (c) => `Putuskan pengajuan tim lebih cepat (≤ 2 hari kerja) — baru ${c.num} dari ${c.den} tepat waktu.`,
   uptimeUnit: (c) => `Tingkatkan ketersediaan alat unit (kini ${c.value}%) — percepat pemulihan gangguan & jalankan PM rutin.`,
   eskalasi: (c) => `Tuntaskan insiden yang tereskalasi — baru ${c.num} dari ${c.den} tertangani.`,
@@ -76,14 +76,17 @@ export async function scoreTeknisi(userId, start, end, unitId) {
     [userId, start, end]
   );
   const hariDinas = Number(hd.d) || 0;
-  // PM: rencana bersifat per-unit, bukan per-teknisi. Target per teknisi = beban PM unit
-  // dibagi jumlah teknisi aktif (pembagian merata). Kosong bila unit tak punya rencana PM.
+  // PM: dinilai dari Maintenance Bulanan (equipment_maintenance) yang dikelola di tab
+  // Maintenance. Target per teknisi = tugas maintenance unit yang direncanakan pada rentang
+  // ÷ jumlah teknisi aktif; nilai = tugas yang sudah diselesaikan (done_by) teknisi ini.
+  const ufmd = unitFilter(unitId, 'd.unit_id');
   const [[pmDoneRow]] = await pool.query(
-    "SELECT COUNT(*) c FROM equipment_maintenance WHERE done_by=? AND status='selesai' AND done_at>=? AND done_at<?",
-    [userId, start, end]
+    `SELECT COUNT(*) c FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id
+      WHERE m.done_by=? AND m.status='selesai' AND m.scheduled_date>=? AND m.scheduled_date<?${ufmd.clause}`,
+    [userId, start, end, ...ufmd.params]
   );
   const pmDone = Number(pmDoneRow.c) || 0;
-  const pmTarget = await pmTargetPerTech(unitId);
+  const pmTarget = await pmTargetPerTech(unitId, start, end);
 
   const taken = Number(t.taken) || 0, onTime = Number(t.onTime) || 0, done = Number(d.done) || 0, insC = Number(ins.c) || 0;
   return combine([
@@ -94,24 +97,29 @@ export async function scoreTeknisi(userId, start, end, unitId) {
     { key: 'inspeksi', label: 'Inspeksi', weight: 20, value: pct(insC, hariDinas), num: insC, den: hariDinas,
       note: hariDinas ? `${insC} inspeksi dari ${hariDinas} hari dinas` : 'Tidak ada hari dinas terjadwal' },
     { key: 'pm', label: 'Pemeliharaan (PM)', weight: 20, value: pct(pmDone, pmTarget), num: pmDone, den: pmTarget,
-      note: pmTarget ? `${pmDone} PM selesai dari target ${pmTarget}` : 'Tidak ada rencana PM di unit' },
+      note: pmTarget ? `${pmDone} maintenance selesai dari target ${pmTarget}` : 'Tidak ada rencana maintenance bulan ini' },
   ]);
 }
 
-// Beban PM per teknisi = rencana PM aktif unit ÷ jumlah teknisi aktif unit (≥1).
-// 0 bila unit tak punya rencana PM aktif → komponen PM diabaikan.
-async function pmTargetPerTech(unitId) {
-  const ufP = unitFilter(unitId, 'unit_id');
-  const [[p]] = await pool.query(`SELECT COUNT(*) c FROM asset_pm_plans WHERE active=1${ufP.clause}`, ufP.params);
-  const plans = Number(p.c) || 0;
-  if (!plans) return 0;
+// Beban PM per teknisi = tugas Maintenance Bulanan unit yang direncanakan pada rentang
+// (status rencana/selesai, bukan batal) ÷ jumlah teknisi aktif unit (≥1). 0 bila unit
+// tak punya tugas maintenance pada rentang → komponen PM diabaikan (bobot dibagi ulang).
+async function pmTargetPerTech(unitId, start, end) {
+  const ufd = unitFilter(unitId, 'd.unit_id');
+  const [[p]] = await pool.query(
+    `SELECT COUNT(*) c FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id
+      WHERE m.status IN ('rencana','selesai') AND m.scheduled_date>=? AND m.scheduled_date<?${ufd.clause}`,
+    [start, end, ...ufd.params]
+  );
+  const tasks = Number(p.c) || 0;
+  if (!tasks) return 0;
   const ufU = unitFilter(unitId, 'unit_id');
   const [[u]] = await pool.query(
     `SELECT COUNT(*) c FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'"teknisi"'))${ufU.clause}`,
     ufU.params
   );
   const techs = Math.max(1, Number(u.c) || 1);
-  return Math.max(1, Math.round(plans / techs));
+  return Math.max(1, Math.round(tasks / techs));
 }
 
 // ————————————————————— KOORDINATOR —————————————————————

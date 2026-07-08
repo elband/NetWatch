@@ -171,8 +171,8 @@ export async function getDutyStatus(conn, userId, when = new Date()) {
   return { onDuty, shift, onDutyCount: ids.length };
 }
 
-// ===== Gate "buka 30 menit sebelum jam dinas" (absensi & hidupkan-peralatan) =====
-const OPEN_BEFORE_MIN = 30;
+// ===== Gate "buka 1 jam sebelum jam dinas" (absensi & hidupkan-peralatan) =====
+const OPEN_BEFORE_MIN = 60;
 const WORK_SHIFTS = ['pagi', 'siang', 'malam'];
 
 const fmtHour = (h) => {
