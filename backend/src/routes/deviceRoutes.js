@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listDevices, createDevice, updateDevice, deleteDevice, requestAlarm, toggleMonitor, toggleAlwaysOn, getDeviceMetrics, uploadDevicePhoto, removeDevicePhoto } from '../controllers/deviceController.js';
+import { listDevices, createDevice, updateDevice, deleteDevice, requestAlarm, toggleMonitor, toggleAlwaysOn, getDeviceMetrics, uploadDevicePhoto, removeDevicePhoto, snmpInterfaces } from '../controllers/deviceController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope } from '../middleware/unitScope.js';
 import { validateBody } from '../middleware/validate.js';
@@ -18,5 +18,6 @@ router.delete('/:id/photo', requireRole('admin', 'koordinator', 'teknisi'), remo
 router.post('/:id/request-alarm', requireRole('admin', 'koordinator', 'teknisi'), requestAlarm);
 router.post('/:id/toggle-monitor', requireRole('admin', 'koordinator', 'teknisi'), toggleMonitor);
 router.post('/:id/toggle-always-on', requireRole('admin', 'koordinator', 'teknisi'), toggleAlwaysOn);
+router.post('/:id/snmp-interfaces', requireRole('admin', 'koordinator', 'teknisi'), snmpInterfaces); // deteksi interface WAN (SNMP walk) untuk pilih ifIndex
 
 export default router;

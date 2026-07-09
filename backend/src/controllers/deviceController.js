@@ -2,6 +2,7 @@ import { pool } from '../db/pool.js';
 import { snapshotAndNotifyOnDuty } from './incidentController.js';
 import { nextIncidentId } from '../utils/incidentId.js';
 import { unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
+import { listSnmpInterfaces } from '../services/snmpInterfaces.js';
 
 export async function listDevices(req, res) {
   // under_maintenance = perangkat sedang dalam jendela maintenance aktif
@@ -185,6 +186,26 @@ export async function toggleMonitor(req, res) {
   await pool.query('UPDATE devices SET monitor_enabled=? WHERE id=?', [next, id]);
   const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   res.json({ device: updated[0] });
+}
+
+// Deteksi interface perangkat via SNMP (untuk memilih ifIndex uplink WAN dari daftar,
+// tanpa menebak angka). IP diambil dari perangkat tersimpan; community/port boleh
+// dioverride dari form agar bisa dites sebelum disimpan.
+export async function snmpInterfaces(req, res) {
+  const id = Number(req.params.id);
+  const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
+  const device = rows[0];
+  if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
+  if (!device.ip || String(device.ip).startsWith('N/A')) return res.status(400).json({ error: 'Perangkat tidak punya IP untuk SNMP.' });
+  const community = req.body?.snmp_community || device.snmp_community || 'public';
+  const port = Number(req.body?.snmp_port || device.snmp_port || 161);
+  try {
+    const interfaces = await listSnmpInterfaces({ ip: device.ip, community, port });
+    if (!interfaces.length) return res.status(502).json({ error: 'Tidak ada interface terbaca. Pastikan SNMP aktif & community/izin IP benar.' });
+    res.json({ interfaces });
+  } catch (e) {
+    res.status(502).json({ error: e?.message || 'Gagal membaca SNMP.' });
+  }
 }
 
 // Toggle "selalu aktif 24 jam": perangkat dikecualikan dari alur Hidupkan/Matikan

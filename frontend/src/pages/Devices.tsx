@@ -18,6 +18,8 @@ const DEVICE_TYPES = ['Switch', 'Router', 'Firewall', 'AP', 'Server', 'NAS', 'CC
 const ICONS = ['🖥️', '🔀', '📶', '🧱', '🖧', '💾', '📹', '🌐', '🔗', '📺', '🚪', '📢', '✈️', '🛰️', '📡', '🛜', '📱', '💻', '🔌', '⚙️', '🟢', '🗂️'];
 const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', location_id: null as number | null, ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, is_uplink: false, uplink_ifindex: '', check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161' };
 const NO_IP = 'N/A (Tanpa IP)';
+// Baris hasil deteksi interface SNMP (untuk memilih ifIndex uplink WAN dari daftar).
+type IfaceRow = { ifIndex: number; name: string; alias: string | null; up: boolean; mbps: number | null };
 
 export default function Devices() {
   const { user } = useAuth();
@@ -33,6 +35,10 @@ export default function Devices() {
   const [formErr, setFormErr] = useState('');
   const [metricsDevice, setMetricsDevice] = useState<Device | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Deteksi interface WAN via SNMP (untuk mengisi ifIndex uplink dari daftar).
+  const [ifaces, setIfaces] = useState<IfaceRow[] | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [detectErr, setDetectErr] = useState('');
   const canEdit = hasRole(user, 'admin', 'koordinator');
   const canEditDevice = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh edit (bukan hapus)
   const canAdd = hasRole(user, 'admin', 'koordinator', 'teknisi'); // teknisi boleh tambah perangkat
@@ -99,11 +105,28 @@ export default function Devices() {
     }
   }
 
+  // Deteksi interface perangkat via SNMP → daftar untuk memilih ifIndex uplink WAN.
+  // Pakai community/port dari form (bisa dites sebelum disimpan); IP dari perangkat tersimpan.
+  async function detectInterfaces() {
+    if (!editId) { setIfaces(null); setDetectErr('Simpan perangkat dulu, lalu buka Edit untuk mendeteksi interface.'); return; }
+    setDetecting(true); setDetectErr(''); setIfaces(null);
+    try {
+      const r = await api.post(`/devices/${editId}/snmp-interfaces`, { snmp_community: form.snmp_community, snmp_port: form.snmp_port });
+      setIfaces(r.data.interfaces || []);
+    } catch (e: any) {
+      setDetectErr(e?.response?.data?.error || 'Gagal mendeteksi interface.');
+    } finally {
+      setDetecting(false);
+    }
+  }
+
+  function resetDetect() { setIfaces(null); setDetectErr(''); setDetecting(false); }
+
   function openAdd() {
-    setEditId(null); setForm(emptyForm); setFormErr(''); setShowAdd(true);
+    setEditId(null); setForm(emptyForm); setFormErr(''); resetDetect(); setShowAdd(true);
   }
   function closeForm() {
-    setShowAdd(false); setEditId(null);
+    setShowAdd(false); setEditId(null); resetDetect();
   }
   function openEdit(d: Device) {
     setEditId(d.id);
@@ -118,7 +141,7 @@ export default function Devices() {
       check_type: d.check_type || 'ping', check_port: d.check_port != null ? String(d.check_port) : '', check_url: d.check_url || '',
       snmp_enabled: !!d.snmp_enabled, snmp_community: d.snmp_community || 'public', snmp_port: String(d.snmp_port ?? 161),
     });
-    setFormErr(''); setShowAdd(true);
+    setFormErr(''); resetDetect(); setShowAdd(true);
   }
 
   async function removeDevice(d: Device) {
@@ -488,8 +511,32 @@ export default function Devices() {
                 {form.is_uplink && (
                   <div className="mt-2 pl-1">
                     <label className="text-[11px] text-text2 block mb-1">ifIndex interface WAN/SFP (SNMP) <span className="text-text2/60">— untuk kecepatan real</span></label>
-                    <input type="number" min={1} className="w-40 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.uplink_ifindex} onChange={(e) => setForm({ ...form, uplink_ifindex: e.target.value })} placeholder="mis. 1" />
-                    <div className="text-[10px] text-text2 mt-1">Aktifkan <b>SNMP</b> di atas, lalu isi <b>ifIndex</b> port internet Mikrotik (RouterOS: <code>/interface print</code> → kolom #, atau via SNMP ifDescr). Kecepatan ↓/↑ dibaca dari ifHCIn/OutOctets tiap 5 dtk.</div>
+                    <div className="flex items-center gap-2">
+                      <input type="number" min={1} className="w-24 bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={form.uplink_ifindex} onChange={(e) => setForm({ ...form, uplink_ifindex: e.target.value })} placeholder="mis. 1" />
+                      <button type="button" onClick={detectInterfaces} disabled={detecting}
+                        className="border border-accent/40 text-accent rounded-md px-2.5 py-2 text-[11px] font-semibold hover:bg-accent/10 disabled:opacity-50 whitespace-nowrap">
+                        {detecting ? '⏳ Mendeteksi…' : '🔎 Deteksi Interface'}
+                      </button>
+                    </div>
+                    {detectErr && <div className="text-[10px] text-danger mt-1.5">⚠️ {detectErr}</div>}
+                    {ifaces && (ifaces.length === 0
+                      ? <div className="text-[10px] text-text2 mt-1.5">Tidak ada interface terbaca.</div>
+                      : <div className="mt-1.5 max-h-44 overflow-y-auto border border-border rounded-md divide-y divide-border/50">
+                          {ifaces.map((f) => {
+                            const sel = String(f.ifIndex) === String(form.uplink_ifindex);
+                            return (
+                              <button key={f.ifIndex} type="button" onClick={() => setForm({ ...form, uplink_ifindex: String(f.ifIndex) })}
+                                className={`w-full text-left px-2.5 py-1.5 text-[11px] flex items-center gap-2 hover:bg-surface2 ${sel ? 'bg-accent/10' : ''}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${f.up ? 'bg-success' : 'bg-text2/50'}`} title={f.up ? 'up' : 'down'} />
+                                <span className="font-mono text-text2 shrink-0">#{f.ifIndex}</span>
+                                <span className="truncate">{f.name}{f.alias ? <span className="text-text2"> · {f.alias}</span> : null}</span>
+                                <span className="ml-auto shrink-0 text-text2">{f.mbps ? `${f.mbps}M` : ''}{sel ? ' ✓' : ''}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                    )}
+                    <div className="text-[10px] text-text2 mt-1.5">Klik <b>🔎 Deteksi Interface</b> untuk membaca daftar via SNMP, lalu pilih port yang menghadap ISP (hijau = up). Perlu SNMP aktif di perangkat. Kecepatan ↓/↑ dibaca dari ifHCIn/OutOctets tiap 5 dtk.</div>
                   </div>
                 )}
               </div>
