@@ -16,51 +16,131 @@ const ST_META: Record<InspectStatus, { c: string; bg: string; t: string }> = {
   perhatian: { c: 'text-warn', bg: 'bg-warn/15 border-warn/40', t: 'Perhatian' },
   rusak: { c: 'text-danger', bg: 'bg-danger/15 border-danger/40', t: 'Rusak' },
 };
+// Koordinat perangkat + radius kerja untuk panel jarak & keterangan geotag.
+type DeviceGeo = { name: string; lat?: number | null; lng?: number | null };
+const DEFAULT_RADIUS_M = 200;
+
+// Jarak dua titik (meter) — haversine. Dipakai untuk "Jarak Saat Ini" & keterangan foto.
+function haversineM(la1: number, lo1: number, la2: number, lo2: number): number {
+  const R = 6371000, toRad = (d: number) => (d * Math.PI) / 180;
+  const dLa = toRad(la2 - la1), dLo = toRad(lo2 - lo1);
+  const a = Math.sin(dLa / 2) ** 2 + Math.cos(toRad(la1)) * Math.cos(toRad(la2)) * Math.sin(dLo / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+// Jarak titik GPS ke perangkat bila koordinat perangkat tersedia, else null.
+function distToDevice(geo: GeoPoint | null, dev?: DeviceGeo | null): number | null {
+  if (!geo || !dev || dev.lat == null || dev.lng == null) return null;
+  return haversineM(geo.lat, geo.lng, Number(dev.lat), Number(dev.lng));
+}
+
+// Skor ketajaman satu frame video: variance of Laplacian pada citra grayscale ~160px.
+// Makin tinggi makin tajam; foto buram bernilai rendah. Dipakai untuk mengunci tombol
+// "Ambil Foto" sampai gambar cukup jelas (anti-foto blur).
+const SHARP_MIN = 40; // ambang ketajaman minimal
+function frameSharpness(video: HTMLVideoElement, canvas: HTMLCanvasElement): number {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return 0;
+  const w = 160, h = Math.max(90, Math.round((vh / vw) * 160));
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return 0;
+  ctx.drawImage(video, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const gray = new Float64Array(w * h);
+  for (let i = 0; i < w * h; i++) gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+  let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const lap = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - w] - gray[i + w];
+      sum += lap; sum2 += lap * lap; n++;
+    }
+  }
+  if (!n) return 0;
+  const mean = sum / n;
+  return sum2 / n - mean * mean;
+}
+
 // Hook kamera+geotag bersama untuk modal inspeksi & hidupkan/matikan peralatan: saat foto
-// dipilih, ambil lokasi aktif, catat waktu tangkap (file.lastModified), lalu bakar geotag ke foto.
-function usePhotoCapture(contextLines: string[]) {
+// dipilih, ambil lokasi aktif, catat waktu tangkap (file.lastModified), lalu bakar geotag ke
+// foto — termasuk keterangan JARAK ke perangkat & DALAM/LUAR RADIUS bila koordinat tersedia.
+function usePhotoCapture(contextLines: string[], opts?: { device?: DeviceGeo | null; radiusM?: number }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [geo, setGeo] = useState<GeoPoint | null>(null);
+  const [dist, setDist] = useState<number | null>(null);
   const [capturedAt, setCapturedAt] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [geoErr, setGeoErr] = useState('');
 
   async function pick(f: File | null) {
-    if (!f) { setFile(null); setPreview(null); setGeo(null); setCapturedAt(null); setGeoErr(''); return; }
+    if (!f) { setFile(null); setPreview(null); setGeo(null); setDist(null); setCapturedAt(null); setGeoErr(''); return; }
     setProcessing(true); setGeoErr('');
     setCapturedAt(f.lastModified || Date.now());
     const g = await getGeo();
     setGeo(g);
     if (!g) setGeoErr('Lokasi tidak aktif — izinkan akses lokasi, lalu ambil foto ulang agar geotag tercatat.');
-    const stamped = await stampPhoto(f, g, contextLines);
+    // Keterangan tambahan pada geotag: jarak ke perangkat + status radius.
+    const radius = opts?.radiusM ?? DEFAULT_RADIUS_M;
+    const d = distToDevice(g, opts?.device);
+    setDist(d);
+    const extra = [...contextLines];
+    if (d != null) extra.push(`📏 ${d} m ke perangkat (radius ${radius} m) — ${d <= radius ? 'DALAM RADIUS' : 'LUAR RADIUS'}`);
+    const stamped = await stampPhoto(f, g, extra);
     setFile(stamped);
     setPreview(URL.createObjectURL(stamped));
     setProcessing(false);
   }
-  return { file, preview, geo, capturedAt, processing, geoErr, pick };
+  return { file, preview, geo, dist, capturedAt, processing, geoErr, pick };
 }
 
-// Tangkap foto LANGSUNG dari kamera (getUserMedia) — unggah dari galeri dinonaktifkan.
-// Menghasilkan File dari frame video via kanvas, lalu diteruskan ke onCapture (yang
-// akan menggeotag lewat usePhotoCapture.pick). Butuh konteks aman (HTTPS/localhost).
-function CameraCapture({ onCapture, hasPhoto }: { onCapture: (f: File) => void; hasPhoto: boolean }) {
+// Halaman kamera dokumentasi peralatan (getUserMedia) — unggah galeri dinonaktifkan.
+// Saat aktif menampilkan panel gaya absensi: LOKASI ANDA, RADIUS KERJA, JARAK SAAT INI &
+// STATUS (dalam/luar radius) secara live, plus GERBANG KETAJAMAN — tombol "Ambil Foto"
+// terkunci sampai frame cukup tajam (anti-foto blur). Frame hasil diteruskan ke onCapture
+// (yang menggeotag lewat usePhotoCapture.pick). Butuh konteks aman (HTTPS/localhost).
+function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M }: {
+  onCapture: (f: File) => void; hasPhoto: boolean; device?: DeviceGeo | null; radiusM?: number;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const sharpCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sharpTimer = useRef<number | null>(null);
+  const watchIdRef = useRef<number | null>(null);
   const [active, setActive] = useState(false);
   const [err, setErr] = useState('');
+  const [sharp, setSharp] = useState(0);
+  const [pos, setPos] = useState<GeoPoint | null>(null);
+  const [posErr, setPosErr] = useState('');
 
+  function stopWatchers() {
+    if (sharpTimer.current != null) { clearInterval(sharpTimer.current); sharpTimer.current = null; }
+    if (watchIdRef.current != null && navigator.geolocation) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null; }
+  }
   function stop() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    setActive(false);
+    stopWatchers();
+    setSharp(0); setActive(false);
   }
-  // Wiring stream → <video> setelah elemen ter-render; plus hentikan kamera saat unmount.
+  // Saat kamera aktif: wiring stream → <video>, jalankan loop ketajaman & watch lokasi.
   useEffect(() => {
-    if (active && streamRef.current && videoRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
+    if (!active) return;
+    const v = videoRef.current;
+    if (streamRef.current && v) { v.srcObject = streamRef.current; v.play().catch(() => {}); }
+    if (!sharpCanvasRef.current) sharpCanvasRef.current = document.createElement('canvas');
+    sharpTimer.current = window.setInterval(() => {
+      const vid = videoRef.current, cv = sharpCanvasRef.current;
+      if (vid && cv) setSharp(frameSharpness(vid, cv));
+    }, 350);
+    if (navigator.geolocation) {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (p) => { setPos({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }); setPosErr(''); },
+        () => setPosErr('Lokasi tidak aktif — izinkan akses lokasi.'),
+        { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+      );
     }
+    return stopWatchers;
   }, [active]);
   useEffect(() => () => stop(), []);
 
@@ -80,7 +160,7 @@ function CameraCapture({ onCapture, hasPhoto }: { onCapture: (f: File) => void; 
 
   function snap() {
     const v = videoRef.current;
-    if (!v || !v.videoWidth) return;
+    if (!v || !v.videoWidth || sharp < SHARP_MIN) return; // hanya boleh saat frame tajam
     const canvas = document.createElement('canvas');
     canvas.width = v.videoWidth; canvas.height = v.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -92,21 +172,80 @@ function CameraCapture({ onCapture, hasPhoto }: { onCapture: (f: File) => void; 
     }, 'image/jpeg', 0.92);
   }
 
-  if (active) {
+  const isSharp = sharp >= SHARP_MIN;
+  const dist = distToDevice(pos, device);
+  const within = dist != null ? dist <= radiusM : null;
+  const hasDevCoord = !!device && device.lat != null && device.lng != null;
+
+  if (!active) {
     return (
       <div className="mb-1">
-        <video ref={videoRef} playsInline muted className="w-full rounded border border-border bg-black max-h-64 object-contain" />
-        <div className="flex gap-2 mt-1">
-          <button type="button" onClick={snap} className="flex-1 bg-accent text-bg rounded-md py-2 text-xs font-semibold">📸 Ambil Foto</button>
-          <button type="button" onClick={stop} className="border border-border text-text2 rounded-md py-2 px-3 text-xs">Tutup</button>
-        </div>
+        <button type="button" onClick={start} className="w-full border border-accent/40 text-accent rounded-md py-2.5 text-xs font-semibold hover:bg-accent/10">
+          📷 {hasPhoto ? 'Ambil Ulang dari Kamera' : 'Buka Kamera & Foto Peralatan'}
+        </button>
+        {err && <div className="mt-1 text-[10px] text-danger">⚠️ {err}</div>}
       </div>
     );
   }
+
   return (
-    <div className="mb-1">
-      <button type="button" onClick={start} className="w-full border border-accent/40 text-accent rounded-md py-2 text-xs font-semibold hover:bg-accent/10">📷 {hasPhoto ? 'Ambil Ulang dari Kamera' : 'Buka Kamera'}</button>
-      {err && <div className="mt-1 text-[10px] text-danger">⚠️ {err}</div>}
+    <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-3" role="dialog" aria-modal="true">
+      <div className="bg-surface border border-border rounded-xl w-full max-w-3xl max-h-[96vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-bold truncate">📷 Foto Peralatan{device?.name ? ` — ${device.name}` : ''}</div>
+          <button type="button" onClick={stop} className="text-text2 hover:text-text text-xl leading-none">×</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-3">
+          {/* Kamera + gerbang ketajaman */}
+          <div>
+            <div className="relative">
+              <video ref={videoRef} playsInline muted className="w-full rounded-lg border border-border bg-black max-h-[58vh] object-contain" />
+              <div className={`absolute left-1/2 -translate-x-1/2 bottom-3 px-3 py-1.5 rounded-full text-[11px] font-semibold flex items-center gap-1.5 ${isSharp ? 'bg-success/90 text-white' : 'bg-black/75 text-white'}`}>
+                {isSharp ? '✅ Foto tajam — siap' : '🔍 Memeriksa ketajaman…'}
+              </div>
+            </div>
+            <div className="mt-1.5 h-1.5 rounded bg-surface2 overflow-hidden" title="Indikator ketajaman">
+              <div className={`h-full transition-all ${isSharp ? 'bg-success' : 'bg-warn'}`} style={{ width: `${Math.min(100, Math.round((sharp / (SHARP_MIN * 2)) * 100))}%` }} />
+            </div>
+            <div className="flex gap-2 mt-2">
+              <button type="button" onClick={snap} disabled={!isSharp}
+                className={`flex-1 rounded-md py-2.5 text-sm font-semibold ${isSharp ? 'bg-accent text-bg' : 'bg-surface2 text-text2 cursor-not-allowed'}`}>
+                📸 {isSharp ? 'Ambil Foto' : 'Fokuskan kamera…'}
+              </button>
+              <button type="button" onClick={stop} className="border border-border text-text2 rounded-md py-2.5 px-4 text-sm">Batal</button>
+            </div>
+          </div>
+          {/* Panel lokasi / radius / jarak / status */}
+          <div className="space-y-2">
+            <div className="border border-border rounded-lg px-3 py-2">
+              <div className="text-[9px] font-semibold tracking-wide text-text2">LOKASI ANDA</div>
+              {pos ? (
+                <div className="mt-0.5"><div className="text-xs font-mono">{pos.lat.toFixed(6)}, {pos.lng.toFixed(6)}</div><div className="text-[10px] text-text2">akurasi ±{Math.round(pos.acc)} m</div></div>
+              ) : (
+                <div className="text-[11px] text-warn mt-0.5">{posErr || (typeof navigator !== 'undefined' && navigator.geolocation ? 'Mengambil lokasi…' : 'Perangkat tidak mendukung GPS.')}</div>
+              )}
+            </div>
+            <div className="border border-border rounded-lg px-3 py-2">
+              <div className="text-[9px] font-semibold tracking-wide text-text2">RADIUS KERJA</div>
+              <div className="text-lg font-bold mt-0.5">{radiusM} <span className="text-xs font-normal text-text2">Meter</span></div>
+            </div>
+            <div className={`border rounded-lg px-3 py-2 ${within === false ? 'border-danger/40 bg-danger/10' : within ? 'border-success/40 bg-success/10' : 'border-border'}`}>
+              <div className="text-[9px] font-semibold tracking-wide text-text2">JARAK SAAT INI</div>
+              <div className={`text-lg font-bold mt-0.5 ${within === false ? 'text-danger' : within ? 'text-success' : ''}`}>{dist != null ? `${dist} ` : '— '}<span className="text-xs font-normal text-text2">Meter</span></div>
+            </div>
+            <div className="border border-border rounded-lg px-3 py-2 flex items-center justify-between">
+              <div className="text-[9px] font-semibold tracking-wide text-text2">STATUS</div>
+              <div className={`text-xs font-bold ${within === false ? 'text-danger' : within ? 'text-success' : 'text-text2'}`}>
+                {!hasDevCoord ? 'Tanpa Koordinat' : dist == null ? 'Lokasi mati' : within ? '✅ Dalam Radius' : '⚠️ Diluar Radius'}
+              </div>
+            </div>
+            <div className="text-[10px] text-text2 leading-relaxed">
+              Arahkan kamera ke peralatan hingga tajam. Waktu, koordinat & jarak dibakar ke foto (geotag). Foto di luar radius tetap bisa disimpan tapi ditandai mencurigakan — performa bulan ini −20%.
+            </div>
+          </div>
+        </div>
+        {err && <div className="mt-2 text-[11px] text-danger">⚠️ {err}</div>}
+      </div>
     </div>
   );
 }
@@ -148,6 +287,7 @@ function InspeksiTab() {
   const [openSlots, setOpenSlots] = useState<string[]>([]);
   const [isToday, setIsToday] = useState(true);
   const [canInput, setCanInput] = useState(false);
+  const [radiusM, setRadiusM] = useState(DEFAULT_RADIUS_M); // radius kerja (Pengaturan)
   const [attended, setAttended] = useState(true); // sudah absen masuk hari ini? (default true agar tak berkedip)
   const [edit, setEdit] = useState<{ dev: EquipmentRow; slot: '09' | '12' | '15' } | null>(null);
   const [powerOn, setPowerOn] = useState<EquipmentRow | null>(null);
@@ -163,6 +303,7 @@ function InspeksiTab() {
       setOpenSlots(res.data.openSlots || []);
       setIsToday(res.data.isToday);
       setCanInput(res.data.canInput);
+      setRadiusM(Number(res.data.inspectRadiusM) || DEFAULT_RADIUS_M);
       setAttended(res.data.attended !== false);
     });
   }
@@ -324,6 +465,7 @@ function InspeksiTab() {
           date={date}
           dev={edit.dev}
           slot={edit.slot}
+          radiusM={radiusM}
           existing={edit.dev.inspections[edit.slot]}
           onClose={() => setEdit(null)}
           onSaved={() => { setEdit(null); load(); }}
@@ -333,6 +475,7 @@ function InspeksiTab() {
       {powerOn && (
         <PowerOnModal
           dev={powerOn}
+          radiusM={radiusM}
           existing={powerOn.poweron || undefined}
           onClose={() => setPowerOn(null)}
           onSaved={() => { setPowerOn(null); load(); }}
@@ -342,6 +485,7 @@ function InspeksiTab() {
       {powerOff && (
         <PowerOffModal
           dev={powerOff}
+          radiusM={radiusM}
           existing={powerOff.poweroff || undefined}
           onClose={() => setPowerOff(null)}
           onSaved={() => { setPowerOff(null); load(); }}
@@ -351,12 +495,12 @@ function InspeksiTab() {
   );
 }
 
-function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: string; dev: EquipmentRow; slot: '09' | '12' | '15'; existing?: Inspection; onClose: () => void; onSaved: () => void }) {
+function InspeksiModal({ date, dev, slot, radiusM, existing, onClose, onSaved }: { date: string; dev: EquipmentRow; slot: '09' | '12' | '15'; radiusM: number; existing?: Inspection; onClose: () => void; onSaved: () => void }) {
   const [status, setStatus] = useState<InspectStatus>(existing?.status || 'baik');
   const [note, setNote] = useState(existing?.note || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const cap = usePhotoCapture([`Inspeksi ${SLOT_LABEL[slot]} · ${dev.name}`]);
+  const cap = usePhotoCapture([`Inspeksi ${SLOT_LABEL[slot]} · ${dev.name}`], { device: dev, radiusM });
 
   // Kirim ke server; `confirmSuspicious` memaksa simpan foto yang gagal verifikasi.
   function submit(confirmSuspicious: boolean) {
@@ -414,7 +558,7 @@ function InspeksiModal({ date, dev, slot, existing, onClose, onSaved }: { date: 
           ))}
         </div>
         <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span> <span className="text-text2">(wajib dari kamera)</span></label>
-        <CameraCapture onCapture={(f) => cap.pick(f)} hasPhoto={!!cap.file} />
+        <CameraCapture onCapture={(f) => cap.pick(f)} hasPhoto={!!cap.file} device={dev} radiusM={radiusM} />
         <GeoTagStatus cap={cap} />
         {cap.preview && <img src={cap.preview} alt="preview" className="mt-1 mb-2 max-h-40 rounded border border-border object-contain" />}
         <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[60px] mb-2 mt-1" placeholder="Catatan kondisi (opsional)…" value={note} onChange={(e) => setNote(e.target.value)} />
@@ -440,24 +584,45 @@ function GeoTagStatus({ cap }: { cap: ReturnType<typeof usePhotoCapture> }) {
 // ===================== MENGHIDUPKAN PERALATAN =====================
 // Catat "peralatan dihidupkan" untuk hari ini (1× per perangkat), wajib foto dokumentasi
 // dengan verifikasi EXIF/GPS yang sama seperti inspeksi. Notifikasi otomatis ke koordinator.
-function PowerOnModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow; existing?: PowerOn; onClose: () => void; onSaved: () => void }) {
+function PowerOnModal({ dev, radiusM, existing, onClose, onSaved }: { dev: EquipmentRow; radiusM: number; existing?: PowerOn; onClose: () => void; onSaved: () => void }) {
   const [note, setNote] = useState(existing?.note || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const cap = usePhotoCapture([`Hidupkan peralatan · ${dev.name}`]);
+  const cap = usePhotoCapture([`Hidupkan peralatan · ${dev.name}`], { device: dev, radiusM });
+
+  // Kirim ke server; `confirmSuspicious` memaksa simpan foto yang gagal verifikasi (penalti 20%).
+  function submit(confirmSuspicious: boolean) {
+    const fd = new FormData();
+    fd.append('deviceId', String(dev.id));
+    fd.append('note', note);
+    fd.append('photo', cap.file as File);
+    if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
+    if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
+    if (confirmSuspicious) fd.append('confirmSuspicious', '1');
+    return api.post('/equipment/poweron', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  }
 
   async function save() {
-    if (!cap.file) return setErr('Foto dokumentasi wajib diunggah (bukti peralatan dihidupkan).');
+    if (!cap.file) return setErr('Foto dokumentasi wajib diambil dari kamera (bukti peralatan dihidupkan).');
     setBusy(true); setErr('');
     try {
-      const fd = new FormData();
-      fd.append('deviceId', String(dev.id));
-      fd.append('note', note);
-      fd.append('photo', cap.file);
-      if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
-      if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
-      const res = await api.post('/equipment/poweron', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
+      let res;
+      try {
+        res = await submit(false);
+      } catch (e: any) {
+        const data = e?.response?.data;
+        if (!data?.needConfirm) throw e;
+        const ok = await confirmDialog({
+          title: 'Foto Mencurigakan',
+          message: `${data.warning}\n\nApakah Anda yakin menyimpan foto ini? Foto mencurigakan (di luar radius / tanpa GPS) yang tetap disimpan akan mengurangi skor performa Anda 20% bulan ini.`,
+          confirmText: 'Ya, tetap simpan', cancelText: 'Batal', variant: 'danger',
+        });
+        if (!ok) return;
+        res = await submit(true);
+      }
+      if (res.data?.flagged) {
+        await alertDialog({ title: 'Tersimpan · Ditandai', message: `Foto disimpan namun ditandai mencurigakan:\n${res.data.warning || ''}\n\nSkor performa bulan ini dikurangi 20% & koordinator diberi tahu.`, variant: 'warning' });
+      }
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -470,18 +635,12 @@ function PowerOnModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow; 
         <h3 className="text-sm font-bold mb-1">⚡ Hidupkan Peralatan</h3>
         <p className="text-[11px] text-text2 mb-4">{dev.name} · {dev.type} · {dev.ip}</p>
         {existing && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mb-3">Sudah tercatat dihidupkan hari ini oleh {existing.done_by_name || '-'}. Mengunggah foto baru akan memperbarui catatan.</div>}
-        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span></label>
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="block w-full text-[11px] text-text2 mb-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-accent file:text-bg file:text-[11px] file:font-semibold"
-          onChange={(e) => cap.pick(e.target.files?.[0] || null)}
-        />
+        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span> <span className="text-text2">(wajib dari kamera)</span></label>
+        <CameraCapture onCapture={(f) => cap.pick(f)} hasPhoto={!!cap.file} device={dev} radiusM={radiusM} />
         <GeoTagStatus cap={cap} />
         {cap.preview && <img src={cap.preview} alt="preview" className="mt-1 mb-2 max-h-40 rounded border border-border object-contain" />}
         <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[60px] mb-2 mt-1" placeholder="Catatan (opsional)…" value={note} onChange={(e) => setNote(e.target.value)} />
-        <div className="text-[10px] text-text2 mb-3">⚠️ Ambil foto langsung dari kamera. Waktu tangkap & lokasi GPS otomatis dibakar ke foto (geotag). Izinkan akses lokasi saat diminta. Foto lama/yang sudah pernah dipakai akan ditolak/ditandai.</div>
+        <div className="text-[10px] text-text2 mb-3">📷 Ambil foto langsung dari kamera hingga tajam. Waktu & lokasi GPS dibakar ke foto (geotag). Foto di luar radius / tanpa GPS dianggap <b>mencurigakan</b> — bila tetap disimpan, performa bulan ini berkurang 20%.</div>
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
@@ -494,24 +653,45 @@ function PowerOnModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow; 
 
 // Matikan peralatan: WAJIB foto dokumentasi (geotag/verifikasi sama seperti Hidupkan).
 // Menandai perangkat "dimatikan" & menjeda monitoring otomatis. Notifikasi ke koordinator.
-function PowerOffModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow; existing?: PowerOn; onClose: () => void; onSaved: () => void }) {
+function PowerOffModal({ dev, radiusM, existing, onClose, onSaved }: { dev: EquipmentRow; radiusM: number; existing?: PowerOn; onClose: () => void; onSaved: () => void }) {
   const [note, setNote] = useState(existing?.note || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const cap = usePhotoCapture([`Matikan peralatan · ${dev.name}`]);
+  const cap = usePhotoCapture([`Matikan peralatan · ${dev.name}`], { device: dev, radiusM });
+
+  // Kirim ke server; `confirmSuspicious` memaksa simpan foto yang gagal verifikasi (penalti 20%).
+  function submit(confirmSuspicious: boolean) {
+    const fd = new FormData();
+    fd.append('deviceId', String(dev.id));
+    fd.append('note', note);
+    fd.append('photo', cap.file as File);
+    if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
+    if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
+    if (confirmSuspicious) fd.append('confirmSuspicious', '1');
+    return api.post('/equipment/poweroff', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  }
 
   async function save() {
-    if (!cap.file) return setErr('Foto dokumentasi wajib diunggah (bukti peralatan dimatikan).');
+    if (!cap.file) return setErr('Foto dokumentasi wajib diambil dari kamera (bukti peralatan dimatikan).');
     setBusy(true); setErr('');
     try {
-      const fd = new FormData();
-      fd.append('deviceId', String(dev.id));
-      fd.append('note', note);
-      fd.append('photo', cap.file);
-      if (cap.geo) { fd.append('lat', String(cap.geo.lat)); fd.append('lng', String(cap.geo.lng)); }
-      if (cap.capturedAt) fd.append('capturedAt', String(cap.capturedAt));
-      const res = await api.post('/equipment/poweroff', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      if (res.data?.warning) alertDialog({ title: 'Tersimpan dengan catatan', message: res.data.warning + '\n\n(Ditandai BELUM TERVERIFIKASI untuk koordinator.)', variant: 'warning' });
+      let res;
+      try {
+        res = await submit(false);
+      } catch (e: any) {
+        const data = e?.response?.data;
+        if (!data?.needConfirm) throw e;
+        const ok = await confirmDialog({
+          title: 'Foto Mencurigakan',
+          message: `${data.warning}\n\nApakah Anda yakin menyimpan foto ini? Foto mencurigakan (di luar radius / tanpa GPS) yang tetap disimpan akan mengurangi skor performa Anda 20% bulan ini.`,
+          confirmText: 'Ya, tetap simpan', cancelText: 'Batal', variant: 'danger',
+        });
+        if (!ok) return;
+        res = await submit(true);
+      }
+      if (res.data?.flagged) {
+        await alertDialog({ title: 'Tersimpan · Ditandai', message: `Foto disimpan namun ditandai mencurigakan:\n${res.data.warning || ''}\n\nSkor performa bulan ini dikurangi 20% & koordinator diberi tahu.`, variant: 'warning' });
+      }
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -525,18 +705,12 @@ function PowerOffModal({ dev, existing, onClose, onSaved }: { dev: EquipmentRow;
         <p className="text-[11px] text-text2 mb-3">{dev.name} · {dev.type} · {dev.ip}</p>
         <div className="bg-warn/10 border border-warn/30 rounded-md px-3 py-2 text-[11px] text-warn mb-3">Perangkat ditandai "dimatikan": status offline tanpa alarm, monitoring otomatis (ping/insiden) dijeda sampai dihidupkan kembali.</div>
         {existing && <div className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px] text-text2 mb-3">Sudah tercatat dimatikan hari ini oleh {existing.done_by_name || '-'}. Mengunggah foto baru akan memperbarui catatan.</div>}
-        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span></label>
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="block w-full text-[11px] text-text2 mb-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-danger file:text-bg file:text-[11px] file:font-semibold"
-          onChange={(e) => cap.pick(e.target.files?.[0] || null)}
-        />
+        <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span> <span className="text-text2">(wajib dari kamera)</span></label>
+        <CameraCapture onCapture={(f) => cap.pick(f)} hasPhoto={!!cap.file} device={dev} radiusM={radiusM} />
         <GeoTagStatus cap={cap} />
         {cap.preview && <img src={cap.preview} alt="preview" className="mt-1 mb-2 max-h-40 rounded border border-border object-contain" />}
         <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[60px] mb-2 mt-1" placeholder="Catatan (opsional)…" value={note} onChange={(e) => setNote(e.target.value)} />
-        <div className="text-[10px] text-text2 mb-3">⚠️ Ambil foto langsung dari kamera. Waktu tangkap & lokasi GPS otomatis dibakar ke foto (geotag). Izinkan akses lokasi saat diminta. Foto lama/yang sudah pernah dipakai akan ditolak/ditandai.</div>
+        <div className="text-[10px] text-text2 mb-3">📷 Ambil foto langsung dari kamera hingga tajam. Waktu & lokasi GPS dibakar ke foto (geotag). Foto di luar radius / tanpa GPS dianggap <b>mencurigakan</b> — bila tetap disimpan, performa bulan ini berkurang 20%.</div>
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>

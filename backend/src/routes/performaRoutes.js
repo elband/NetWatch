@@ -71,9 +71,11 @@ export async function metricsFor(id, start, end, unitId = null) {
   // Pelanggaran lokasi/VPN saat absensi → penalti 50% pada skor akhir.
   const [[vp]] = await pool.query('SELECT COUNT(*) c FROM attendance WHERE user_id=? AND flagged=1 AND work_date>=? AND work_date<?', [id, start, end]);
   const vpnDays = vp.c, vpnFlag = vp.c > 0;
-  // Foto inspeksi mencurigakan yang tetap disimpan (dikonfirmasi teknisi) → penalti 20%.
+  // Foto mencurigakan yang tetap disimpan (dikonfirmasi teknisi) → penalti 20%. Mencakup
+  // inspeksi harian & catatan hidupkan/matikan peralatan (equipment_poweron).
   const [[si]] = await pool.query('SELECT COUNT(*) c FROM equipment_inspections WHERE inspected_by=? AND flagged=1 AND inspect_date>=? AND inspect_date<?', [id, start, end]);
-  const suspInspDays = si.c, suspInspFlag = si.c > 0;
+  const [[sp]] = await pool.query('SELECT COUNT(*) c FROM equipment_poweron WHERE done_by=? AND flagged=1 AND on_date>=? AND on_date<?', [id, start, end]);
+  const suspInspDays = Number(si.c) + Number(sp.c), suspInspFlag = suspInspDays > 0;
 
   const m = {
     done: d.done, active: a.active, taken: t.taken, onTime: Number(t.onTime) || 0, kritisDone: Number(d.kritis) || 0,

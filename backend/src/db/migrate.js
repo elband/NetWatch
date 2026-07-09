@@ -120,6 +120,8 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'doc_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
   // equipment_poweron: dukung state on/off (dokumentasi wajib untuk keduanya). Kolom + unique key.
   await addColumnIfMissing(conn, env.db.database, 'equipment_poweron', 'state', "ENUM('on','off') NOT NULL DEFAULT 'on' AFTER on_date");
+  // Foto hidupkan/matikan mencurigakan (di luar radius/tanpa GPS) yang tetap disimpan → penalti performa 20%.
+  await addColumnIfMissing(conn, env.db.database, 'equipment_poweron', 'flagged', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER distance_m');
   await ensurePoweronUnique(conn, env.db.database);
   // Jendela maintenance: penyelesaian pekerjaan (status selesai + dokumentasi foto).
   await addColumnIfMissing(conn, env.db.database, 'maintenance_windows', 'status', "ENUM('terjadwal','selesai') NOT NULL DEFAULT 'terjadwal' AFTER ends_at");

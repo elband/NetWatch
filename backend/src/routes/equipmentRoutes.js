@@ -34,8 +34,20 @@ const maintUpload = multer({
 
 // Ambang verifikasi anti-foto-palsu.
 const FRESH_MINUTES = 30;   // foto harus diambil <= 30 menit dari sekarang (dari EXIF)
-const PROXIMITY_M = 200;    // lokasi foto harus <= 200 m dari koordinat perangkat
+const DEFAULT_RADIUS_M = 200; // radius kerja default (m); dapat diubah admin di Pengaturan
 const STRICT_VERIFY = false; // true = tolak bila tak terverifikasi; false = simpan tapi ditandai
+
+// Radius kerja (meter) untuk verifikasi proximity foto ke perangkat — diatur admin lewat
+// Pengaturan (settings key 'inspect_radius_m'). Dipakai konsisten oleh verifikasi backend
+// & panel "Jarak Saat Ini" di halaman kamera inspeksi. Fallback ke DEFAULT_RADIUS_M.
+async function getInspectRadius() {
+  try {
+    const [r] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='inspect_radius_m'");
+    const v = r[0]?.setting_value;
+    const n = Number(typeof v === 'string' ? JSON.parse(v) : v);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : DEFAULT_RADIUS_M;
+  } catch { return DEFAULT_RADIUS_M; }
+}
 
 // Jarak dua titik (meter) — formula haversine.
 function haversine(lat1, lng1, lat2, lng2) {
@@ -51,7 +63,7 @@ function haversine(lat1, lng1, lat2, lng2) {
 // `capturedAt` (ms epoch) = waktu tangkap dari klien (file.lastModified) — dipakai bila
 // EXIF kosong, sebab kamera langsung via browser umumnya membuang metadata EXIF.
 // Mengembalikan { hash, verified, distance, warning }.
-async function verifyPhoto(buffer, device, bodyLat, bodyLng, capturedAt) {
+async function verifyPhoto(buffer, device, bodyLat, bodyLng, capturedAt, radiusM = DEFAULT_RADIUS_M) {
   const hash = crypto.createHash('sha256').update(buffer).digest('hex');
 
   let exifTime = null, exifGps = null;
@@ -79,8 +91,8 @@ async function verifyPhoto(buffer, device, bodyLat, bodyLng, capturedAt) {
   if (device.lat != null && device.lng != null) {
     if (photoLat != null && photoLng != null && !Number.isNaN(photoLat) && !Number.isNaN(photoLng)) {
       distance = haversine(Number(device.lat), Number(device.lng), photoLat, photoLng);
-      proxOk = distance <= PROXIMITY_M;
-      if (!proxOk) proxReason = `Lokasi foto ${distance} m dari perangkat (maks ${PROXIMITY_M} m).`;
+      proxOk = distance <= radiusM;
+      if (!proxOk) proxReason = `Lokasi foto ${distance} m dari perangkat (maks ${radiusM} m).`;
     } else {
       proxOk = false; proxReason = 'Lokasi foto tidak terdeteksi (aktifkan GPS/izin lokasi).';
     }
@@ -140,7 +152,7 @@ router.get('/inspections', async (req, res) => {
   // Scoping unit lewat daftar perangkat: inspeksi/poweron dipetakan per device_id,
   // sehingga baris milik unit lain otomatis tak ikut tampil.
   const ufd = unitFilter(req.unitId, 'unit_id');
-  const [devices] = await pool.query(`SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason, always_on FROM devices WHERE inspect_required=1${ufd.clause} ORDER BY name`, ufd.params);
+  const [devices] = await pool.query(`SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason, always_on, lat, lng FROM devices WHERE inspect_required=1${ufd.clause} ORDER BY name`, ufd.params);
   const [insp] = await pool.query('SELECT * FROM equipment_inspections WHERE inspect_date = ?', [date]);
   const byDevice = {};
   for (const r of insp) (byDevice[r.device_id] ||= {})[r.slot] = r;
@@ -164,6 +176,7 @@ router.get('/inspections', async (req, res) => {
     openSlots: openSlots(),
     canInput: await canInspect(req.user),
     attended: await hasAttendedToday(req.user),
+    inspectRadiusM: await getInspectRadius(),
     devices: list,
   });
 });
@@ -197,8 +210,9 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   const rowUnitId = device.unit_id ?? insertUnitId(req);
   if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
 
-  // Anti-foto-palsu: hash + kesegaran waktu tangkap + proximity GPS.
-  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
+  // Anti-foto-palsu: hash + kesegaran waktu tangkap + proximity GPS (radius dari Pengaturan).
+  const radiusM = await getInspectRadius();
+  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt, radiusM);
 
   // Tolak bila foto identik (hash sama) sudah pernah dipakai pada inspeksi lain.
   const [dups] = await pool.query(
@@ -288,7 +302,8 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const rowUnitId = device.unit_id ?? insertUnitId(req);
   if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
 
-  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
+  const radiusM = await getInspectRadius();
+  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt, radiusM);
 
   // Tolak bila foto identik sudah pernah dipakai pada catatan menghidupkan lain.
   const [dups] = await pool.query(
@@ -301,17 +316,25 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
     return res.status(422).json({ error: `Verifikasi gagal: ${warning}` });
   }
 
+  // Foto di luar radius / tanpa GPS → minta konfirmasi eksplisit sebelum disimpan; bila
+  // teknisi tetap yakin, foto ditandai (flagged=1) & performa bulan ini dipotong 20%.
+  const confirmSuspicious = req.body.confirmSuspicious === '1' || req.body.confirmSuspicious === 'true';
+  if (!verified && !confirmSuspicious) {
+    return res.status(409).json({ needConfirm: true, suspicious: true, warning: warning || 'Foto tidak lolos verifikasi lokasi/kesegaran.' });
+  }
+  const flagged = (!verified && confirmSuspicious) ? 1 : 0;
+
   const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
   const filename = `poweron-${deviceId}-${date}-${randToken()}${ext}`;
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
   await pool.query(
-    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name, unit_id)
-     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
+     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
-       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
-    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name, rowUnitId]
+       verified=VALUES(verified), distance_m=VALUES(distance_m), flagged=VALUES(flagged), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
+    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
   );
 
   // Menghidupkan peralatan = mulai monitoring: aktifkan pantauan otomatis & bersihkan
@@ -326,7 +349,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   // Notifikasi ke koordinator bahwa peralatan sudah dihidupkan.
   {
     const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [rowUnitId]);
-    const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
+    const verifyTag = verified ? '✅ terverifikasi' : (flagged ? '🚫 mencurigakan — disimpan atas konfirmasi teknisi (performa −20%)' : '⚠️ belum terverifikasi');
     for (const c of coords) {
       if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
       await queueWaNotification({
@@ -338,7 +361,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   }
 
   const [rows] = await pool.query("SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=? AND state='on'", [deviceId, date]);
-  res.json({ poweron: rows[0], device: updatedDev, verified, distance, warning });
+  res.json({ poweron: rows[0], device: updatedDev, verified, distance, warning, flagged });
 });
 
 // Mematikan peralatan = hentikan monitoring: perangkat ditandai "dimatikan" (status
@@ -360,7 +383,8 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const rowUnitId = device.unit_id ?? insertUnitId(req);
   if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
 
-  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt);
+  const radiusM = await getInspectRadius();
+  const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt, radiusM);
 
   // Tolak bila foto identik sudah pernah dipakai pada catatan on/off lain.
   const [dups] = await pool.query(
@@ -373,17 +397,25 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
     return res.status(422).json({ error: `Verifikasi gagal: ${warning}` });
   }
 
+  // Foto di luar radius / tanpa GPS → minta konfirmasi eksplisit sebelum disimpan; bila
+  // teknisi tetap yakin, foto ditandai (flagged=1) & performa bulan ini dipotong 20%.
+  const confirmSuspicious = req.body.confirmSuspicious === '1' || req.body.confirmSuspicious === 'true';
+  if (!verified && !confirmSuspicious) {
+    return res.status(409).json({ needConfirm: true, suspicious: true, warning: warning || 'Foto tidak lolos verifikasi lokasi/kesegaran.' });
+  }
+  const flagged = (!verified && confirmSuspicious) ? 1 : 0;
+
   const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
   const filename = `poweroff-${deviceId}-${date}-${randToken()}${ext}`;
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
   await pool.query(
-    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, done_by, done_by_name, unit_id)
-     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
+     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
-       verified=VALUES(verified), distance_m=VALUES(distance_m), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
-    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, req.user.id, req.user.name, rowUnitId]
+       verified=VALUES(verified), distance_m=VALUES(distance_m), flagged=VALUES(flagged), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
+    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
   );
 
   await pool.query(
@@ -396,7 +428,7 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   // Notifikasi ke koordinator bahwa peralatan dimatikan (monitoring dijeda).
   {
     const [coords] = await pool.query("SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [rowUnitId]);
-    const verifyTag = verified ? '✅ terverifikasi' : '⚠️ belum terverifikasi';
+    const verifyTag = verified ? '✅ terverifikasi' : (flagged ? '🚫 mencurigakan — disimpan atas konfirmasi teknisi (performa −20%)' : '⚠️ belum terverifikasi');
     for (const c of coords) {
       if (!(await isNotifyEnabledForUser('pengajuan_review_koordinator', c.id))) continue;
       await queueWaNotification({
@@ -408,7 +440,7 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   }
 
   const [rows] = await pool.query("SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=? AND state='off'", [deviceId, date]);
-  res.json({ poweroff: rows[0], device: updatedDev, verified, distance, warning });
+  res.json({ poweroff: rows[0], device: updatedDev, verified, distance, warning, flagged });
 });
 
 // ===================== MAINTENANCE BULANAN =====================

@@ -339,6 +339,7 @@ export interface PowerOn {
   photo_hash: string | null;
   verified: number;
   distance_m: number | null;
+  flagged?: number;
   done_by: number | null;
   done_by_name: string | null;
 }
@@ -352,6 +353,8 @@ export interface EquipmentRow {
   monitor_enabled?: number;
   off_reason?: string | null;
   always_on?: number;
+  lat?: number | null;
+  lng?: number | null;
   inspections: Partial<Record<'09' | '12' | '15', Inspection>>;
   poweron?: PowerOn | null;
   poweroff?: PowerOn | null;
