@@ -14,6 +14,17 @@ const KIND_META: Record<LogEvent['kind'], { icon: string; label: string; cls: st
   maintenance: { icon: '🛠️', label: 'Maintenance', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
   insiden: { icon: '🚨', label: 'Insiden', cls: 'text-danger bg-danger/10 border-danger/30' },
 };
+// Badge Jenis per-event. Aksi power dipisah jadi Hidupkan/Matikan (bukan satu kategori
+// gabungan "Hidup/Mati") agar tiap kegiatan tampil sebagai jenis tersendiri.
+function kindBadge(e: LogEvent): { icon: string; label: string; cls: string } {
+  if (e.kind === 'power') {
+    return e.status === 'mati'
+      ? { icon: '⏻', label: 'Matikan', cls: 'text-slate-300 bg-slate-500/15 border-slate-500/30' }
+      : { icon: '⚡', label: 'Hidupkan', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' };
+  }
+  return KIND_META[e.kind];
+}
+const powerJenis = (e: LogEvent) => (e.status === 'mati' ? 'Matikan' : 'Hidupkan');
 const fmtDate = (s: string) => (s ? new Date(s + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }) : '-');
 const monthLabel = (m: string) => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); };
 
@@ -103,7 +114,7 @@ export default function Logbook() {
                       </thead>
                       <tbody>
                         {d.events.map((e, i) => {
-                          const km = KIND_META[e.kind];
+                          const km = kindBadge(e);
                           return (
                             <tr key={i} className="border-b border-border/30 last:border-0">
                               <td className="px-3 py-2 whitespace-nowrap font-mono">{fmtDate(e.date)}{e.time ? ` ${e.time}` : ''}</td>
@@ -149,7 +160,7 @@ function buildPrintHtml(devices: LogDevice[], month: string): string {
         </tr></thead>
         <tbody>${d.events.map((e) => `<tr>
           <td style="border:1px solid #999;padding:3px 6px;white-space:nowrap">${esc(e.date)}${e.time ? ' ' + esc(e.time) : ''}</td>
-          <td style="border:1px solid #999;padding:3px 6px">${esc(KIND[e.kind] || e.kind)}</td>
+          <td style="border:1px solid #999;padding:3px 6px">${esc(e.kind === 'power' ? powerJenis(e) : (KIND[e.kind] || e.kind))}</td>
           <td style="border:1px solid #999;padding:3px 6px">${esc(e.label)}${e.detail ? `<br><span style="color:#666">${esc(e.detail)}</span>` : ''}</td>
           <td style="border:1px solid #999;padding:3px 6px">${esc(e.status || '-')}</td>
           <td style="border:1px solid #999;padding:3px 6px">${esc(e.by || '-')}</td>

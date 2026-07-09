@@ -132,7 +132,9 @@ router.get('/export', async (req, res) => {
       continue;
     }
     for (const e of d.events) {
-      rows.push({ ...base, Tanggal: e.date, Jam: e.time || '-', Jenis: KIND[e.kind] || e.kind, Uraian: e.label, Status: e.status || '-', Catatan: e.detail || '-', Oleh: e.by || '-' });
+      // Aksi power dipisah jadi Hidupkan/Matikan (bukan kategori gabungan "Hidupkan/Matikan").
+      const jenis = e.kind === 'power' ? (e.status === 'mati' ? 'Matikan' : 'Hidupkan') : (KIND[e.kind] || e.kind);
+      rows.push({ ...base, Tanggal: e.date, Jam: e.time || '-', Jenis: jenis, Uraian: e.label, Status: e.status || '-', Catatan: e.detail || '-', Oleh: e.by || '-' });
     }
   }
   const buf = await jsonToBuffer(`Logbook ${month}`, rows.length ? rows : [{ Perangkat: '(tidak ada aktivitas)', IP: '', Lokasi: '', Tanggal: '', Jam: '', Jenis: '', Uraian: '', Status: '', Catatan: '', Oleh: '' }]);
