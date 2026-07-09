@@ -286,7 +286,7 @@ export default function EquipmentPerf() {
           <button className={`px-3 py-1.5 text-xs rounded-md ${tab === 'maintenance' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`} onClick={() => setTab('maintenance')}>Maintenance</button>
         </div>
       </div>
-      {tab === 'inspeksi' && <InspeksiTab />}
+      {tab === 'inspeksi' && <InspeksiTab isManager={isManager} />}
       {tab === 'maintenance' && (
         <div className="space-y-6">
           {/* Maintenance Bulanan + Jendela Maintenance digabung jadi satu halaman utuh (tanpa sekat). */}
@@ -299,7 +299,9 @@ export default function EquipmentPerf() {
 }
 
 // ===================== INSPEKSI HARIAN =====================
-function InspeksiTab() {
+type InspectOverride = { date: string; reason: string; by?: number; by_name: string; at: string };
+
+function InspeksiTab({ isManager }: { isManager: boolean }) {
   const [date, setDate] = useState(todayKey());
   const [rows, setRows] = useState<EquipmentRow[]>([]);
   const [slots, setSlots] = useState<string[]>(SLOTS);
@@ -314,6 +316,8 @@ function InspeksiTab() {
   const [powerOff, setPowerOff] = useState<EquipmentRow | null>(null);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'semua' | 'belum' | 'sudah'>('semua');
+  const [override, setOverride] = useState<InspectOverride | null>(null); // izin koordinator hari ini
+  const [showOverride, setShowOverride] = useState(false);
 
   function load() {
     api.get(`/equipment/inspections?date=${date}`).then((res) => {
@@ -325,6 +329,7 @@ function InspeksiTab() {
       setCanInput(res.data.canInput);
       setRadiusM(Number(res.data.inspectRadiusM) || DEFAULT_RADIUS_M);
       setAttended(res.data.attended !== false);
+      setOverride(res.data.inspectOverride || null);
     });
   }
   useEffect(load, [date]);
@@ -361,9 +366,25 @@ function InspeksiTab() {
       </div>
       <div className="text-[10px] text-text2 mb-3">🔒 Tiap slot hanya bisa diisi pada jamnya (09:00 → 08:30–11:00, 12:00 → 11:00–14:00, 15:00 → 14:00–17:00). Foto wajib & tidak boleh foto yang sudah pernah dipakai.</div>
 
-      {canInput && isToday && !attended && (
+      {canInput && isToday && !attended && !override && (
         <div className="mb-3 rounded-md px-3 py-2 text-[11px] border bg-warn/10 border-warn/30 text-warn flex items-center gap-2">
           <span>⏰ Anda belum <b>absen masuk</b> hari ini. Absen masuk dulu untuk bisa <b>inspeksi & menghidupkan/mematikan peralatan</b> — buka <b>Dashboard → Absensi</b>.</span>
+        </div>
+      )}
+
+      {/* Override koordinator: buka akses inspeksi hari ini walau absen belum/salah ter-record. */}
+      {(isManager || override) && (
+        <div className={`mb-3 rounded-md px-3 py-2 text-[11px] border flex items-center gap-2 flex-wrap ${override ? 'bg-accent2/10 border-accent2/30 text-accent2' : 'bg-surface2 border-border text-text2'}`}>
+          {override ? (
+            <span className="flex-1 min-w-[200px]">🔓 <b>Inspeksi dibuka hari ini</b> oleh {override.by_name} — alasan: “{override.reason}”. Teknisi terjadwal bisa inspeksi/hidupkan/matikan walau absen belum/salah tercatat.</span>
+          ) : (
+            <span className="flex-1 min-w-[200px]">Ada teknisi tak bisa inspeksi karena absen belum/salah tercatat? Koordinator bisa membukanya untuk hari ini.</span>
+          )}
+          {isManager && (
+            <button onClick={() => setShowOverride(true)} className="border border-accent2/50 text-accent2 rounded-md px-2.5 py-1 text-[11px] font-semibold hover:bg-accent2/10 whitespace-nowrap">
+              🔓 {override ? 'Perbarui / ganti alasan' : 'Izinkan Inspeksi Hari Ini'}
+            </button>
+          )}
         </div>
       )}
 
@@ -514,6 +535,42 @@ function InspeksiTab() {
           onSaved={() => { setPowerOff(null); load(); }}
         />
       )}
+
+      {showOverride && (
+        <InspectOverrideModal existing={override} onClose={() => setShowOverride(false)} onSaved={() => { setShowOverride(false); load(); }} />
+      )}
+    </div>
+  );
+}
+
+// Modal koordinator: buka akses inspeksi + hidupkan/matikan HARI INI (alasan wajib).
+function InspectOverrideModal({ existing, onClose, onSaved }: { existing: InspectOverride | null; onClose: () => void; onSaved: () => void }) {
+  const [reason, setReason] = useState(existing?.reason || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function save() {
+    if (!reason.trim()) return setErr('Alasan wajib diisi.');
+    setBusy(true); setErr('');
+    try {
+      await api.post('/equipment/inspect-override', { reason: reason.trim() });
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Gagal menyimpan.');
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-bold mb-1">🔓 Izinkan Inspeksi Hari Ini</h3>
+        <p className="text-[11px] text-text2 mb-3">Membuka akses <b>inspeksi + hidupkan/matikan peralatan</b> untuk teknisi yang terjadwal dinas <b>hari ini</b> di unit Anda — meski absen belum/salah tercatat. Berlaku sampai ganti hari.</p>
+        <label className="block text-[11px] text-text2 mb-1">Alasan <span className="text-danger">*</span></label>
+        <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[70px] mb-2" placeholder="mis. absen pagi ter-record tanggal kemarin (bug), teknisi sudah hadir." value={reason} onChange={(e) => setReason(e.target.value)} />
+        {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
+        <div className="flex gap-2 justify-end">
+          <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
+          <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : '🔓 Izinkan'}</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { pool } from '../db/pool.js';
 import { unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
+import { localDate } from '../utils/localDate.js';
 
 // Fase 5c (AAB): obat air / bahan kimia — master (dgn harga) + pemakaian harian →
 // laporan biaya periodik (volume × harga satuan). Ter-scope unit.
@@ -71,7 +72,7 @@ export async function listUsage(req, res) {
 
 // Laporan biaya periode: per bahan (total volume & biaya) + total keseluruhan.
 export async function report(req, res) {
-  const to = req.query.to || new Date().toISOString().slice(0, 10);
+  const to = req.query.to || localDate();
   const from = req.query.from || `${to.slice(0, 7)}-01`;
   const rows = await computeReport(req.unitId, from, to);
   const grand_total = rows.reduce((s, r) => s + Number(r.biaya || 0), 0);

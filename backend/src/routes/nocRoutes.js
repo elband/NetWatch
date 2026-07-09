@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { getUplinkSpeed } from '../services/uplinkSpeed.js';
+import { localDate } from '../utils/localDate.js';
 
 // Wallboard Publik (NOC): halaman layar-dinding TANPA login, digerbangi token rahasia
 // di URL (?key=…) & di-scope ke satu unit (?unit=KODE). Data lengkap (dgn IP) sesuai
@@ -103,7 +104,7 @@ router.get('/public', async (req, res) => {
   // Tren 7 hari (jumlah insiden/hari).
   const trendMap = {}; for (const r of trendRows) trendMap[String(r.d).slice(0, 10)] = n(r.c);
   const trend = []; const base = new Date();
-  for (let i = 6; i >= 0; i--) { const dt = new Date(base); dt.setDate(base.getDate() - i); const key = dt.toISOString().slice(0, 10); trend.push({ date: key, count: trendMap[key] || 0 }); }
+  for (let i = 6; i >= 0; i--) { const dt = new Date(base); dt.setDate(base.getDate() - i); const key = localDate(dt); trend.push({ date: key, count: trendMap[key] || 0 }); }
 
   const total = devices.length;
   const online = devices.filter((d) => d.status === 'online').length;

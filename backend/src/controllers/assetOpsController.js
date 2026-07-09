@@ -1,5 +1,6 @@
 import { pool } from '../db/pool.js';
 import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
+import { localDate } from '../utils/localDate.js';
 import { logAssetStatus } from './assetController.js';
 import { nextIncidentId } from '../utils/incidentId.js';
 import { snapshotAndNotifyOnDuty } from './incidentController.js';
@@ -231,7 +232,7 @@ export async function createPm(req, res) {
   if (type === 'calendar' && !interval_days) return res.status(400).json({ error: 'PM kalender butuh interval hari.' });
   // Anchor default: nilai meter terkini / hari ini.
   const anchorVal = type === 'hours' ? (anchor_value != null && anchor_value !== '' ? Number(anchor_value) : (await latestMetricValue(asset.id, metric_key) ?? 0)) : null;
-  const anchorDate = type === 'calendar' ? (anchor_date || new Date().toISOString().slice(0, 10)) : null;
+  const anchorDate = type === 'calendar' ? (anchor_date || localDate()) : null;
   const [r] = await pool.query(
     `INSERT INTO asset_pm_plans (device_id, unit_id, name, trigger_type, metric_key, interval_hours, interval_days, anchor_value, anchor_date)
      VALUES (?,?,?,?,?,?,?,?,?)`,

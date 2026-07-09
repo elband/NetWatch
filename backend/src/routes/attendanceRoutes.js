@@ -5,7 +5,7 @@ import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/un
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
-import { shiftOpenGate } from '../config/shifts.js';
+import { shiftOpenGate, dateKey } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -24,7 +24,9 @@ const haversine = (la1, lo1, la2, lo2) => {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 };
 const clientIp = (req) => (req.headers['x-forwarded-for']?.split(',')[0].trim()) || req.socket?.remoteAddress || '';
-const todayKey = () => new Date().toISOString().slice(0, 10);
+// Tanggal "hari ini" HARUS waktu lokal (WITA), bukan UTC. `toISOString()` selalu UTC →
+// sebelum ~08:00 WITA (masih tanggal kemarin di UTC) absensi salah hari. dateKey() = lokal.
+const todayKey = () => dateKey(new Date());
 const ymd = (s) => String(s).slice(0, 10);
 
 // Anomali lokasi/perangkat: luar radius, akurasi rendah, zona waktu tak wajar, GPS mati, perangkat tak dikenal.

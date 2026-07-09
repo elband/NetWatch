@@ -124,12 +124,48 @@ function currentSlot(d = new Date()) {
   return '15';
 }
 
+// ===== Override inspeksi koordinator =====
+// Bila absen ter-record salah tanggal (mis. bug timezone) teknisi tak lolos gerbang
+// "sudah absen hari ini" → tak bisa inspeksi/hidupkan/matikan. Koordinator/admin bisa
+// membuka akses untuk unit-nya HARI INI dengan alasan. Disimpan di settings.inspect_override:
+//   { "<unitId>"|"all": { date, reason, by, by_name, at } }.
+async function getInspectOverrides() {
+  const [r] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='inspect_override'");
+  try { const v = r[0]?.setting_value; return (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { return {}; }
+}
+async function setInspectOverrides(obj) {
+  await pool.query(
+    "INSERT INTO settings (setting_key, setting_value) VALUES ('inspect_override', ?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
+    [JSON.stringify(obj)]
+  );
+}
+// Override AKTIF (tanggal = hari ini) untuk unit tsb atau 'all' global → objek, else null.
+async function inspectOverrideFor(unitId) {
+  const today = dateKey(new Date());
+  const all = await getInspectOverrides();
+  for (const k of [unitId != null ? String(unitId) : null, 'all'].filter(Boolean)) {
+    if (all[k] && all[k].date === today) return all[k];
+  }
+  return null;
+}
+// Terjadwal dinas (pagi/siang/malam) hari ini?
+async function hasWorkShiftToday(userId) {
+  const [rows] = await pool.query(
+    "SELECT 1 FROM shifts WHERE user_id=? AND shift_date=? AND shift_type IN ('pagi','siang','malam') LIMIT 1",
+    [userId, dateKey(new Date())]
+  );
+  return rows.length > 0;
+}
+
 // Bolehkah user input inspeksi? Teknisi harus on-duty; koord/admin selalu boleh.
 async function canInspect(user) {
   if (user.role === 'admin' || user.role === 'koordinator') return true;
   if (user.role === 'teknisi') {
     const { onDuty } = await getDutyStatus(pool, user.id);
-    return onDuty;
+    if (onDuty) return true;
+    // Override koordinator: teknisi terjadwal boleh inspeksi walau absen salah/belum ter-record.
+    if ((await hasWorkShiftToday(user.id)) && (await inspectOverrideFor(user.unit_id))) return true;
+    return false;
   }
   return false;
 }
@@ -143,7 +179,9 @@ async function hasAttendedToday(user) {
     'SELECT 1 FROM attendance WHERE user_id=? AND work_date=? AND check_in_at IS NOT NULL LIMIT 1',
     [user.id, dateKey(new Date())]
   );
-  return rows.length > 0;
+  if (rows.length > 0) return true;
+  // Override koordinator: dianggap sudah absen untuk unit ini hari ini.
+  return !!(await inspectOverrideFor(user.unit_id));
 }
 
 // ===================== INSPEKSI HARIAN =====================
@@ -189,9 +227,27 @@ router.get('/inspections', async (req, res) => {
     openSlots: openSlots(),
     canInput: await canInspect(req.user),
     attended: await hasAttendedToday(req.user),
+    inspectOverride: await inspectOverrideFor(req.unitId),
     inspectRadiusM: await getInspectRadius(),
     devices: list,
   });
+});
+
+// Status override inspeksi hari ini untuk unit efektif (null bila tak ada).
+router.get('/inspect-override', async (req, res) => {
+  res.json({ override: await inspectOverrideFor(req.unitId) });
+});
+
+// Koordinator/admin: BUKA akses inspeksi + hidupkan/matikan untuk unit ini HARI INI walau
+// absen belum/salah tanggal. Wajib alasan; berlaku untuk teknisi yang terjadwal dinas hari ini.
+router.post('/inspect-override', requireRole('admin', 'koordinator'), async (req, res) => {
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return res.status(400).json({ error: 'Alasan wajib diisi.' });
+  const key = req.unitId != null ? String(req.unitId) : 'all';
+  const all = await getInspectOverrides();
+  all[key] = { date: dateKey(new Date()), reason, by: req.user.id, by_name: req.user.name, at: new Date().toISOString() };
+  await setInspectOverrides(all);
+  res.json({ ok: true, override: all[key] });
 });
 
 router.post('/inspections', withInspectionPhoto, async (req, res) => {

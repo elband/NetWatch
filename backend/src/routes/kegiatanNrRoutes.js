@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { localDate } from '../utils/localDate.js';
 import { randName } from '../middleware/upload.js';
 import path from 'path';
 import fs from 'fs';
@@ -157,7 +158,7 @@ router.post('/', uploadFields, async (req, res) => {
     const [r] = await conn.query(
       `INSERT INTO kegiatan_non_rutin (nomor, seq, tahun, tanggal_kegiatan, petugas_id, petugas_nama, unit_kerja, kategori, judul, lokasi, uraian, hasil, durasi_jam, jumlah_personel, tingkat_kesulitan, poin, status, created_by, creator_name, unit_id)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?,?)`,
-      [nomor, seq, tahun, b.tanggal_kegiatan || new Date().toISOString().slice(0, 10), petugasId, b.petugas_nama || req.user.name, b.unit_kerja || 'Unit Elektronika Bandara',
+      [nomor, seq, tahun, b.tanggal_kegiatan || localDate(), petugasId, b.petugas_nama || req.user.name, b.unit_kerja || 'Unit Elektronika Bandara',
         b.kategori.trim(), b.judul.trim(), b.lokasi || null, b.uraian || null, b.hasil || null, Number(b.durasi_jam) || 0, Number(b.jumlah_personel) || 1, tingkat, WEIGHT[tingkat], req.user.id, req.user.name, unitId]
     );
     for (const f of req.files?.foto || []) await conn.query('INSERT INTO kegiatan_non_rutin_files (kegiatan_id, file_url, filename, mimetype, jenis) VALUES (?,?,?,?,?)', [r.insertId, `/uploads/kegiatan/${f.filename}`, f.originalname.slice(0, 200), f.mimetype, 'foto']);

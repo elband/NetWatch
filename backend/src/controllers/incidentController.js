@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { pool } from '../db/pool.js';
+import { localDate } from '../utils/localDate.js';
 import { env } from '../config/env.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
@@ -666,7 +667,7 @@ async function ensureNotaDinasSurat(incidentId, user) {
   const nomor = `${String(seq).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`;
   const loc = incident.device_loc ? ` di ${incident.device_loc}` : '';
   const hal = `Laporan Kerusakan dan Perbaikan ${incident.device_name}${loc}`;
-  const tanggal = now.toISOString().slice(0, 10);
+  const tanggal = localDate(now);
 
   const [r] = await pool.query(
     `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, incident_id, hal, tanggal, created_by, creator_name, unit_id)
@@ -798,7 +799,7 @@ async function resolveTteSurat(token) {
       else surat = {
         id: null, jenis: 'Nota Dinas', nomor: '-', incident_id: incidentId,
         hal: 'Laporan Kerusakan dan Perbaikan', tujuan: null, body: null,
-        tanggal: byLkp[0].signed_at || new Date().toISOString().slice(0, 10),
+        tanggal: byLkp[0].signed_at || localDate(),
         signer_name: byLkp[0].signer_name, signer_nip: byLkp[0].signer_nip, sign_token: null,
       };
     }

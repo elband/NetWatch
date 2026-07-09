@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
+import { localDate } from '../utils/localDate.js';
 import multer from 'multer';
 import { randName } from '../middleware/upload.js';
 import path from 'path';
@@ -100,7 +101,7 @@ router.post('/', requireRole('koordinator', 'admin'), upload.array('files', 10),
   const conn = await pool.getConnection();
   try {
     const { nomor, seq, bulan, tahun } = await nextNomor(conn, (jenis || 'Nota Dinas').trim(), unitId);
-    const tanggal = new Date().toISOString().slice(0, 10);
+    const tanggal = localDate();
     const rm = /^\d{4}-\d{2}$/.test(report_month || '') ? report_month : null;
     const [r] = await conn.query(
       `INSERT INTO nota_dinas (jenis, nomor, seq, bulan, tahun, hal, tujuan, body, tanggal, created_by, creator_name, report_month, incident_id, unit_id)
