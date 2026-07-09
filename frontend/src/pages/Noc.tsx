@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { unlockAudio, playAlarm, playTestBeep, audioReady } from '../utils/alarmSound';
 
 // ===== COMMAND CENTER — Wallboard Publik NOC (tanpa login, token ?key=, per-unit ?unit=).
 // Tata letak: Header · Sidebar kiri (Layer/Top Lokasi/Statistik) · Tengah (KPI/Peta/Telemetri)
@@ -96,6 +97,29 @@ export default function Noc() {
   const [toast, setToast] = useState<NDevice | null>(null);
   const [focusIdx, setFocusIdx] = useState(0);
   const [hoverMap, setHoverMap] = useState(false);
+  // Alarm suara: aktif/mati (disimpan per-browser) + status audio sudah ter-unlock browser.
+  const [soundOn, setSoundOn] = useState<boolean>(() => { try { return localStorage.getItem('noc_alarm_sound') !== '0'; } catch { return true; } });
+  const [audioOk, setAudioOk] = useState(false);
+  const soundOnRef = useRef(soundOn); soundOnRef.current = soundOn;
+
+  // Kebijakan autoplay: unlock audio pada interaksi user pertama (sekali) agar alarm bisa berbunyi.
+  useEffect(() => {
+    const unlock = () => { unlockAudio(); window.setTimeout(() => setAudioOk(audioReady()), 60); };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
+  }, []);
+
+  // Toggle alarm suara (juga meng-unlock audio + beep konfirmasi saat dinyalakan).
+  // Efek samping di luar updater agar tetap murni (StrictMode aman, tak dobel-beep).
+  const toggleSound = () => {
+    unlockAudio();
+    const nv = !soundOnRef.current;
+    soundOnRef.current = nv;
+    setSoundOn(nv);
+    try { localStorage.setItem('noc_alarm_sound', nv ? '1' : '0'); } catch { /* */ }
+    if (nv) window.setTimeout(() => { setAudioOk(audioReady()); playTestBeep(); }, 80);
+  };
 
   const q = `unit=${encodeURIComponent(unit)}&key=${encodeURIComponent(key)}`;
 
@@ -145,6 +169,7 @@ export default function Noc() {
     const snap: Record<number, string> = {}; for (const d of devices) snap[d.id] = d.status; prev.current = snap;
     if (!first && down) {
       setAlert(down); setToast(down);
+      if (soundOnRef.current) playAlarm('critical'); // bunyikan alarm sesuai nada gangguan
       window.clearTimeout(alertTimer.current);
       alertTimer.current = window.setTimeout(() => { setAlert(null); setToast(null); }, ALERT_MS);
     }
@@ -269,6 +294,14 @@ export default function Noc() {
             <span style={{ width: 9, height: 9, borderRadius: 999, background: sys.c, boxShadow: `0 0 8px ${sys.c}` }} />{sys.t}
           </div>
           <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'right' }}>Shift aktif<br /><b style={{ color: C.text }}>{onDuty.length ? onDuty.map((t) => t.name.split(' ')[0]).join(', ') : '—'}</b></div>
+          <button
+            onClick={toggleSound}
+            title={!soundOn ? 'Alarm suara MATI — klik untuk hidupkan' : audioOk ? 'Alarm suara AKTIF — klik untuk matikan' : 'Alarm aktif — klik sekali untuk mengizinkan suara di browser'}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: `1px solid ${soundOn ? C.online + '66' : C.border}`, color: soundOn ? C.online : C.dim, borderRadius: 8, padding: '5px 10px', cursor: 'pointer', lineHeight: 1, animation: soundOn && !audioOk ? 'nocblink 1.2s infinite' : 'none' }}
+          >
+            <span style={{ fontSize: 16 }}>{soundOn ? '🔊' : '🔇'}</span>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.3 }}>ALARM</span>
+          </button>
           <div style={{ position: 'relative' }}>
             <span style={{ fontSize: 20 }}>🔔</span>
             {kpi.activeInc > 0 && <span style={{ position: 'absolute', top: -4, right: -6, background: C.offline, color: '#fff', fontSize: 10, fontWeight: 800, borderRadius: 999, padding: '0 5px' }}>{kpi.activeInc}</span>}
