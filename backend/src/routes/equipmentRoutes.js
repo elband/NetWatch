@@ -151,8 +151,14 @@ router.get('/inspections', async (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : dateKey(new Date());
   // Scoping unit lewat daftar perangkat: inspeksi/poweron dipetakan per device_id,
   // sehingga baris milik unit lain otomatis tak ikut tampil.
-  const ufd = unitFilter(req.unitId, 'unit_id');
-  const [devices] = await pool.query(`SELECT id, name, ip, type, loc, status, monitor_enabled, off_reason, always_on, lat, lng FROM devices WHERE inspect_required=1${ufd.clause} ORDER BY name`, ufd.params);
+  const ufd = unitFilter(req.unitId, 'd.unit_id');
+  // Koordinat inspeksi: pakai koordinat PERANGKAT; bila kosong ikut koordinat LOKASI-nya
+  // (marker di Peta / Master Data → Lokasi). Jadi cukup set titik lokasi sekali, semua
+  // perangkat di lokasi itu otomatis punya koordinat untuk cek jarak/radius.
+  const [devices] = await pool.query(`SELECT d.id, d.name, d.ip, d.type, d.loc, d.status, d.monitor_enabled, d.off_reason, d.always_on,
+      COALESCE(d.lat, loc.lat) AS lat, COALESCE(d.lng, loc.lng) AS lng
+      FROM devices d LEFT JOIN locations loc ON loc.id = d.location_id
+      WHERE d.inspect_required=1${ufd.clause} ORDER BY d.name`, ufd.params);
   const [insp] = await pool.query('SELECT * FROM equipment_inspections WHERE inspect_date = ?', [date]);
   const byDevice = {};
   for (const r of insp) (byDevice[r.device_id] ||= {})[r.slot] = r;
@@ -202,7 +208,7 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi inspeksi wajib diunggah.' });
 
   // Ambil koordinat perangkat (untuk cek GPS proximity) + unit_id (scoping).
-  const [devRows] = await pool.query('SELECT name, lat, lng, unit_id FROM devices WHERE id = ?', [deviceId]);
+  const [devRows] = await pool.query('SELECT d.name, COALESCE(d.lat, loc.lat) AS lat, COALESCE(d.lng, loc.lng) AS lng, d.unit_id FROM devices d LEFT JOIN locations loc ON loc.id = d.location_id WHERE d.id = ?', [deviceId]);
   const device = devRows[0];
   if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
 
@@ -293,7 +299,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
 
-  const [devRows] = await pool.query('SELECT name, lat, lng, always_on, unit_id FROM devices WHERE id = ?', [deviceId]);
+  const [devRows] = await pool.query('SELECT d.name, COALESCE(d.lat, loc.lat) AS lat, COALESCE(d.lng, loc.lng) AS lng, d.always_on, d.unit_id FROM devices d LEFT JOIN locations loc ON loc.id = d.location_id WHERE d.id = ?', [deviceId]);
   const device = devRows[0];
   if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
   if (device.always_on) return res.status(400).json({ error: 'Perangkat ini ditandai selalu aktif (24 jam) — tidak untuk dihidupkan/dimatikan.' });
@@ -378,7 +384,7 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });
 
-  const [[device]] = await pool.query('SELECT id, name, lat, lng, always_on, unit_id FROM devices WHERE id=?', [deviceId]);
+  const [[device]] = await pool.query('SELECT d.id, d.name, COALESCE(d.lat, loc.lat) AS lat, COALESCE(d.lng, loc.lng) AS lng, d.always_on, d.unit_id FROM devices d LEFT JOIN locations loc ON loc.id = d.location_id WHERE d.id=?', [deviceId]);
   if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
   if (device.always_on) return res.status(400).json({ error: 'Perangkat ini ditandai selalu aktif (24 jam) — tidak untuk dihidupkan/dimatikan.' });
 
