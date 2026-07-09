@@ -35,7 +35,7 @@ export function getUplinkSpeed(deviceId) {
 async function sampleDevice(snmp, d) {
   let session;
   try {
-    session = snmp.createSession(d.ip, d.snmp_community || 'public', { port: d.snmp_port || 161, version: snmp.Version2c, timeout: 2000, retries: 1 });
+    session = snmp.createSession(d.snmp_host || d.ip, d.snmp_community || 'public', { port: d.snmp_port || 161, version: snmp.Version2c, timeout: 2000, retries: 1 });
     const vb = await snmpGet(session, [OID_IN + d.uplink_ifindex, OID_OUT + d.uplink_ifindex]);
     if (!vb || vb.length < 2) return;
     const inOct = toNum(vb[0]?.value), outOct = toNum(vb[1]?.value);
@@ -63,7 +63,7 @@ export function startUplinkSpeed(intervalMs = 5000) {
       const snmp = await loadSnmp();
       if (!snmp) return;
       const [rows] = await pool.query(
-        "SELECT id, ip, snmp_community, snmp_port, uplink_ifindex FROM devices WHERE is_uplink=1 AND snmp_enabled=1 AND uplink_ifindex IS NOT NULL AND ip IS NOT NULL AND ip NOT LIKE 'N/A%'"
+        "SELECT id, ip, snmp_host, snmp_community, snmp_port, uplink_ifindex FROM devices WHERE is_uplink=1 AND snmp_enabled=1 AND uplink_ifindex IS NOT NULL AND ip IS NOT NULL AND ip NOT LIKE 'N/A%'"
       );
       const live = new Set(rows.map((r) => r.id));
       for (const id of [...samples.keys()]) if (!live.has(id)) samples.delete(id);

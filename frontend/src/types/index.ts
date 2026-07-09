@@ -78,6 +78,7 @@ export interface Device {
   snmp_enabled?: number;
   snmp_community?: string | null;
   snmp_port?: number;
+  snmp_host?: string | null;
   under_maintenance?: number;
   // Multi-unit & aset non-IP (Fase 2)
   unit_id?: number | null;

@@ -45,7 +45,7 @@ function validateCheckUrl(u) {
 
 export async function createDevice(req, res) {
   const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required, is_uplink, uplink_ifindex,
-    check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
+    check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port, snmp_host } = req.body;
   if (!name || !ip || !type) return res.status(400).json({ error: 'Nama, IP, tipe wajib diisi' });
   const urlErr = validateCheckUrl(check_url);
   if (urlErr) return res.status(400).json({ error: urlErr });
@@ -55,12 +55,12 @@ export async function createDevice(req, res) {
   const locId = location_id === '' || location_id == null ? null : Number(location_id);
   const [result] = await pool.query(
     `INSERT INTO devices (unit_id, name, ip, type, category, icon, loc, location_id, inspect_required, is_uplink, uplink_ifindex, status, ssh_host, ssh_port, ssh_username, lat, lng,
-       check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port, snmp_host)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [unitId, name, ip, type, category?.trim() || null, icon?.trim() || null, loc || null, locId, inspReq, is_uplink ? 1 : 0, uplink_ifindex ? Number(uplink_ifindex) : null, ssh_host || ip, ssh_port || 22, ssh_username || null,
      lat === '' || lat == null ? null : Number(lat), lng === '' || lng == null ? null : Number(lng),
      normCheckType(check_type), check_port ? Number(check_port) : null, check_url?.trim() || null,
-     snmp_enabled ? 1 : 0, snmp_community?.trim() || 'public', snmp_port ? Number(snmp_port) : 161]
+     snmp_enabled ? 1 : 0, snmp_community?.trim() || 'public', snmp_port ? Number(snmp_port) : 161, snmp_host?.trim() || null]
   );
   // Hanya satu uplink per unit: bila perangkat ini ditandai uplink, matikan flag di perangkat lain.
   if (is_uplink) await pool.query('UPDATE devices SET is_uplink=0 WHERE unit_id=? AND id<>?', [unitId, result.insertId]);
@@ -71,7 +71,7 @@ export async function createDevice(req, res) {
 export async function updateDevice(req, res) {
   const id = Number(req.params.id);
   const { name, ip, type, category, icon, loc, location_id, ssh_host, ssh_port, ssh_username, lat, lng, inspect_required, is_uplink, uplink_ifindex,
-    check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port } = req.body;
+    check_type, check_port, check_url, snmp_enabled, snmp_community, snmp_port, snmp_host } = req.body;
   if (check_url !== undefined) {
     const urlErr = validateCheckUrl(check_url);
     if (urlErr) return res.status(400).json({ error: urlErr });
@@ -80,7 +80,7 @@ export async function updateDevice(req, res) {
   if (!existing[0] || !rowInUnit(existing[0], req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   await pool.query(
     `UPDATE devices SET name=?, ip=?, type=?, category=?, icon=?, loc=?, location_id=?, inspect_required=?, is_uplink=?, uplink_ifindex=?, ssh_host=?, ssh_port=?, ssh_username=?, lat=?, lng=?,
-       check_type=?, check_port=?, check_url=?, snmp_enabled=?, snmp_community=?, snmp_port=? WHERE id=?`,
+       check_type=?, check_port=?, check_url=?, snmp_enabled=?, snmp_community=?, snmp_port=?, snmp_host=? WHERE id=?`,
     [
       name ?? existing[0].name,
       ip ?? existing[0].ip,
@@ -103,6 +103,7 @@ export async function updateDevice(req, res) {
       snmp_enabled === undefined ? existing[0].snmp_enabled : (snmp_enabled ? 1 : 0),
       snmp_community === undefined ? existing[0].snmp_community : (snmp_community?.trim() || 'public'),
       snmp_port === undefined ? existing[0].snmp_port : (snmp_port ? Number(snmp_port) : 161),
+      snmp_host === undefined ? existing[0].snmp_host : (snmp_host?.trim() || null),
       id,
     ]
   );
@@ -196,11 +197,14 @@ export async function snmpInterfaces(req, res) {
   const [rows] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   const device = rows[0];
   if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
-  if (!device.ip || String(device.ip).startsWith('N/A')) return res.status(400).json({ error: 'Perangkat tidak punya IP untuk SNMP.' });
+  // SNMP dibaca dari snmp_host bila diisi (mis. Sub Mikrotik di LAN), else IP perangkat.
+  // Override dari body agar bisa dites sebelum perangkat disimpan.
+  const snmpHost = String(req.body?.snmp_host || device.snmp_host || device.ip || '').trim();
+  if (!snmpHost || snmpHost.startsWith('N/A')) return res.status(400).json({ error: 'Tidak ada host SNMP — isi SNMP Host atau IP perangkat.' });
   const community = req.body?.snmp_community || device.snmp_community || 'public';
   const port = Number(req.body?.snmp_port || device.snmp_port || 161);
   try {
-    const interfaces = await listSnmpInterfaces({ ip: device.ip, community, port });
+    const interfaces = await listSnmpInterfaces({ ip: snmpHost, community, port });
     if (!interfaces.length) return res.status(502).json({ error: 'Tidak ada interface terbaca. Pastikan SNMP aktif & community/izin IP benar.' });
     res.json({ interfaces });
   } catch (e) {

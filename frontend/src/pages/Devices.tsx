@@ -16,7 +16,7 @@ function meterColor(v: number) {
 const DEVICE_TYPES = ['Switch', 'Router', 'Firewall', 'AP', 'Server', 'NAS', 'CCTV', 'PC Client', 'Printer'];
 // Pustaka ikon (emoji) untuk perangkat / kartu layanan.
 const ICONS = ['🖥️', '🔀', '📶', '🧱', '🖧', '💾', '📹', '🌐', '🔗', '📺', '🚪', '📢', '✈️', '🛰️', '📡', '🛜', '📱', '💻', '🔌', '⚙️', '🟢', '🗂️'];
-const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', location_id: null as number | null, ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, is_uplink: false, uplink_ifindex: '', check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161' };
+const emptyForm = { name: '', ip: '', hasIp: true, type: 'Switch', category: '', icon: '', loc: '', location_id: null as number | null, ssh_host: '', ssh_port: '22', ssh_username: '', lat: '', lng: '', inspect_required: true, is_uplink: false, uplink_ifindex: '', check_type: 'ping' as 'ping' | 'tcp' | 'http', check_port: '', check_url: '', snmp_enabled: false, snmp_community: 'public', snmp_port: '161', snmp_host: '' };
 const NO_IP = 'N/A (Tanpa IP)';
 // Baris hasil deteksi interface SNMP (untuk memilih ifIndex uplink WAN dari daftar).
 type IfaceRow = { ifIndex: number; name: string; alias: string | null; up: boolean; mbps: number | null };
@@ -111,7 +111,7 @@ export default function Devices() {
     if (!editId) { setIfaces(null); setDetectErr('Simpan perangkat dulu, lalu buka Edit untuk mendeteksi interface.'); return; }
     setDetecting(true); setDetectErr(''); setIfaces(null);
     try {
-      const r = await api.post(`/devices/${editId}/snmp-interfaces`, { snmp_community: form.snmp_community, snmp_port: form.snmp_port });
+      const r = await api.post(`/devices/${editId}/snmp-interfaces`, { snmp_community: form.snmp_community, snmp_port: form.snmp_port, snmp_host: form.snmp_host });
       setIfaces(r.data.interfaces || []);
     } catch (e: any) {
       setDetectErr(e?.response?.data?.error || 'Gagal mendeteksi interface.');
@@ -139,7 +139,7 @@ export default function Devices() {
       is_uplink: !!d.is_uplink,
       uplink_ifindex: d.uplink_ifindex != null ? String(d.uplink_ifindex) : '',
       check_type: d.check_type || 'ping', check_port: d.check_port != null ? String(d.check_port) : '', check_url: d.check_url || '',
-      snmp_enabled: !!d.snmp_enabled, snmp_community: d.snmp_community || 'public', snmp_port: String(d.snmp_port ?? 161),
+      snmp_enabled: !!d.snmp_enabled, snmp_community: d.snmp_community || 'public', snmp_port: String(d.snmp_port ?? 161), snmp_host: d.snmp_host || '',
     });
     setFormErr(''); resetDetect(); setShowAdd(true);
   }
@@ -180,6 +180,7 @@ export default function Devices() {
       snmp_enabled: form.snmp_enabled,
       snmp_community: form.snmp_community.trim() || 'public',
       snmp_port: Number(form.snmp_port) || 161,
+      snmp_host: form.snmp_host.trim() || null,
     };
     try {
       if (editId) {
@@ -488,6 +489,12 @@ export default function Devices() {
                 <>
                   <Field label="SNMP Community"><input className="dev-inp" value={form.snmp_community} onChange={(e) => setForm({ ...form, snmp_community: e.target.value })} placeholder="public" /></Field>
                   <Field label="SNMP Port"><input className="dev-inp" value={form.snmp_port} onChange={(e) => setForm({ ...form, snmp_port: e.target.value })} placeholder="161" /></Field>
+                  <div className="col-span-2">
+                    <Field label="SNMP Host (opsional)">
+                      <input className="dev-inp" value={form.snmp_host} onChange={(e) => setForm({ ...form, snmp_host: e.target.value })} placeholder="kosong = pakai IP perangkat" />
+                    </Field>
+                    <div className="text-[10px] text-text2 mt-1">Isi bila SNMP harus dibaca dari <b>alamat lain</b> — mis. perangkat ber-IP publik (Mikrotik Utama) yang tak bisa di-SNMP langsung, tapi trafiknya terbaca dari <b>Mikrotik sejalur di LAN</b> (mis. Sub Mikrotik). Ping/status tetap ke IP perangkat; semua query SNMP (kecepatan, CPU/RAM, Deteksi Interface) diarahkan ke host ini.</div>
+                  </div>
                 </>
               )}
 

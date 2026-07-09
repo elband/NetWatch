@@ -132,7 +132,7 @@ async function probeSnmp(device) {
   if (!snmp) return { cpu: null, mem: null };
   let session;
   try {
-    session = snmp.createSession(device.ip, device.snmp_community || 'public', {
+    session = snmp.createSession(device.snmp_host || device.ip, device.snmp_community || 'public', {
       port: device.snmp_port || 161,
       version: snmp.Version2c,
       timeout: 2000,

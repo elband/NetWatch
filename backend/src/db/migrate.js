@@ -114,6 +114,10 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'devices', 'snmp_enabled', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER check_url');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'snmp_community', "VARCHAR(80) DEFAULT 'public' AFTER snmp_enabled");
   await addColumnIfMissing(conn, env.db.database, 'devices', 'snmp_port', 'INT NOT NULL DEFAULT 161 AFTER snmp_community');
+  // SNMP Host opsional: baca SNMP dari alamat lain (mis. Sub Mikrotik di LAN) tanpa mengubah IP
+  // yang di-ping. Berguna saat perangkat utama (mis. Mikrotik Utama ber-IP publik) tak bisa
+  // di-SNMP langsung, tapi trafiknya terbaca dari perangkat lain yang sejalur.
+  await addColumnIfMissing(conn, env.db.database, 'devices', 'snmp_host', 'VARCHAR(255) DEFAULT NULL AFTER snmp_port');
   // Idempotent untuk DB yang sudah memiliki device_metrics versi awal (tanpa in_maint).
   await addColumnIfMissing(conn, env.db.database, 'device_metrics', 'in_maint', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER mem');
   // Dokumentasi (foto/PDF) untuk rencana/pelaksanaan maintenance.
