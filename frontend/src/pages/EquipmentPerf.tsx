@@ -254,8 +254,9 @@ const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${Str
 // Tanggal singkat "05 Jul" dari kolom DATE (bisa string/ISO). '' bila kosong/invalid.
 const fmtDay = (s?: string | null) => { if (!s) return ''; const d = new Date(String(s).slice(0, 10) + 'T00:00:00'); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }); };
 
-// Chip bukti Hidup/Mati terakhir pada kartu peralatan: ikon status + 📷 (✅ terverifikasi /
-// ⚠️ belum) yang membuka foto dokumentasi. Tooltip memuat tanggal, pelaksana & jarak.
+// Chip bukti Hidup/Mati terakhir pada kartu peralatan: ikon + TANGGAL + 📷 (✅ terverifikasi /
+// ⚠️ belum) yang membuka foto dokumentasi. Tanggal ditampilkan agar jelas bukti ini dari hari
+// mana → cocok dengan baris di Logbook (yang per-bulan). Tooltip memuat pelaksana & jarak.
 function PowerProof({ rec, kind }: { rec?: PowerOn | null; kind: 'on' | 'off' }) {
   if (!rec?.photo_url) return null;
   const icon = kind === 'on' ? '⚡' : '⏻';
@@ -266,8 +267,8 @@ function PowerProof({ rec, kind }: { rec?: PowerOn | null; kind: 'on' | 'off' })
       type="button"
       onClick={(e) => { e.stopPropagation(); openImage(rec.photo_url!); }}
       title={`Bukti ${word}${when ? ' ' + when : ''} oleh ${rec.done_by_name || '-'}${rec.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${rec.distance_m != null ? ' · ' + rec.distance_m + ' m' : ''}`}
-      className="leading-none whitespace-nowrap"
-    >{icon}📷{rec.verified ? '✅' : '⚠️'}</button>
+      className="inline-flex items-center gap-0.5 leading-none whitespace-nowrap"
+    ><span>{icon}</span>{when && <span className="text-text2 text-[9px]">{when}</span>}<span>📷{rec.verified ? '✅' : '⚠️'}</span></button>
   );
 }
 
