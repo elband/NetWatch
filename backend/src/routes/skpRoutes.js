@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import multer from 'multer';
+import { randName } from '../middleware/upload.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -31,7 +32,7 @@ fs.mkdirSync(DIR, { recursive: true });
 const upload = multer({
   storage: multer.diskStorage({
     destination: (q, f, cb) => cb(null, DIR),
-    filename: (q, f, cb) => cb(null, `S${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(f.originalname).toLowerCase()}`),
+    filename: (q, f, cb) => cb(null, randName('S', f.originalname)),
   }),
   limits: { fileSize: 20 * 1024 * 1024 },
 });

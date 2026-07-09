@@ -7,6 +7,7 @@
 import QRCode from 'qrcode';
 import type { Surat, Incident } from '../types';
 import { buildReportHtml, SECTIONS, type LaporanData, type LkpHead, type SectionKey } from './laporanReport';
+import { buildAabReportHtml, type AabReportData } from './aabReport';
 
 export interface SplPegawaiRow {
   user_id?: number; nama: string; nip: string; mulai: string; selesai: string;
@@ -397,8 +398,11 @@ export interface BuildDocDeps {
   origin: string;
   // Ambil insiden untuk dokumen gabungan (Nota Dinas + LKP). Boleh kembalikan null.
   fetchIncident: (id: string) => Promise<Incident | null>;
-  // Ambil data laporan bulanan. Boleh kembalikan null.
-  fetchLaporan: (month: string) => Promise<LaporanData | null>;
+  // Ambil data laporan bulanan. Boleh kembalikan null. Bentuk data tergantung unit
+  // (ELB=LaporanData, AAB=AabReportData) — lihat reportKind.
+  fetchLaporan: (month: string) => Promise<LaporanData | AabReportData | null>;
+  // Jenis laporan: 'aab' → renderer AAB, selain itu → renderer ELB default.
+  reportKind?: string;
   // Bagian laporan yang disertakan (default: semua).
   sections?: Set<SectionKey>;
 }
@@ -448,8 +452,11 @@ export async function buildDocHtml(s: Surat, deps: BuildDocDeps): Promise<string
       if (data) {
         const kasiQr = await tokenQr(origin, s.kasi_sign_token, 130);
         const cover = { nomor: s.nomor, tanggal: s.tanggal, tujuan: s.tujuan, signer_name: s.signer_name, signer_nip: s.signer_nip, sign_token: s.sign_token, kasi_signer_name: s.kasi_signer_name, kasi_signer_nip: s.kasi_signer_nip, kasi_sign_token: s.kasi_sign_token };
+        // AAB dikenali dari reportKind eksplisit atau bentuk data (punya svcRekap).
+        const isAab = deps.reportKind === 'aab' || (typeof data === 'object' && data !== null && 'svcRekap' in data);
+        if (isAab) return buildAabReportHtml(data as AabReportData, cover, qr, lkp, kasiQr);
         const sel = deps.sections ?? new Set(SECTIONS.map((x) => x.key));
-        return buildReportHtml(data, cover, qr, lkp, sel, kasiQr);
+        return buildReportHtml(data as LaporanData, cover, qr, lkp, sel, kasiQr);
       }
     } catch { return suratHtml(s, qr, lkp, origin); }
   }

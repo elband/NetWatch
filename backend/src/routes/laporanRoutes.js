@@ -7,6 +7,13 @@ import { metricsFor } from './performaRoutes.js';
 import { scoreTeknisi, scoreKoordinator } from '../services/perfScore.js';
 import { buildLogbook } from './logbookRoutes.js';
 import { computeReport as obatAirReport } from '../controllers/waterChemController.js';
+import { effectiveLkp } from '../services/unitConfig.js';
+
+// Baca lkp global (settings) → objek; dipakai buildAabReport untuk kop & TTD.
+async function readGlobalLkp() {
+  const [r] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='lkp'");
+  try { const v = r[0]?.setting_value; return (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { return {}; }
+}
 
 const router = Router();
 router.use(requireAuth);
@@ -413,9 +420,41 @@ export async function buildAabReport(monthIn, unitId) {
     [start, end, ...ufc.params]
   );
   const [chkByOverall] = await pool.query(
-    `SELECT overall, COUNT(*) n FROM checklist_runs WHERE run_date>=? AND run_date<?${ufc.clause} GROUP BY overall`,
+    `SELECT overall, COUNT(*) n FROM checklist_runs WHERE frequency='harian' AND run_date>=? AND run_date<?${ufc.clause} GROUP BY overall`,
     [start, end, ...ufc.params]
   );
+
+  // III-b. Status kelayakan (checklist BULANAN Serviceable/Unserviceable) — status TERAKHIR per aset pada periode.
+  const ufsv = unitFilter(unitId, 'cr.unit_id');
+  const [svcRows] = await pool.query(
+    `SELECT cr.device_id, d.name, cr.serviceable, cr.note
+       FROM checklist_runs cr JOIN devices d ON d.id=cr.device_id
+      WHERE cr.frequency='bulanan' AND cr.period=?${ufsv.clause}
+      ORDER BY cr.device_id, cr.id DESC`,
+    [month, ...ufsv.params]
+  );
+  const svcLatest = new Map();
+  for (const r of svcRows) if (!svcLatest.has(r.device_id)) svcLatest.set(r.device_id, r);
+  const serviceability = [...svcLatest.values()].map((r) => ({ name: r.name, serviceable: r.serviceable ? 1 : 0, note: r.note || null }));
+  const svcRekap = { serviceable: 0, unserviceable: 0 };
+  for (const r of serviceability) (r.serviceable ? svcRekap.serviceable++ : svcRekap.unserviceable++);
+
+  // III-c. Grid checklist HARIAN per aset/kendaraan (baris aset × kolom tanggal, kode hasil).
+  const ufcg = unitFilter(unitId, 'cr.unit_id');
+  const [dailyRuns] = await pool.query(
+    `SELECT cr.device_id, d.name, DAY(cr.run_date) AS day, cr.overall
+       FROM checklist_runs cr JOIN devices d ON d.id=cr.device_id
+      WHERE cr.frequency='harian' AND cr.run_date>=? AND cr.run_date<?${ufcg.clause}
+      ORDER BY d.name, cr.run_date`,
+    [start, end, ...ufcg.params]
+  );
+  const OV_CODE = { baik: '✓', perhatian: '△', rusak: '✗' };
+  const gmap = new Map();
+  for (const r of dailyRuns) {
+    if (!gmap.has(r.device_id)) gmap.set(r.device_id, { nama: r.name, cells: Array(daysInMonth).fill('') });
+    gmap.get(r.device_id).cells[r.day - 1] = OV_CODE[r.overall] || '';
+  }
+  const checklistGrid = { days: daysInMonth, rows: [...gmap.values()] };
 
   // IV. Obat air (biaya periode)
   const obatAir = await obatAirReport(unitId, start, lastDay);
@@ -446,20 +485,53 @@ export async function buildAabReport(monthIn, unitId) {
     jmap.get(r.user_id).cells[r.d - 1] = SHIFT_CODE[r.shift_type] || '';
   }
 
+  // Identitas surat efektif (kop, koordinator) untuk letterhead & blok tanda tangan.
+  const lkp = await effectiveLkp(await readGlobalLkp(), unitId);
+  const tglCetak = `${now.getDate()} ${BULAN[now.getMonth()]} ${now.getFullYear()}`;
+
   return {
     month, monthName, daysInMonth,
     personil: personil.map((p, i) => ({ no: i + 1, ...p })),
     inventaris, kondisiRekap,
     checklist: { total: chkTot.total, aset: chkTot.aset, byOverall: chkByOverall },
+    serviceability, svcRekap,
+    checklistGrid,
     obatAir, obatTotal,
     procurement,
     kegiatan,
     jadwal: { days: daysInMonth, rows: [...jmap.values()] },
+    lkp: {
+      kop_url: lkp.kop_url || null,
+      kantor: lkp.kantor || 'BANDAR UDARA A.P.T. PRANOTO - SAMARINDA',
+      kota: lkp.kota || 'Samarinda',
+      koord_nama: lkp.koord_nama || '',
+      koord_nip: lkp.koord_nip || '',
+      koord_jabatan: lkp.koord_jabatan || 'KOORDINATOR UNIT ALAT-ALAT BESAR',
+    },
+    tglCetak,
   };
 }
 
 router.get('/aab', requireRole('koordinator', 'admin'), async (req, res) => {
   res.json(await buildAabReport(req.query.month, req.unitId));
+});
+
+// Pilih builder Laporan Bulanan menurut unit: AAB → buildAabReport, selain itu → buildLaporanData.
+// Kembalikan { kind, data } — `kind='aab'` dipakai frontend (TTD/DocPrint) memilih renderer HTML.
+export async function buildMonthlyReport(month, unitId) {
+  let code = null;
+  if (unitId != null) {
+    const [[u]] = await pool.query('SELECT code FROM units WHERE id=? LIMIT 1', [unitId]);
+    code = u?.code || null;
+  }
+  if (code === 'AAB') return { kind: 'aab', data: await buildAabReport(month, unitId) };
+  return { kind: 'default', data: await buildLaporanData(month, unitId) };
+}
+
+// Laporan bulanan unit-aware ({kind, data}) — dipakai "Cetak"/preview di Surat Keluar
+// agar pengantar Laporan Bulanan AAB memakai renderer AAB.
+router.get('/monthly', requireRole('koordinator', 'admin'), async (req, res) => {
+  res.json(await buildMonthlyReport(req.query.month, req.unitId));
 });
 
 // ===== Laporan Bulanan Unjuk Hasil / Kinerja (ELB — unit jaringan) =====

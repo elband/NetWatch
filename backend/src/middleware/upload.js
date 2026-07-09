@@ -1,18 +1,31 @@
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Token acak kriptografis (default 96-bit) untuk nama berkas tak-tertebak.
+// Mengganti pola lama Date.now()+Math.random() yang bisa ditebak/di-brute:
+// folder /uploads publik (kop, foto insiden/inspeksi, surat, dsb.) hanya
+// mengandalkan URL tak-tertebak, jadi nama berkas WAJIB acak kuat.
+export const randToken = (bytes = 12) => crypto.randomBytes(bytes).toString('hex');
+
+// Nama berkas: prefix opsional (keterbacaan) + token acak + ekstensi asli.
+// fallbackExt dipakai bila originalName tak berekstensi (mis. '.png' untuk kop).
+export function randName(prefix, originalName, fallbackExt = '') {
+  const ext = (path.extname(originalName || '').toLowerCase() || fallbackExt).replace(/[^.a-z0-9]/g, '');
+  return `${prefix ? prefix + '-' : ''}${randToken()}${ext}`;
+}
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'incidents');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
     const safeId = String(req.params.id || 'inc').replace(/[^a-zA-Z0-9_-]/g, '');
-    cb(null, `${safeId}-${Date.now()}${ext}`);
+    cb(null, randName(safeId, file.originalname, '.jpg'));
   },
 });
 
@@ -61,9 +74,8 @@ fs.mkdirSync(DEVICE_PHOTO_DIR, { recursive: true });
 const deviceStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, DEVICE_PHOTO_DIR),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
     const safeId = String(req.params.id || 'dev').replace(/[^a-zA-Z0-9_-]/g, '');
-    cb(null, `D${safeId}-${Date.now()}${ext}`);
+    cb(null, randName(`D${safeId}`, file.originalname, '.jpg'));
   },
 });
 

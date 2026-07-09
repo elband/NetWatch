@@ -207,7 +207,9 @@ export default function SuratKeluar() {
     } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal mengirim notifikasi.'); }
   }
 
-  // Unggah gambar kop/letterhead → tersimpan di settings.lkp.kop_url, dipakai saat generate dokumen.
+  // Unggah gambar kop/letterhead → tersimpan per-unit (units.config.kop_url) bila unit
+  // dalam scope, atau global (settings.lkp) untuk super admin "Semua Unit". Server balas
+  // kop_url EFEKTIF (unit menimpa global) yang dipakai saat generate dokumen.
   async function uploadKop(file: File | undefined) {
     if (!file) return;
     if (!file.type.startsWith('image/')) { setMsg('Kop harus berupa gambar (JPG/PNG/WebP/GIF).'); return; }
@@ -222,12 +224,13 @@ export default function SuratKeluar() {
     finally { setKopBusy(false); if (kopInputRef.current) kopInputRef.current.value = ''; }
   }
   async function removeKop() {
-    if (!(await confirmDialog({ title: 'Hapus kop surat', message: 'Dokumen akan digenerate tanpa header sampai kop baru diunggah.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    if (!(await confirmDialog({ title: 'Hapus kop surat', message: 'Kop untuk scope ini dihapus. Bila unit punya kop global default, dokumen kembali memakai kop global; jika tidak, digenerate tanpa header.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     setKopBusy(true);
     try {
-      await api.delete('/surat/kop');
-      setLkp((l) => { const n = { ...l }; delete n.kop_url; return n; });
-      setMsg('Kop surat dihapus.');
+      const r = await api.delete('/surat/kop');
+      // Pakai kop_url EFEKTIF dari server (bisa fallback ke kop global).
+      setLkp((l) => ({ ...l, kop_url: r.data?.kop_url }));
+      setMsg(r.data?.kop_url ? 'Kop unit dihapus — kembali ke kop global default.' : 'Kop surat dihapus.');
     } catch (e: any) { setMsg(e?.response?.data?.error || 'Gagal menghapus kop.'); }
     finally { setKopBusy(false); }
   }
@@ -276,9 +279,11 @@ export default function SuratKeluar() {
         const { data } = await api.get<{ incident: Incident }>(`/incidents/${id}`);
         return data.incident;
       },
+      // Unit-aware: AAB → data laporan AAB, selain itu → laporan ELB. Renderer dipilih
+      // di buildDocHtmlShared dari bentuk data (svcRekap) — pengantar AAB otomatis pakai format AAB.
       fetchLaporan: async (month) => {
-        const { data } = await api.get<LaporanData>('/laporan/bulanan', { params: { month } });
-        return data;
+        const { data } = await api.get<{ kind: string; data: LaporanData }>('/laporan/monthly', { params: { month } });
+        return data.data;
       },
     });
   }

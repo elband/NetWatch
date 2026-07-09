@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { randName } from '../middleware/upload.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,7 +19,7 @@ fs.mkdirSync(SURAT_DIR, { recursive: true });
 const kopUpload = multer({
   storage: multer.diskStorage({
     destination: (q, f, cb) => cb(null, SURAT_DIR),
-    filename: (q, f, cb) => cb(null, `kop-unit-${q.params.id}-${Date.now()}${path.extname(f.originalname).toLowerCase() || '.png'}`),
+    filename: (q, f, cb) => cb(null, randName('kop-unit-' + q.params.id, f.originalname, '.png')),
   }),
   fileFilter: (q, f, cb) => (/^image\/(jpe?g|png|webp|gif)$/.test(f.mimetype) ? cb(null, true) : cb(new Error('Kop harus gambar (JPG/PNG/WebP/GIF).'))),
   limits: { fileSize: 8 * 1024 * 1024 },

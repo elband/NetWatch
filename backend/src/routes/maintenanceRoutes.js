@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { randName } from '../middleware/upload.js';
 import path from 'path';
 import {
   listMaintenanceWindows, createMaintenanceWindow, updateMaintenanceWindow, deleteMaintenanceWindow,
@@ -11,7 +12,7 @@ import { unitScope } from '../middleware/unitScope.js';
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, f, cb) => cb(null, MW_PHOTO_DIR),
-    filename: (req, f, cb) => cb(null, `MW${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(f.originalname).toLowerCase()}`),
+    filename: (req, f, cb) => cb(null, randName('MW', f.originalname)),
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, f, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'].includes(f.mimetype)),

@@ -7,7 +7,7 @@ import { getOnDutyTechIds, getDutyStatus } from '../config/shifts.js';
 import { remindOnDutyTechs } from '../services/coordWatcher.js';
 import { isNotifyEnabledForUser, notifyKasiIfEnabled } from '../services/notifyPrefs.js';
 import { nextIncidentId } from '../utils/incidentId.js';
-import { buildLaporanData } from '../routes/laporanRoutes.js';
+import { buildLaporanData, buildMonthlyReport } from '../routes/laporanRoutes.js';
 import { effectiveLkp } from '../services/unitConfig.js';
 import { unitFilter, unitFilterShared, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
@@ -838,11 +838,11 @@ export async function verifyTteDocData(req, res) {
     if (incRows[0]) incident = (await attachNotes(incRows))[0];
   }
 
-  // Laporan bulanan bila surat adalah cover laporan.
-  let laporan = null;
+  // Laporan bulanan bila surat adalah cover laporan. Builder per-unit (AAB → laporan AAB).
+  let laporan = null, reportKind = 'default';
   const month = suratReportMonth(surat);
   if (month) {
-    try { laporan = await buildLaporanData(month); } catch { laporan = null; }
+    try { const rep = await buildMonthlyReport(month, surat.unit_id ?? null); laporan = rep.data; reportKind = rep.kind; } catch { laporan = null; }
   }
 
   // Org config (kop, nama/jabatan penanda tangan, dll) — per unit surat (Fase 4).
@@ -851,7 +851,7 @@ export async function verifyTteDocData(req, res) {
   try { const v = sRows[0]?.setting_value; lkp = (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { lkp = {}; }
   lkp = await effectiveLkp(lkp, surat.unit_id);
 
-  res.json({ valid: true, surat, incident, laporan, lkp });
+  res.json({ valid: true, surat, incident, laporan, report_kind: reportKind, lkp });
 }
 
 // Render & unduh dokumen sebagai PDF (Puppeteer membuka /doc-print). Publik & token-gated.

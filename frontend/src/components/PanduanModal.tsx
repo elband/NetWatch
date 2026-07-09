@@ -392,25 +392,7 @@ export default function PanduanModal({ onClose }: Props) {
               </div>
 
               <SectionTitle number="9" title="Referensi Cepat" />
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="border border-gray-200 rounded-xl p-4">
-                  <div className="font-semibold text-gray-800 text-[13px] mb-3">🔑 PIN Demo (untuk testing)</div>
-                  <div className="space-y-2">
-                    {[
-                      { role: 'Admin', pin: '111111', emoji: '👑' },
-                      { role: 'Koordinator (Siti)', pin: '222222', emoji: '👩‍💼' },
-                      { role: 'Teknisi (Budi)', pin: '333333', emoji: '👨‍🔧' },
-                      { role: 'Teknisi (Dian)', pin: '444444', emoji: '👩‍💻' },
-                      { role: 'Viewer', pin: '777777', emoji: '👁️' },
-                    ].map((u) => (
-                      <div key={u.pin} className="flex items-center justify-between text-[12px]">
-                        <span>{u.emoji} {u.role}</span>
-                        <code className="bg-gray-100 px-2 py-0.5 rounded text-gray-800 font-mono">{u.pin}</code>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-gray-400 mt-3">⚠️ Ganti semua PIN ini di lingkungan produksi.</p>
-                </div>
+              <div className="grid grid-cols-1 gap-4 mb-6">
                 <div className="border border-gray-200 rounded-xl p-4">
                   <div className="font-semibold text-gray-800 text-[13px] mb-3">🗺️ Peta Menu Utama</div>
                   <div className="space-y-1.5">

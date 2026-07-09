@@ -9,7 +9,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { getDutyStatus, dateKey, shiftOpenGate } from '../config/shifts.js';
-import { withInspectionPhoto, INSPECTION_DIR } from '../middleware/upload.js';
+import { withInspectionPhoto, INSPECTION_DIR, randName, randToken } from '../middleware/upload.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
@@ -26,7 +26,7 @@ fs.mkdirSync(MAINT_DIR, { recursive: true });
 const maintUpload = multer({
   storage: multer.diskStorage({
     destination: (req, f, cb) => cb(null, MAINT_DIR),
-    filename: (req, f, cb) => cb(null, `M${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(f.originalname).toLowerCase()}`),
+    filename: (req, f, cb) => cb(null, randName('M', f.originalname)),
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, f, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'].includes(f.mimetype)),
@@ -223,7 +223,7 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
 
   // Tulis file ke disk setelah lolos validasi.
   const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
-  const filename = `insp-${deviceId}-${date}-${slot}-${Date.now()}${ext}`;
+  const filename = `insp-${deviceId}-${date}-${slot}-${randToken()}${ext}`;
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
@@ -302,7 +302,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   }
 
   const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
-  const filename = `poweron-${deviceId}-${date}-${Date.now()}${ext}`;
+  const filename = `poweron-${deviceId}-${date}-${randToken()}${ext}`;
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
@@ -374,7 +374,7 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   }
 
   const ext = (path.extname(req.file.originalname).toLowerCase() || '.jpg').replace(/[^.a-z0-9]/g, '');
-  const filename = `poweroff-${deviceId}-${date}-${Date.now()}${ext}`;
+  const filename = `poweroff-${deviceId}-${date}-${randToken()}${ext}`;
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 

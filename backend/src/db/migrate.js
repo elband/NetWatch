@@ -489,6 +489,13 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'checklist_template_items', 'category', 'VARCHAR(60) DEFAULT NULL AFTER label');
   await addColumnIfMissing(conn, env.db.database, 'checklist_run_items', 'category', 'VARCHAR(60) DEFAULT NULL AFTER label');
 
+  // 5d. Checklist BULANAN (status Serviceable/Unserviceable). frequency menandai template
+  // harian vs bulanan; run bulanan menyimpan period (YYYY-MM) + serviceable (1=S,0=US).
+  await addColumnIfMissing(conn, env.db.database, 'checklist_templates', 'frequency', "ENUM('harian','bulanan') NOT NULL DEFAULT 'harian' AFTER category");
+  await addColumnIfMissing(conn, env.db.database, 'checklist_runs', 'frequency', "ENUM('harian','bulanan') NOT NULL DEFAULT 'harian' AFTER template_id");
+  await addColumnIfMissing(conn, env.db.database, 'checklist_runs', 'period', 'VARCHAR(7) DEFAULT NULL AFTER run_date');
+  await addColumnIfMissing(conn, env.db.database, 'checklist_runs', 'serviceable', 'TINYINT(1) DEFAULT NULL AFTER overall');
+
   // 5c. Obat air: master bahan kimia (dgn harga) + pemakaian harian → laporan biaya periodik.
   await conn.query(`CREATE TABLE IF NOT EXISTS water_chemicals (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -545,6 +552,23 @@ async function migrate() {
         await conn.query('INSERT INTO checklist_template_items (template_id, label, category, sort_order) VALUES (?,?,?,?)', [tpl.insertId, ITEMS[i][1], ITEMS[i][0], i]);
       }
       console.log('  + seed checklist "Checklist Harian Kendaraan" (AAB)');
+    }
+    // 5d. Seed template BULANAN "Checklist Bulanan (Serviceable)" AAB — status kelayakan
+    // per aset per bulan. Sekali saja; edit koordinator tidak tertimpa.
+    const [[existMonthly]] = await conn.query("SELECT id FROM checklist_templates WHERE unit_id=? AND name='Checklist Bulanan (Serviceable)' LIMIT 1", [aab.id]);
+    if (!existMonthly) {
+      const [tplM] = await conn.query("INSERT INTO checklist_templates (unit_id, name, category, frequency) VALUES (?,?,NULL,'bulanan')", [aab.id, 'Checklist Bulanan (Serviceable)']);
+      const MITEMS = [
+        'Kondisi fisik & struktur baik (tidak ada kerusakan berarti)',
+        'Fungsi operasional normal sesuai peruntukan',
+        'Kelengkapan komponen & aksesori utuh',
+        'Kebersihan & perawatan rutin terpenuhi',
+        'Dokumen/log pemeliharaan terkini',
+      ];
+      for (let i = 0; i < MITEMS.length; i++) {
+        await conn.query('INSERT INTO checklist_template_items (template_id, label, category, sort_order) VALUES (?,?,NULL,?)', [tplM.insertId, MITEMS[i], i]);
+      }
+      console.log('  + seed checklist "Checklist Bulanan (Serviceable)" (AAB)');
     }
   }
 

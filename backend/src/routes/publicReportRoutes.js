@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { randName } from '../middleware/upload.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -21,7 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RDIR = path.join(__dirname, '..', '..', 'uploads', 'reports');
 fs.mkdirSync(RDIR, { recursive: true });
 const upload = multer({
-  storage: multer.diskStorage({ destination: (q, f, cb) => cb(null, RDIR), filename: (q, f, cb) => cb(null, `R${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(f.originalname).toLowerCase()}`) }),
+  storage: multer.diskStorage({ destination: (q, f, cb) => cb(null, RDIR), filename: (q, f, cb) => cb(null, randName('R', f.originalname)) }),
   limits: { fileSize: 25 * 1024 * 1024, files: 6 },
 });
 async function nextReportId(conn) {

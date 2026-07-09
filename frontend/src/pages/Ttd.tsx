@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { api } from '../api/client';
 import { alertDialog } from '../components/dialog';
 import { buildReportHtml, SECTIONS, type LaporanData, type LkpHead } from '../utils/laporanReport';
+import { buildAabReportHtml, type AabReportData } from '../utils/aabReport';
 
 const LKP_DEFAULT: LkpHead = {
   kantor: 'BANDAR UDARA A.P.T. PRANOTO - SAMARINDA', kota: 'Samarinda', bandara: 'Aji Pangeran Tumenggung Pranoto Samarinda',
@@ -18,7 +19,7 @@ interface Doc {
   kasi_status: string | null; kasi_signer_name: string | null; kasi_signer_nip: string | null; kasi_signed_at: string | null; kasi_sign_token: string | null; kasi_note: string | null;
   lampiran: Lampiran[];
 }
-interface Resp { valid: boolean; doc?: Doc; laporan?: LaporanData | null; lkp?: Partial<LkpHead>; kasi?: { nama: string; nip: string; jabatan: string }; header?: { kantor: string; koord_jabatan: string; nd_dari: string } }
+interface Resp { valid: boolean; doc?: Doc; laporan?: LaporanData | AabReportData | null; report_kind?: string; lkp?: Partial<LkpHead>; kasi?: { nama: string; nip: string; jabatan: string }; header?: { kantor: string; koord_jabatan: string; nd_dari: string } }
 
 const fmt = (s?: string | null) => {
   if (!s) return '-';
@@ -62,7 +63,9 @@ export default function Ttd() {
     const cover = { nomor: d.nomor, tanggal: d.tanggal, tujuan: d.tujuan, signer_name: d.signer_name, signer_nip: d.signer_nip, sign_token: d.sign_token, kasi_signer_name: d.kasi_signer_name, kasi_signer_nip: d.kasi_signer_nip, kasi_sign_token: d.kasi_sign_token };
     const qrOf = (tok?: string | null) => tok ? QRCode.toDataURL(`${location.origin}/verify-tte?token=${tok}`, { width: 130, margin: 1 }).catch(() => '') : Promise.resolve('');
     Promise.all([qrOf(d.sign_token), d.kasi_status === 'disetujui' ? qrOf(d.kasi_sign_token) : Promise.resolve('')]).then(([qr, kasiQr]) =>
-      setReportHtml(buildReportHtml(r.laporan!, cover, qr, lkp, new Set(SECTIONS.map((x) => x.key)), kasiQr)));
+      setReportHtml(r.report_kind === 'aab'
+        ? buildAabReportHtml(r.laporan as AabReportData, cover, qr, lkp, kasiQr)
+        : buildReportHtml(r.laporan as LaporanData, cover, qr, lkp, new Set(SECTIONS.map((x) => x.key)), kasiQr)));
   }, [r]);
 
   const doc = r?.doc;

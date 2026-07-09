@@ -154,11 +154,13 @@ export interface AssetMetricType {
 
 // ——— Fase 3: checklist, preventive maintenance, availability ———
 export interface ChecklistTemplateItem { id?: number; label: string; category?: string | null; sort_order?: number }
+export type ChecklistFrequency = 'harian' | 'bulanan';
 export interface ChecklistTemplate {
   id: number;
   unit_id: number | null;
   name: string;
   category: string | null;
+  frequency?: ChecklistFrequency;
   active: number;
   item_count?: number;
   items: ChecklistTemplateItem[];
@@ -169,8 +171,11 @@ export interface ChecklistRun {
   id: number;
   device_id: number;
   template_id: number | null;
+  frequency?: ChecklistFrequency;
   run_date: string;
+  period?: string | null;
   overall: 'baik' | 'perhatian' | 'rusak';
+  serviceable?: number | null;
   note: string | null;
   photo_url: string | null;
   done_by_name?: string | null;

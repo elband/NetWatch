@@ -563,10 +563,10 @@ function MetricTypesTab() {
 // ===================== CHECKLIST TEMPLATE (Fase 3) =====================
 // Template checklist inspeksi per unit — item satu per baris. Dipakai di halaman
 // Aset & Peralatan (tombol Checklist). Ter-scope unit di backend.
-interface ChecklistTpl { id: number; unit_id: number | null; name: string; category: string | null; active: number; items: { id?: number; label: string }[] }
+interface ChecklistTpl { id: number; unit_id: number | null; name: string; category: string | null; frequency?: 'harian' | 'bulanan'; active: number; items: { id?: number; label: string }[] }
 function ChecklistTemplatesTab() {
   const [items, setItems] = useState<ChecklistTpl[]>([]);
-  const empty = { name: '', category: '', itemsText: '' };
+  const empty = { name: '', category: '', frequency: 'harian', itemsText: '' };
   const [form, setForm] = useState<any>(empty);
   const [editId, setEditId] = useState<number | null>(null);
   const [err, setErr] = useState('');
@@ -578,7 +578,7 @@ function ChecklistTemplatesTab() {
     if (!form.name.trim()) { setErr('Nama template wajib diisi.'); return; }
     setErr('');
     const itemList = String(form.itemsText).split('\n').map((s: string) => s.trim()).filter(Boolean).map((label: string) => ({ label }));
-    const body = { name: form.name, category: form.category || null, items: itemList };
+    const body = { name: form.name, category: form.category || null, frequency: form.frequency || 'harian', items: itemList };
     try {
       if (editId) await api.put(`/aset/checklist-templates/${editId}`, body);
       else await api.post('/aset/checklist-templates', body);
@@ -589,13 +589,18 @@ function ChecklistTemplatesTab() {
     if (!(await confirmDialog({ title: 'Hapus template', message: `Template "${name}" akan dihapus.`, confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
     await api.delete(`/aset/checklist-templates/${id}`); load();
   }
-  function edit(t: ChecklistTpl) { setEditId(t.id); setForm({ name: t.name, category: t.category || '', itemsText: (t.items || []).map((i) => i.label).join('\n') }); }
+  function edit(t: ChecklistTpl) { setEditId(t.id); setForm({ name: t.name, category: t.category || '', frequency: t.frequency || 'harian', itemsText: (t.items || []).map((i) => i.label).join('\n') }); }
 
   return (
     <div>
       <div className="bg-surface border border-border rounded-lg p-3.5 mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
         <input className={inputCls} placeholder="Nama template * (mis. Inspeksi Harian Excavator)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <input className={inputCls} placeholder="Kategori/jenis alat (opsional, cocokkan ke aset)" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+        <label className="block"><span className="text-[10px] text-text2">Frekuensi</span>
+          <select className={inputCls} value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })}>
+            <option value="harian">Harian (Baik/Perhatian/Rusak)</option>
+            <option value="bulanan">Bulanan (Serviceable/Unserviceable)</option>
+          </select></label>
         <textarea className={`${inputCls} sm:col-span-2 min-h-[90px]`} placeholder={'Item checklist — satu per baris\nmis.\nLevel oli mesin\nTekanan ban\nRem'} value={form.itemsText} onChange={(e) => setForm({ ...form, itemsText: e.target.value })} />
         <div className="sm:col-span-2 flex gap-2">
           <button className={btnPrimary} onClick={save}>{editId ? '💾 Update' : '+ Tambah'}</button>
@@ -608,7 +613,7 @@ function ChecklistTemplatesTab() {
         {items.map((t) => (
           <div key={t.id} className="rounded-lg border border-border bg-surface2 p-3">
             <div className="flex items-start justify-between gap-2">
-              <div><div className="text-sm font-semibold">{t.name}</div>{t.category && <div className="text-[10px] text-text2">Jenis: {t.category}</div>}</div>
+              <div><div className="text-sm font-semibold">{t.name} <span className={`ml-1 text-[9px] px-1.5 py-0.5 rounded ${t.frequency === 'bulanan' ? 'bg-accent/15 text-accent' : 'bg-surface text-text2'}`}>{t.frequency === 'bulanan' ? '📅 Bulanan' : 'Harian'}</span></div>{t.category && <div className="text-[10px] text-text2">Jenis: {t.category}</div>}</div>
               <div className="flex gap-1"><button className={btnGhost} onClick={() => edit(t)}>✏️</button><button className={`${btnGhost} text-danger`} onClick={() => del(t.id, t.name)}>🗑️</button></div>
             </div>
             <div className="text-[11px] text-text2 mt-1.5">{(t.items || []).length} item: {(t.items || []).map((i) => i.label).join(', ') || '—'}</div>

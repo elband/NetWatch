@@ -33,14 +33,15 @@ export async function listTemplates(req, res) {
 }
 
 export async function createTemplate(req, res) {
-  const { name, category, items } = req.body;
+  const { name, category, frequency, items } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Nama template wajib diisi.' });
   const unitId = insertUnitId(req);
   if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
+  const freq = frequency === 'bulanan' ? 'bulanan' : 'harian';
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const [r] = await conn.query('INSERT INTO checklist_templates (unit_id, name, category) VALUES (?,?,?)', [unitId, name.trim(), category?.trim() || null]);
+    const [r] = await conn.query('INSERT INTO checklist_templates (unit_id, name, category, frequency) VALUES (?,?,?,?)', [unitId, name.trim(), category?.trim() || null, freq]);
     await insertItems(conn, r.insertId, items);
     await conn.commit();
     res.status(201).json({ id: r.insertId });
@@ -52,12 +53,13 @@ export async function updateTemplate(req, res) {
   const id = Number(req.params.id);
   const [[t]] = await pool.query('SELECT * FROM checklist_templates WHERE id = ?', [id]);
   if (!t || !rowInUnit(t, req.unitId)) return res.status(404).json({ error: 'Template tidak ditemukan' });
-  const { name, category, active, items } = req.body;
+  const { name, category, frequency, active, items } = req.body;
+  const freq = frequency === 'bulanan' ? 'bulanan' : (frequency === 'harian' ? 'harian' : t.frequency);
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    await conn.query('UPDATE checklist_templates SET name=COALESCE(?,name), category=?, active=? WHERE id=?',
-      [name?.trim() || null, category?.trim() || null, active == null ? t.active : (active ? 1 : 0), id]);
+    await conn.query('UPDATE checklist_templates SET name=COALESCE(?,name), category=?, frequency=?, active=? WHERE id=?',
+      [name?.trim() || null, category?.trim() || null, freq, active == null ? t.active : (active ? 1 : 0), id]);
     if (Array.isArray(items)) {
       await conn.query('DELETE FROM checklist_template_items WHERE template_id = ?', [id]);
       await insertItems(conn, id, items);
@@ -116,7 +118,17 @@ export async function assetChecklist(req, res) {
 export async function createRun(req, res) {
   const asset = await assetInUnit(Number(req.params.id), req.unitId);
   if (!asset) return res.status(404).json({ error: 'Aset tidak ditemukan' });
-  const overall = ['baik', 'perhatian', 'rusak'].includes(req.body.overall) ? req.body.overall : 'baik';
+  // Checklist bulanan (Serviceable/Unserviceable) vs harian (baik/perhatian/rusak).
+  const frequency = req.body.frequency === 'bulanan' ? 'bulanan' : 'harian';
+  let overall, serviceable = null, period = null;
+  if (frequency === 'bulanan') {
+    serviceable = String(req.body.serviceable) === '0' ? 0 : 1;   // default Serviceable
+    period = /^\d{4}-\d{2}$/.test(req.body.period || '') ? req.body.period : new Date().toISOString().slice(0, 7);
+    // Unserviceable → jalur "rusak" (set op_status + tawaran insiden); Serviceable → baik.
+    overall = serviceable ? 'baik' : 'rusak';
+  } else {
+    overall = ['baik', 'perhatian', 'rusak'].includes(req.body.overall) ? req.body.overall : 'baik';
+  }
   let items = req.body.items;
   if (typeof items === 'string') { try { items = JSON.parse(items); } catch { items = []; } }
   const note = req.body.note?.trim() || null;
@@ -125,9 +137,9 @@ export async function createRun(req, res) {
   try {
     await conn.beginTransaction();
     const [r] = await conn.query(
-      `INSERT INTO checklist_runs (device_id, unit_id, template_id, run_date, overall, note, photo_url, done_by)
-       VALUES (?,?,?,CURDATE(),?,?,?,?)`,
-      [asset.id, asset.unit_id, req.body.template_id ? Number(req.body.template_id) : null, overall, note, photoUrl, req.user.id]
+      `INSERT INTO checklist_runs (device_id, unit_id, template_id, frequency, run_date, period, overall, serviceable, note, photo_url, done_by)
+       VALUES (?,?,?,?,CURDATE(),?,?,?,?,?,?)`,
+      [asset.id, asset.unit_id, req.body.template_id ? Number(req.body.template_id) : null, frequency, period, overall, serviceable, note, photoUrl, req.user.id]
     );
     for (const it of (Array.isArray(items) ? items : [])) {
       if (!it?.label) continue;

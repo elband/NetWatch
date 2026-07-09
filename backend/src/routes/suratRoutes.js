@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import multer from 'multer';
+import { randName } from '../middleware/upload.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -9,11 +10,11 @@ import { env } from '../config/env.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 import { queueWaRaw } from '../jobs/waQueue.js';
-import { buildLaporanData } from './laporanRoutes.js';
+import { buildLaporanData, buildMonthlyReport } from './laporanRoutes.js';
 import { createNotification } from '../services/notify.js';
 import { renderDocPdf } from '../services/pdfRenderer.js';
 import { sendToSiKeren, isSiKerenConfigured } from '../services/siKerenService.js';
-import { effectiveLkp } from '../services/unitConfig.js';
+import { effectiveLkp, getUnitConfig, writeUnitConfig } from '../services/unitConfig.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -29,7 +30,7 @@ const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'applicat
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`),
+    filename: (req, file, cb) => cb(null, randName('doc', file.originalname)),
   }),
   limits: { fileSize: 10 * 1024 * 1024, files: 10 },
   fileFilter: (req, file, cb) => cb(null, ALLOWED.includes(file.mimetype)),
@@ -170,32 +171,58 @@ async function writeLkpRaw(lkp) {
   );
 }
 
-// Unggah gambar kop/letterhead → simpan URL ke settings.lkp.kop_url (dipakai saat generate dokumen).
+// Hapus berkas kop lama dari disk (hanya berkas milik /uploads/surat/).
+function unlinkKopFile(url) {
+  if (url && url.startsWith('/uploads/surat/')) {
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(url))); } catch { /* abaikan */ }
+  }
+}
+
+// Unggah gambar kop/letterhead. UNIT-AWARE (perbaikan isolasi antar-unit):
+// - unit dalam scope (koordinator, atau super admin memilih unit) → simpan ke
+//   units.config.kop_url unit tsb (TIDAK menimpa kop unit lain / global).
+// - super admin mode "Semua Unit" (unitId null) → kop global default (settings.lkp).
+// lkp efektif (global ditimpa unit) sudah dipakai saat generate dokumen.
 router.post('/kop', requireRole('koordinator', 'admin'), upload.single('kop'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Tidak ada gambar diunggah.' });
   if (!req.file.mimetype.startsWith('image/')) {
-    try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch { /* abaikan */ }
+    unlinkKopFile(`/uploads/surat/${req.file.filename}`);
     return res.status(400).json({ error: 'Kop harus berupa gambar (JPG/PNG/WebP/GIF).' });
   }
-  const lkp = await readLkpRaw();
-  // Hapus berkas kop lama bila ada (agar tidak menumpuk di disk).
-  if (lkp.kop_url && lkp.kop_url.startsWith('/uploads/surat/')) {
-    try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(lkp.kop_url))); } catch { /* abaikan */ }
+  const newUrl = `/uploads/surat/${req.file.filename}`;
+  if (req.unitId != null) {
+    const cfg = await getUnitConfig(req.unitId);
+    unlinkKopFile(cfg.kop_url);        // buang kop LAMA milik unit ini saja
+    cfg.kop_url = newUrl;
+    await writeUnitConfig(req.unitId, cfg);
+  } else {
+    const lkp = await readLkpRaw();
+    unlinkKopFile(lkp.kop_url);
+    lkp.kop_url = newUrl;
+    await writeLkpRaw(lkp);
   }
-  lkp.kop_url = `/uploads/surat/${req.file.filename}`;
-  await writeLkpRaw(lkp);
-  res.json({ ok: true, kop_url: lkp.kop_url, lkp });
+  // Kembalikan lkp EFEKTIF agar UI langsung menampilkan kop yang benar untuk unit ini.
+  const effective = await effectiveLkp(await readLkpRaw(), req.unitId);
+  res.json({ ok: true, kop_url: effective.kop_url, lkp: effective });
 });
 
-// Hapus kop yang tersimpan → kembali ke dokumen tanpa header.
+// Hapus kop tersimpan. Unit-aware: hanya menghapus kop milik scope-nya.
+// - unit dalam scope → hapus units.config.kop_url (fallback kembali ke kop global bila ada).
+// - super admin "Semua Unit" → hapus kop global.
 router.delete('/kop', requireRole('koordinator', 'admin'), async (req, res) => {
-  const lkp = await readLkpRaw();
-  if (lkp.kop_url && lkp.kop_url.startsWith('/uploads/surat/')) {
-    try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(lkp.kop_url))); } catch { /* abaikan */ }
+  if (req.unitId != null) {
+    const cfg = await getUnitConfig(req.unitId);
+    unlinkKopFile(cfg.kop_url);
+    delete cfg.kop_url;
+    await writeUnitConfig(req.unitId, cfg);
+  } else {
+    const lkp = await readLkpRaw();
+    unlinkKopFile(lkp.kop_url);
+    delete lkp.kop_url;
+    await writeLkpRaw(lkp);
   }
-  delete lkp.kop_url;
-  await writeLkpRaw(lkp);
-  res.json({ ok: true, lkp });
+  const effective = await effectiveLkp(await readLkpRaw(), req.unitId);
+  res.json({ ok: true, kop_url: effective.kop_url, lkp: effective });
 });
 
 // Hapus surat keluar (beserta lampiran & berkasnya).
@@ -371,9 +398,10 @@ export async function getTtdDoc(req, res) {
     const mm = /laporan bulanan.*?\b(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+(\d{4})/i.exec(s.hal || '');
     if (mm) rm = `${mm[2]}-${String(BLN.indexOf(mm[1].toLowerCase()) + 1).padStart(2, '0')}`;
   }
-  let laporan = null;
+  let laporan = null, reportKind = 'default';
   // Data laporan mengikuti unit pemilik surat (bukan scoping requester — akses token tetap publik).
-  if (rm) { try { laporan = await buildLaporanData(rm, s.unit_id ?? null); } catch { laporan = null; } }
+  // Builder dipilih per-unit: AAB → laporan AAB, selain itu → laporan ELB.
+  if (rm) { try { const rep = await buildMonthlyReport(rm, s.unit_id ?? null); laporan = rep.data; reportKind = rep.kind; } catch { laporan = null; } }
   res.json({
     valid: true,
     doc: {
@@ -383,7 +411,7 @@ export async function getTtdDoc(req, res) {
       kasi_signed_at: s.kasi_signed_at, kasi_sign_token: s.kasi_sign_token, kasi_note: s.kasi_note,
       report_month: s.report_month, lampiran: lamp,
     },
-    laporan,
+    laporan, report_kind: reportKind,
     kasi: { nama: lkp.kasie_nama || '', nip: lkp.kasie_nip || '', jabatan: lkp.kasie_jabatan || 'Kepala Seksi Teknik dan Operasi' },
     header: { kantor: lkp.kantor || '', koord_jabatan: lkp.koord_jabatan || 'Koordinator Unit Elektronika Bandara', nd_dari: lkp.nd_dari || '' },
     lkp: {

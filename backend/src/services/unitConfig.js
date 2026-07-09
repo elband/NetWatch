@@ -13,6 +13,11 @@ export async function getUnitConfig(unitId) {
   try { return typeof row.config === 'string' ? JSON.parse(row.config) : row.config; } catch { return {}; }
 }
 
+// Tulis kembali units.config (JSON) untuk satu unit.
+export async function writeUnitConfig(unitId, config) {
+  await pool.query('UPDATE units SET config = ? WHERE id = ?', [JSON.stringify(config), unitId]);
+}
+
 // Gabung: hanya field per-unit yang diisi (non-kosong) yang menimpa global.
 export function mergeUnitLkp(globalLkp, unitConfig) {
   const out = { ...(globalLkp || {}) };

@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { api } from '../api/client';
 import type { Surat, Incident } from '../types';
 import type { LaporanData } from '../utils/laporanReport';
+import type { AabReportData } from '../utils/aabReport';
 import { buildDocHtml, LKP_DEFAULT } from '../utils/docTemplates';
 
 declare global {
@@ -38,12 +39,13 @@ export default function DocPrint() {
 
         const lkp = { ...LKP_DEFAULT, ...(data.lkp || {}) };
         const incident = (data.incident as Incident | null) ?? null;
-        const laporan = (data.laporan as LaporanData | null) ?? null;
+        const laporan = (data.laporan as LaporanData | AabReportData | null) ?? null;
         const html = await buildDocHtml(data.surat as Surat, {
           lkp,
           origin: window.location.origin,
           fetchIncident: async () => incident,
           fetchLaporan: async () => laporan,
+          reportKind: data.report_kind,
         });
 
         // Ganti seluruh dokumen dengan HTML siap-cetak.

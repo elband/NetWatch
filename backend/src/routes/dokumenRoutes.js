@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { randName } from '../middleware/upload.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -29,7 +30,7 @@ const DOC_MIME_OK = new Set([
   'application/zip', 'application/x-zip-compressed', 'application/octet-stream',
 ]);
 const upload = multer({
-  storage: multer.diskStorage({ destination: (q, f, cb) => cb(null, DIR), filename: (q, f, cb) => cb(null, `D${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(f.originalname).toLowerCase()}`) }),
+  storage: multer.diskStorage({ destination: (q, f, cb) => cb(null, DIR), filename: (q, f, cb) => cb(null, randName('D', f.originalname)) }),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (q, f, cb) => (DOC_MIME_OK.has(f.mimetype) ? cb(null, true) : cb(new Error('Tipe file tidak diizinkan (hanya PDF, gambar, Office, teks, atau zip).'))),
 });

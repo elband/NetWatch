@@ -28,11 +28,16 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
   const [tplId, setTplId] = useState<number | null>(null);
   const [items, setItems] = useState<ItemState[]>([]);
   const [overall, setOverall] = useState<'baik' | 'perhatian' | 'rusak'>('baik');
+  const [serviceable, setServiceable] = useState(true);
+  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const [note, setNote] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const [createIncident, setCreateIncident] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const selectedTpl = templates.find((t) => t.id === tplId);
+  const isMonthly = selectedTpl?.frequency === 'bulanan';
 
   const load = useCallback(() => {
     api.get(`/aset/${asset.id}/checklist`).then((r) => {
@@ -50,6 +55,7 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
   function pickTemplate(t: ChecklistTemplate) {
     setTplId(t.id);
     setItems((t.items || []).map((i) => ({ label: i.label, category: i.category || null, result: 'ok', note: '' })));
+    setOverall('baik'); setServiceable(true);
   }
   function setItem(idx: number, patch: Partial<ItemState>) {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
@@ -60,13 +66,20 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
     try {
       const fd = new FormData();
       if (tplId) fd.append('template_id', String(tplId));
-      fd.append('overall', overall);
+      if (isMonthly) {
+        fd.append('frequency', 'bulanan');
+        fd.append('serviceable', serviceable ? '1' : '0');
+        fd.append('period', period);
+        if (!serviceable && createIncident) fd.append('create_incident', '1');
+      } else {
+        fd.append('overall', overall);
+        if (overall === 'rusak' && createIncident) fd.append('create_incident', '1');
+      }
       if (note.trim()) fd.append('note', note.trim());
       fd.append('items', JSON.stringify(items));
-      if (overall === 'rusak' && createIncident) fd.append('create_incident', '1');
       if (photo) fd.append('photo', photo);
       const r = await api.post(`/aset/${asset.id}/checklist`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setNote(''); setPhoto(null); setOverall('baik');
+      setNote(''); setPhoto(null); setOverall('baik'); setServiceable(true);
       const t = templates.find((x) => x.id === tplId); if (t) pickTemplate(t);
       load(); onSaved?.();
       setError(r.data.incidentId ? `✅ Tersimpan. Insiden ${r.data.incidentId} dibuat.` : '✅ Checklist tersimpan.');
@@ -95,7 +108,7 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
                 {templates.map((t) => (
                   <button key={t.id} onClick={() => pickTemplate(t)}
                     className={`px-3 py-1 rounded-md text-[11px] border ${tplId === t.id ? 'bg-accent text-bg border-accent font-semibold' : 'bg-surface2 text-text2 border-border'}`}>
-                    {t.name}
+                    {t.name}{t.frequency === 'bulanan' && <span className="ml-1 opacity-70">📅 Bulanan</span>}
                   </button>
                 ))}
               </div>
@@ -130,15 +143,29 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border-t border-border pt-3">
-                <label className="block"><span className="text-[10px] text-text2">Hasil keseluruhan</span>
-                  <select className={inp} value={overall} onChange={(e) => setOverall(e.target.value as 'baik' | 'perhatian' | 'rusak')}>
-                    {Object.entries(OVERALL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                  </select></label>
+                {isMonthly ? (
+                  <>
+                    <label className="block"><span className="text-[10px] text-text2">Status kelayakan</span>
+                      <div className="flex gap-1 mt-0.5">
+                        <button type="button" onClick={() => setServiceable(true)}
+                          className={`flex-1 px-2 py-1.5 rounded-md text-[11px] border ${serviceable ? 'bg-success/15 border-success text-success font-semibold' : 'bg-surface2 border-border text-text2'}`}>✅ Serviceable</button>
+                        <button type="button" onClick={() => setServiceable(false)}
+                          className={`flex-1 px-2 py-1.5 rounded-md text-[11px] border ${!serviceable ? 'bg-danger/15 border-danger text-danger font-semibold' : 'bg-surface2 border-border text-text2'}`}>⛔ Unserviceable</button>
+                      </div></label>
+                    <label className="block"><span className="text-[10px] text-text2">Periode (bulan)</span>
+                      <input type="month" className={inp} value={period} onChange={(e) => setPeriod(e.target.value)} /></label>
+                  </>
+                ) : (
+                  <label className="block"><span className="text-[10px] text-text2">Hasil keseluruhan</span>
+                    <select className={inp} value={overall} onChange={(e) => setOverall(e.target.value as 'baik' | 'perhatian' | 'rusak')}>
+                      {Object.entries(OVERALL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    </select></label>
+                )}
                 <label className="block"><span className="text-[10px] text-text2">Foto bukti (opsional)</span>
                   <input type="file" accept="image/*" capture="environment" className="block w-full text-[11px] text-text2 file:mr-2 file:rounded file:border-0 file:bg-surface2 file:px-2 file:py-1 file:text-text2" onChange={(e) => setPhoto(e.target.files?.[0] || null)} /></label>
                 <label className="block sm:col-span-2"><span className="text-[10px] text-text2">Catatan</span>
                   <input className={inp} placeholder="Catatan inspeksi (opsional)" value={note} onChange={(e) => setNote(e.target.value)} /></label>
-                {overall === 'rusak' && (
+                {((isMonthly && !serviceable) || (!isMonthly && overall === 'rusak')) && (
                   <label className="flex items-center gap-2 text-[11px] text-warn sm:col-span-2">
                     <input type="checkbox" checked={createIncident} onChange={(e) => setCreateIncident(e.target.checked)} />
                     Set status aset “Rusak” &amp; buat tiket insiden otomatis
@@ -155,8 +182,10 @@ export default function ChecklistModal({ asset, onClose, onSaved }: { asset: Phy
                     {runs.map((run) => (
                       <div key={run.id} className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px]">
                         <div className="flex items-center justify-between">
-                          <span>{new Date(run.created_at).toLocaleString('id-ID')} · {run.done_by_name || '—'}</span>
-                          <span>{OVERALL[run.overall]}</span>
+                          <span>{run.frequency === 'bulanan' && run.period ? `📅 ${run.period}` : new Date(run.created_at).toLocaleString('id-ID')} · {run.done_by_name || '—'}</span>
+                          <span>{run.frequency === 'bulanan'
+                            ? (run.serviceable ? '✅ Serviceable' : '⛔ Unserviceable')
+                            : OVERALL[run.overall]}</span>
                         </div>
                         {run.items.some((i) => i.result === 'tidak') && (
                           <div className="text-danger mt-1">⚠ {run.items.filter((i) => i.result === 'tidak').map((i) => i.label).join(', ')}</div>

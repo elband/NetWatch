@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { randName } from '../middleware/upload.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -28,7 +29,7 @@ fs.mkdirSync(ASSET_DIR, { recursive: true });
 const readingPhoto = multer({
   storage: multer.diskStorage({
     destination: (q, f, cb) => cb(null, ASSET_DIR),
-    filename: (q, f, cb) => cb(null, `AR${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(f.originalname).toLowerCase() || '.jpg'}`),
+    filename: (q, f, cb) => cb(null, randName('AR', f.originalname, '.jpg')),
   }),
   fileFilter: (q, f, cb) => (/^image\/(jpe?g|png|webp|gif)$/.test(f.mimetype) ? cb(null, true) : cb(new Error('Foto harus gambar (JPG/PNG/WebP/GIF).'))),
   limits: { fileSize: 8 * 1024 * 1024 },
