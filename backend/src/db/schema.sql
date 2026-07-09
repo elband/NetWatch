@@ -748,7 +748,8 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance_photos (
   FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- Catatan menghidupkan/mematikan peralatan harian (1x per perangkat per state per hari).
+-- Catatan menghidupkan/mematikan peralatan — LOG (append-only, bukan upsert): tiap aksi
+-- Hidup / Mati adalah baris tersendiri, boleh berkali-kali sehari & tidak saling menimpa.
 -- Kedua aksi (on/off) wajib foto dokumentasi + verifikasi anti-foto-palsu (waktu tangkap & GPS).
 CREATE TABLE IF NOT EXISTS equipment_poweron (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -765,7 +766,7 @@ CREATE TABLE IF NOT EXISTS equipment_poweron (
   done_by_name VARCHAR(120) DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_poweron (device_id, on_date, state),
+  INDEX idx_poweron (device_id, on_date, state),
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
   FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;

@@ -251,6 +251,25 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
 }
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+// Tanggal singkat "05 Jul" dari kolom DATE (bisa string/ISO). '' bila kosong/invalid.
+const fmtDay = (s?: string | null) => { if (!s) return ''; const d = new Date(String(s).slice(0, 10) + 'T00:00:00'); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }); };
+
+// Chip bukti Hidup/Mati terakhir pada kartu peralatan: ikon status + 📷 (✅ terverifikasi /
+// ⚠️ belum) yang membuka foto dokumentasi. Tooltip memuat tanggal, pelaksana & jarak.
+function PowerProof({ rec, kind }: { rec?: PowerOn | null; kind: 'on' | 'off' }) {
+  if (!rec?.photo_url) return null;
+  const icon = kind === 'on' ? '⚡' : '⏻';
+  const word = kind === 'on' ? 'dihidupkan' : 'dimatikan';
+  const when = fmtDay(rec.on_date);
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); openImage(rec.photo_url!); }}
+      title={`Bukti ${word}${when ? ' ' + when : ''} oleh ${rec.done_by_name || '-'}${rec.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${rec.distance_m != null ? ' · ' + rec.distance_m + ' m' : ''}`}
+      className="leading-none whitespace-nowrap"
+    >{icon}📷{rec.verified ? '✅' : '⚠️'}</button>
+  );
+}
 
 export default function EquipmentPerf() {
   const { user } = useAuth();
@@ -416,18 +435,17 @@ function InspeksiTab() {
                 // sering dimatikan di akhir hari). Koord/admin tercakup dalam `attended`.
                 const canMatikan = attended && isToday;
                 const isOn = d.monitor_enabled !== 0;
-                const bukti = isOn ? d.poweron : d.poweroff; // bukti sesuai state terkini
                 return (
                   <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between text-[10px]">
-                      <span className={isOn ? 'text-success' : 'text-text2'}>
+                    <div className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className={`truncate ${isOn ? 'text-success' : 'text-text2'}`}>
                         {isOn ? '🟢 Monitoring aktif' : '⚫ Dimatikan · monitoring dijeda'}
                       </span>
-                      {bukti?.photo_url && (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); openImage(bukti.photo_url!); }}
-                          title={`Bukti ${isOn ? 'dihidupkan' : 'dimatikan'} oleh ${bukti.done_by_name || '-'}${bukti.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${bukti.distance_m != null ? ' · ' + bukti.distance_m + ' m' : ''}`}
-                          className="leading-none">📷{bukti.verified ? '✅' : '⚠️'}</button>
-                      )}
+                      {/* Bukti Hidup & Mati terakhir (lintas tanggal) — keduanya tampil bila ada. */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <PowerProof rec={d.poweron} kind="on" />
+                        <PowerProof rec={d.poweroff} kind="off" />
+                      </div>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button
@@ -586,8 +604,9 @@ function GeoTagStatus({ cap }: { cap: ReturnType<typeof usePhotoCapture> }) {
 }
 
 // ===================== MENGHIDUPKAN PERALATAN =====================
-// Catat "peralatan dihidupkan" untuk hari ini (1× per perangkat), wajib foto dokumentasi
-// dengan verifikasi EXIF/GPS yang sama seperti inspeksi. Notifikasi otomatis ke koordinator.
+// Catat "peralatan dihidupkan" — LOG append-only: tiap penyimpanan = entri baru (boleh
+// berkali-kali sehari, tidak menimpa catatan sebelumnya). Wajib foto dokumentasi dengan
+// verifikasi EXIF/GPS yang sama seperti inspeksi. Notifikasi otomatis ke koordinator.
 function PowerOnModal({ dev, radiusM, existing, onClose, onSaved }: { dev: EquipmentRow; radiusM: number; existing?: PowerOn; onClose: () => void; onSaved: () => void }) {
   const [note, setNote] = useState(existing?.note || '');
   const [busy, setBusy] = useState(false);
@@ -638,7 +657,7 @@ function PowerOnModal({ dev, radiusM, existing, onClose, onSaved }: { dev: Equip
       <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-1">⚡ Hidupkan Peralatan</h3>
         <p className="text-[11px] text-text2 mb-4">{dev.name} · {dev.type} · {dev.ip}</p>
-        {existing && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mb-3">Sudah tercatat dihidupkan hari ini oleh {existing.done_by_name || '-'}. Mengunggah foto baru akan memperbarui catatan.</div>}
+        {existing && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mb-3">Terakhir dihidupkan {fmtDay(existing.on_date) || 'sebelumnya'} oleh {existing.done_by_name || '-'}. Menyimpan akan menambah catatan <b>Hidup</b> baru (tidak menimpa yang lama).</div>}
         <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span> <span className="text-text2">(wajib dari kamera)</span></label>
         <CameraCapture onCapture={(f) => cap.pick(f)} hasPhoto={!!cap.file} device={dev} radiusM={radiusM} />
         <GeoTagStatus cap={cap} />
@@ -708,7 +727,7 @@ function PowerOffModal({ dev, radiusM, existing, onClose, onSaved }: { dev: Equi
         <h3 className="text-sm font-bold mb-1">⏻ Matikan Peralatan</h3>
         <p className="text-[11px] text-text2 mb-3">{dev.name} · {dev.type} · {dev.ip}</p>
         <div className="bg-warn/10 border border-warn/30 rounded-md px-3 py-2 text-[11px] text-warn mb-3">Perangkat ditandai "dimatikan": status offline tanpa alarm, monitoring otomatis (ping/insiden) dijeda sampai dihidupkan kembali.</div>
-        {existing && <div className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px] text-text2 mb-3">Sudah tercatat dimatikan hari ini oleh {existing.done_by_name || '-'}. Mengunggah foto baru akan memperbarui catatan.</div>}
+        {existing && <div className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px] text-text2 mb-3">Terakhir dimatikan {fmtDay(existing.on_date) || 'sebelumnya'} oleh {existing.done_by_name || '-'}. Menyimpan akan menambah catatan <b>Mati</b> baru (tidak menimpa yang lama).</div>}
         <label className="block text-[11px] text-text2 mb-1">Foto dokumentasi <span className="text-danger">*</span> <span className="text-text2">(wajib dari kamera)</span></label>
         <CameraCapture onCapture={(f) => cap.pick(f)} hasPhoto={!!cap.file} device={dev} radiusM={radiusM} />
         <GeoTagStatus cap={cap} />

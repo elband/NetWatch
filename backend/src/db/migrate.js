@@ -118,11 +118,12 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'device_metrics', 'in_maint', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER mem');
   // Dokumentasi (foto/PDF) untuk rencana/pelaksanaan maintenance.
   await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'doc_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
-  // equipment_poweron: dukung state on/off (dokumentasi wajib untuk keduanya). Kolom + unique key.
+  // equipment_poweron: dukung state on/off (dokumentasi wajib untuk keduanya).
   await addColumnIfMissing(conn, env.db.database, 'equipment_poweron', 'state', "ENUM('on','off') NOT NULL DEFAULT 'on' AFTER on_date");
   // Foto hidupkan/matikan mencurigakan (di luar radius/tanpa GPS) yang tetap disimpan → penalti performa 20%.
   await addColumnIfMissing(conn, env.db.database, 'equipment_poweron', 'flagged', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER distance_m');
-  await ensurePoweronUnique(conn, env.db.database);
+  // Log append-only: buang UNIQUE lama agar Hidup & Mati tak saling menimpa (boleh berkali-kali/hari).
+  await ensurePoweronAppendOnly(conn, env.db.database);
   // Jendela maintenance: penyelesaian pekerjaan (status selesai + dokumentasi foto).
   await addColumnIfMissing(conn, env.db.database, 'maintenance_windows', 'status', "ENUM('terjadwal','selesai') NOT NULL DEFAULT 'terjadwal' AFTER ends_at");
   await addColumnIfMissing(conn, env.db.database, 'maintenance_windows', 'done_note', 'VARCHAR(255) DEFAULT NULL AFTER status');
@@ -652,23 +653,31 @@ async function addUniqueIndexIfMissing(conn, dbName, table, indexName, colsExpr)
   }
 }
 
-// Pastikan unique key equipment_poweron mencakup kolom `state` (device_id, on_date, state)
-// agar catatan on & off bisa berdampingan di hari yang sama. Untuk DB lama yang masih
-// memakai unique (device_id, on_date), index diganti; DB baru (dari schema.sql) dilewati.
-async function ensurePoweronUnique(conn, dbName) {
-  try {
-    const [cols] = await conn.query(
-      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS
-        WHERE TABLE_SCHEMA=? AND TABLE_NAME='equipment_poweron' AND INDEX_NAME='uniq_poweron'
-        ORDER BY SEQ_IN_INDEX`, [dbName]
+// equipment_poweron kini LOG append-only: tiap Hidup/Mati baris tersendiri (boleh berkali-kali
+// sehari, tidak saling menimpa). DB lama memakai UNIQUE KEY uniq_poweron (yang membatasi 1 baris
+// per state/hari & menyebabkan on/off saling menimpa) — buang unique-nya, ganti index biasa.
+async function ensurePoweronAppendOnly(conn, dbName) {
+  const hasIndex = async (name) => {
+    const [[r]] = await conn.query(
+      `SELECT COUNT(*) AS c FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA=? AND TABLE_NAME='equipment_poweron' AND INDEX_NAME=?`, [dbName, name]
     );
-    if (cols.length && !cols.some((c) => c.COLUMN_NAME === 'state')) {
+    return r.c > 0;
+  };
+  try {
+    // Tambah idx_poweron DULU: karena uniq_poweron diawali device_id, ia menjadi index FK
+    // device_id — MySQL menolak DROP-nya sampai ada index pengganti (idx_poweron juga
+    // diawali device_id sehingga bisa mengambil alih peran FK). Barulah drop uniq_poweron.
+    if (!(await hasIndex('idx_poweron'))) {
+      await conn.query('ALTER TABLE equipment_poweron ADD INDEX idx_poweron (device_id, on_date, state)');
+      console.log('  + equipment_poweron.idx_poweron');
+    }
+    if (await hasIndex('uniq_poweron')) {
       await conn.query('ALTER TABLE equipment_poweron DROP INDEX uniq_poweron');
-      await conn.query('ALTER TABLE equipment_poweron ADD UNIQUE KEY uniq_poweron (device_id, on_date, state)');
-      console.log('  ~ equipment_poweron.uniq_poweron → sertakan state');
+      console.log('  ~ equipment_poweron.uniq_poweron dibuang → log append-only (on/off tak saling menimpa)');
     }
   } catch (e) {
-    console.warn(`  ! lewati fix uniq_poweron: ${e.message}`);
+    console.warn(`  ! lewati fix equipment_poweron append-only: ${e.message}`);
   }
 }
 

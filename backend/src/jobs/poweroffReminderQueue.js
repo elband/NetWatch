@@ -8,8 +8,8 @@ import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 const inUnit = (rowUnit, userUnit) => rowUnit == null || userUnit == null || Number(rowUnit) === Number(userUnit);
 
 // Pengingat WA sore hari: peralatan yang tercatat DIHIDUPKAN hari ini tapi belum ada
-// catatan "dimatikan" → ingatkan teknisi on-duty & koordinator agar catat power-off
-// selagi masih dinas (agar logbook peralatan lengkap: setiap hidup punya pasangan mati).
+// catatan "dimatikan" → kirim HANYA ke KOORDINATOR (pengawas) agar dipastikan dicatat
+// power-off (logbook lengkap: tiap hidup punya pasangan mati). Teknisi tidak dikirimi.
 export const poweroffReminderQueue = new Queue('poweroff-reminder', { connection: redisConnection });
 
 export async function schedulePoweroffReminder() {
@@ -30,16 +30,18 @@ export async function schedulePoweroffReminder() {
 
 // Perangkat yang HARI INI dihidupkan tapi belum dimatikan (tidak termasuk yang
 // ditandai selalu aktif 24 jam). Kembalikan baris {id, name, loc, unit_id}.
+// Log append-only: bisa ada beberapa siklus on/off sehari — yang menentukan status
+// terkini adalah entri power TERBARU hari ini. Ingatkan bila state terakhir = 'on'.
 export async function pendingPoweroffDevices() {
   const [rows] = await pool.query(
     `SELECT d.id, d.name, d.loc, d.unit_id
        FROM devices d
-       JOIN equipment_poweron ep ON ep.device_id = d.id AND ep.on_date = CURDATE() AND ep.state = 'on'
       WHERE d.always_on = 0
-        AND NOT EXISTS (
-          SELECT 1 FROM equipment_poweron eo
-           WHERE eo.device_id = d.id AND eo.on_date = CURDATE() AND eo.state = 'off'
-        )
+        AND (
+          SELECT ep.state FROM equipment_poweron ep
+           WHERE ep.device_id = d.id AND ep.on_date = CURDATE()
+           ORDER BY ep.created_at DESC, ep.id DESC LIMIT 1
+        ) = 'on'
       ORDER BY d.name ASC`
   );
   return rows;
@@ -48,19 +50,9 @@ export async function pendingPoweroffDevices() {
 // Dipanggil worker (dan bisa manual/test) — query + kirim WA.
 export async function sendPoweroffReminders() {
   const pending = await pendingPoweroffDevices();
-  if (pending.length === 0) return { sent: 0, devices: 0, technicians: 0, coordinators: 0 };
+  if (pending.length === 0) return { sent: 0, devices: 0, coordinators: 0 };
 
-  // Teknisi yang dinas hari ini (bisa mencatat power-off selagi on-duty).
-  const [techs] = await pool.query(
-    `SELECT u.id, u.unit_id
-       FROM users u
-       JOIN shifts s ON s.user_id = u.id
-      WHERE s.shift_date = CURDATE()
-        AND s.shift_type IN ('pagi', 'siang', 'malam')
-        AND (u.role = 'teknisi' OR JSON_CONTAINS(u.roles, '"teknisi"'))
-        AND u.phone IS NOT NULL AND u.phone <> ''`
-  );
-  // Koordinator per unit (boleh mencatat power-off kapan pun; sebagai pengawas).
+  // HANYA koordinator (pengawas) per unit yang menerima pengingat — teknisi tidak dikirimi.
   const [coords] = await pool.query(
     `SELECT id, unit_id FROM users
       WHERE (role = 'koordinator' OR JSON_CONTAINS(roles, '"koordinator"'))
@@ -71,8 +63,8 @@ export async function sendPoweroffReminders() {
     `Pengingat: Catat Mematikan Peralatan\n\n` +
     `Peralatan berikut tercatat DIHIDUPKAN hari ini tapi belum ada catatan "dimatikan":\n` +
     rows.map((d) => `- ${d.name}${d.loc ? ` (${d.loc})` : ''}`).join('\n') +
-    `\n\nJika dimatikan di akhir dinas, catat lewat menu Peralatan → tombol Matikan (wajib foto) selagi masih on-duty. ` +
-    `Bila peralatan memang beroperasi 24 jam, minta admin menandainya "Selalu aktif". Terima kasih.`;
+    `\n\nMohon pastikan teknisi mencatat mematikan lewat menu Peralatan → tombol Matikan (wajib foto), atau catat sendiri sebagai pengawas. ` +
+    `Bila peralatan memang beroperasi 24 jam, tandai "Selalu aktif" di Master Data. Terima kasih.`;
 
   let sent = 0;
   const notify = async (userId, rows) => {
@@ -82,10 +74,9 @@ export async function sendPoweroffReminders() {
     catch (err) { logger.error({ err: err?.message, userId }, '[poweroffReminder] gagal queue WA'); }
   };
 
-  for (const t of techs) await notify(t.id, pending.filter((d) => inUnit(d.unit_id, t.unit_id)));
   for (const c of coords) await notify(c.id, pending.filter((d) => inUnit(d.unit_id, c.unit_id)));
 
-  return { sent, devices: pending.length, technicians: techs.length, coordinators: coords.length };
+  return { sent, devices: pending.length, coordinators: coords.length };
 }
 
 export function startPoweroffReminderWorker() {

@@ -162,7 +162,14 @@ router.get('/inspections', async (req, res) => {
   const [insp] = await pool.query('SELECT * FROM equipment_inspections WHERE inspect_date = ?', [date]);
   const byDevice = {};
   for (const r of insp) (byDevice[r.device_id] ||= {})[r.slot] = r;
-  const [pons] = await pool.query('SELECT * FROM equipment_poweron WHERE on_date = ?', [date]);
+  // Bukti Hidup/Mati di kartu = catatan power TERBARU tiap state, LINTAS TANGGAL (bukan hanya
+  // tanggal terpilih). Status on/off perangkat berlaku "saat ini", jadi buktinya jangan ikut
+  // hilang hanya karena berganti hari. Ambil baris dgn id terbesar per (device, state).
+  const [pons] = await pool.query(
+    `SELECT ep.* FROM equipment_poweron ep
+       JOIN (SELECT device_id, state, MAX(id) AS mid FROM equipment_poweron GROUP BY device_id, state) t
+         ON t.mid = ep.id`
+  );
   const ponByDevice = {};
   for (const r of pons) (ponByDevice[r.device_id] ||= {})[r.state] = r;
   const list = devices.map((d) => ({
@@ -313,11 +320,8 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   const radiusM = await getInspectRadius();
   const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt, radiusM);
 
-  // Tolak bila foto identik sudah pernah dipakai pada catatan menghidupkan lain.
-  const [dups] = await pool.query(
-    'SELECT id FROM equipment_poweron WHERE photo_hash = ? AND NOT (device_id = ? AND on_date = ?) LIMIT 1',
-    [hash, deviceId, date]
-  );
+  // Log append-only → setiap foto harus baru: tolak bila foto identik sudah pernah dipakai.
+  const [dups] = await pool.query('SELECT id FROM equipment_poweron WHERE photo_hash = ? LIMIT 1', [hash]);
   if (dups.length) return res.status(409).json({ error: 'Foto ini sudah pernah dipakai. Gunakan foto baru hasil saat ini.' });
 
   if (STRICT_VERIFY && !verified) {
@@ -337,11 +341,10 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
-  await pool.query(
+  // Append entri baru (tidak menimpa catatan Hidup/Mati sebelumnya di hari yang sama).
+  const [ins] = await pool.query(
     `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
-     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
-       verified=VALUES(verified), distance_m=VALUES(distance_m), flagged=VALUES(flagged), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
+     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
   );
 
@@ -368,7 +371,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
     }
   }
 
-  const [rows] = await pool.query("SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=? AND state='on'", [deviceId, date]);
+  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE id=?', [ins.insertId]);
   res.json({ poweron: rows[0], device: updatedDev, verified, distance, warning, flagged });
 });
 
@@ -397,11 +400,8 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const radiusM = await getInspectRadius();
   const { hash, verified, distance, warning } = await verifyPhoto(req.file.buffer, device, req.body.lat, req.body.lng, req.body.capturedAt, radiusM);
 
-  // Tolak bila foto identik sudah pernah dipakai pada catatan on/off lain.
-  const [dups] = await pool.query(
-    "SELECT id FROM equipment_poweron WHERE photo_hash = ? AND NOT (device_id = ? AND on_date = ? AND state='off') LIMIT 1",
-    [hash, deviceId, date]
-  );
+  // Log append-only → setiap foto harus baru: tolak bila foto identik sudah pernah dipakai.
+  const [dups] = await pool.query('SELECT id FROM equipment_poweron WHERE photo_hash = ? LIMIT 1', [hash]);
   if (dups.length) return res.status(409).json({ error: 'Foto ini sudah pernah dipakai. Gunakan foto baru hasil saat ini.' });
 
   if (STRICT_VERIFY && !verified) {
@@ -421,11 +421,10 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
-  await pool.query(
+  // Append entri baru (tidak menimpa catatan Hidup/Mati sebelumnya di hari yang sama).
+  const [ins] = await pool.query(
     `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
-     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE note=VALUES(note), photo_url=VALUES(photo_url), photo_hash=VALUES(photo_hash),
-       verified=VALUES(verified), distance_m=VALUES(distance_m), flagged=VALUES(flagged), done_by=VALUES(done_by), done_by_name=VALUES(done_by_name), unit_id=VALUES(unit_id)`,
+     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
   );
 
@@ -450,7 +449,7 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
     }
   }
 
-  const [rows] = await pool.query("SELECT * FROM equipment_poweron WHERE device_id=? AND on_date=? AND state='off'", [deviceId, date]);
+  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE id=?', [ins.insertId]);
   res.json({ poweroff: rows[0], device: updatedDev, verified, distance, warning, flagged });
 });
 
