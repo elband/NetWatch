@@ -12,6 +12,7 @@ import { schedulePingSweep, startPingWorker } from './jobs/pingQueue.js';
 import { startWaWorker } from './jobs/waWorker.js';
 import { purgeOldWaLogs } from './jobs/waQueue.js';
 import { scheduleMaintenanceReminder, startMaintenanceReminderWorker } from './jobs/maintenanceReminderQueue.js';
+import { schedulePoweroffReminder, startPoweroffReminderWorker } from './jobs/poweroffReminderQueue.js';
 import { scheduleMetricsMaintenance, startMetricsWorker, runMetricsMaintenance } from './jobs/metricsQueue.js';
 import { initTimezoneFromSettings } from './services/timezone.js';
 import { loadShiftWindows } from './config/shifts.js';
@@ -61,12 +62,15 @@ if (isPrimary) {
   startPingWorker(io);
   startWaWorker(io);
   startMaintenanceReminderWorker();
+  startPoweroffReminderWorker();
   startMetricsWorker();
   startCoordWatcher(io);
   startUplinkSpeed(); // sampel SNMP kecepatan internet perangkat uplink (Mikrotik)
   await schedulePingSweep();
   // Pengingat WA harian (08:00) ke teknisi dinas ttg maintenance peralatan terjadwal.
   await scheduleMaintenanceReminder();
+  // Pengingat WA sore (19:00): peralatan yang dihidupkan hari ini tapi belum dimatikan.
+  await schedulePoweroffReminder();
   // Rollup uptime harian + retensi metrik mentah (00:10) + sekali saat start.
   await scheduleMetricsMaintenance();
   runMetricsMaintenance().then((r) => logger.info(r, '[metrics] maintenance awal')).catch(() => {});
