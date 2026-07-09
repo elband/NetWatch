@@ -3,7 +3,7 @@ import { pool } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { createNotification, notifyRoles } from '../services/notify.js';
-import { getOnDutyTechIds, getDutyStatus } from '../config/shifts.js';
+import { getOnDutyTechIds, getOnDutyCheckedInTechIds, getDutyStatus } from '../config/shifts.js';
 import { remindOnDutyTechs } from '../services/coordWatcher.js';
 import { isNotifyEnabledForUser, notifyKasiIfEnabled } from '../services/notifyPrefs.js';
 import { nextIncidentId } from '../utils/incidentId.js';
@@ -102,7 +102,9 @@ export async function notifyAutoResolved(conn, incident, info = {}) {
 // Snapshot teknisi on-duty saat insiden masuk + kirim notifikasi ke mereka.
 // Mengembalikan jumlah teknisi yang diberi notifikasi.
 export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue, coordId = null }) {
-  let onDutyIds = await getOnDutyTechIds(conn);
+  // Aturan: hanya teknisi yang SUDAH ABSEN MASUK hari ini yang di-snapshot & dinotifikasi.
+  // Bila belum ada yang absen → daftar kosong; koordinator tetap dinotifikasi (fallback) di bawah.
+  let onDutyIds = await getOnDutyCheckedInTechIds(conn);
   // Multi-unit: hanya teknisi on-duty se-unit dengan insiden yang di-snapshot & dinotifikasi.
   const unitId = await incidentUnitId(conn, { id });
   if (unitId && onDutyIds.length) {
@@ -129,7 +131,8 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
   // (perangkat offline) hanya memberi lonceng, sehingga koordinator tak dapat WA
   // saat tiket muncul. Kini semua path (auto/manual-pool/lapor publik) yang
   // melewati fungsi ini mengirim WA ke koordinator juga.
-  await notifyCoordinators(conn, { id, coord_id: coordId }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
+  const noTechNote = onDutyIds.length === 0 ? '\n⚠️ Belum ada teknisi yang absen masuk — mohon tindak lanjut.' : '';
+  await notifyCoordinators(conn, { id, coord_id: coordId }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}${noTechNote}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
   // Koordinator & admin (se-unit): tiket helpdesk baru masuk.
   await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: `/incidents?focus=${id}` }, { unitId });
   return onDutyIds.length;

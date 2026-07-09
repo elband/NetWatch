@@ -193,6 +193,8 @@ router.post('/inspections', withInspectionPhoto, async (req, res) => {
   const validStatus = ['baik', 'perhatian', 'rusak'];
   const st = validStatus.includes(status) ? status : 'baik';
   if (!(await canInspect(req.user))) return res.status(403).json({ error: 'Hanya teknisi on-duty (atau koordinator/admin) yang bisa input inspeksi.' });
+  // Alur harian: absen masuk dulu (sama seperti hidupkan/matikan peralatan). Koord/admin dikecualikan.
+  if (!(await hasAttendedToday(req.user))) return res.status(403).json({ error: 'Absen masuk dulu hari ini sebelum inspeksi (buka Dashboard → Absensi).' });
 
   // Waktu ditentukan SERVER, bukan klien: hanya hari ini & dalam jendela slot.
   const today = dateKey(new Date());

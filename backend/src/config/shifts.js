@@ -153,6 +153,21 @@ export async function getOnDutyTechIds(conn, when = new Date()) {
   return [...onDuty];
 }
 
+/**
+ * Seperti getOnDutyTechIds, tapi HANYA teknisi yang SUDAH ABSEN MASUK hari ini
+ * (attendance.check_in_at terisi). Dipakai untuk notifikasi insiden — hanya teknisi
+ * yang benar-benar hadir yang diberi tahu; bila kosong, pemanggil mengeskalasi ke koordinator.
+ */
+export async function getOnDutyCheckedInTechIds(conn, when = new Date()) {
+  const onDuty = await getOnDutyTechIds(conn, when);
+  if (!onDuty.length) return [];
+  const [rows] = await conn.query(
+    'SELECT DISTINCT user_id FROM attendance WHERE user_id IN (?) AND work_date = ? AND check_in_at IS NOT NULL',
+    [onDuty, dateKey(when)]
+  );
+  return rows.map((r) => r.user_id);
+}
+
 /** Status on-duty untuk satu user pada waktu `when`. */
 export async function getDutyStatus(conn, userId, when = new Date()) {
   const ids = await getOnDutyTechIds(conn, when);

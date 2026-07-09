@@ -308,7 +308,8 @@ function InspeksiTab() {
     });
   }
   useEffect(load, [date]);
-  const slotEditable = (s: string) => canInput && isToday && openSlots.includes(s);
+  // Alur harian: wajib sudah absen masuk (attended) untuk bisa mengisi inspeksi — sama seperti hidupkan/matikan.
+  const slotEditable = (s: string) => canInput && attended && isToday && openSlots.includes(s);
 
   const cur = currentSlot as '09' | '12' | '15';
   const filtered = rows.filter((d) => {
@@ -342,7 +343,7 @@ function InspeksiTab() {
 
       {canInput && isToday && !attended && (
         <div className="mb-3 rounded-md px-3 py-2 text-[11px] border bg-warn/10 border-warn/30 text-warn flex items-center gap-2">
-          <span>⏰ Anda belum <b>absen masuk</b> hari ini. Absen masuk dulu untuk bisa <b>menghidupkan peralatan</b> — buka <b>Dashboard → Absensi</b>.</span>
+          <span>⏰ Anda belum <b>absen masuk</b> hari ini. Absen masuk dulu untuk bisa <b>inspeksi & menghidupkan/mematikan peralatan</b> — buka <b>Dashboard → Absensi</b>.</span>
         </div>
       )}
 
