@@ -370,7 +370,10 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
 router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   const { deviceId, note } = req.body;
   if (!deviceId) return res.status(400).json({ error: 'Perangkat wajib valid.' });
-  if (!(await canInspect(req.user))) return res.status(403).json({ error: 'Hanya teknisi on-duty (atau koordinator/admin) yang bisa mematikan peralatan.' });
+  // Mematikan boleh oleh teknisi yang SUDAH ABSEN MASUK hari ini (tak harus masih dalam
+  // jam dinas) — peralatan sering dimatikan di akhir hari/di luar window shift. Koord/admin
+  // bebas. Foto + verifikasi GPS anti-foto-palsu tetap wajib (di bawah).
+  if (!(await hasAttendedToday(req.user))) return res.status(403).json({ error: 'Absen masuk dulu hari ini untuk mencatat mematikan peralatan (buka Dashboard → Absensi).' });
 
   const date = dateKey(new Date()); // hanya hari ini (waktu ditentukan server)
   if (!req.file) return res.status(400).json({ error: 'Foto dokumentasi wajib diunggah.' });

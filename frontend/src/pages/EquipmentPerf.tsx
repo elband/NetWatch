@@ -411,6 +411,9 @@ function InspeksiTab() {
               ) : (() => {
                 const canPress = canInput && isToday;
                 const canHidupkan = canPress && attended; // wajib sudah absen masuk dulu
+                // Mematikan: cukup sudah absen masuk hari ini (boleh di luar jam dinas — alat
+                // sering dimatikan di akhir hari). Koord/admin tercakup dalam `attended`.
+                const canMatikan = attended && isToday;
                 const isOn = d.monitor_enabled !== 0;
                 const bukti = isOn ? d.poweron : d.poweroff; // bukti sesuai state terkini
                 return (
@@ -437,12 +440,12 @@ function InspeksiTab() {
                         {!canHidupkan && !isOn ? '🔒 ' : ''}⚡ {isOn ? 'Hidup' : 'Hidupkan'}
                       </button>
                       <button
-                        disabled={!canPress || !isOn}
-                        onClick={() => canPress && isOn && setPowerOff(d)}
-                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : !isOn ? 'Peralatan sudah dimatikan' : 'Matikan + jeda monitoring (wajib foto dokumentasi)'}
+                        disabled={!canMatikan || !isOn}
+                        onClick={() => canMatikan && isOn && setPowerOff(d)}
+                        title={!canMatikan ? 'Absen masuk dulu hari ini untuk mematikan peralatan' : !isOn ? 'Peralatan sudah dimatikan' : 'Matikan + jeda monitoring (wajib foto dokumentasi)'}
                         className={`flex-1 border rounded px-2 py-1.5 text-[11px] font-semibold ${!isOn
                           ? 'bg-surface2 border-border text-text2 cursor-default'
-                          : canPress ? 'border-danger/40 text-danger hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
+                          : canMatikan ? 'border-danger/40 text-danger hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
                       >
                         ⏻ {isOn ? 'Matikan' : 'Mati'}
                       </button>

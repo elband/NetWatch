@@ -188,7 +188,7 @@ function QrModal({ room, onClose }: { room: Room; onClose: () => void }) {
       .page{width:210mm;min-height:297mm;margin:0 auto;padding:16mm 14mm;display:flex;flex-direction:column;align-items:center;text-align:center;background:#fff}
       .band{width:100%;background:linear-gradient(135deg,#2563eb,#06b6d4);color:#fff;border-radius:18px;padding:18px;display:flex;align-items:center;gap:14px;justify-content:center}
       .band .logo{width:54px;height:54px;border-radius:14px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:30px}
-      .band h1{margin:0;font-size:22px;letter-spacing:.5px}.band p{margin:2px 0 0;font-size:12px;opacity:.9}
+      .band h1{margin:0;font-size:18px;letter-spacing:.3px;line-height:1.15}.band p{margin:3px 0 0;font-size:12px;opacity:.9}
       .judul{font-size:40px;font-weight:900;color:#1e3a8a;margin:22px 0 4px;line-height:1.05}
       .sub{font-size:16px;color:#475569;margin:0 0 6px}
       .qrcard{background:#fff;border:3px solid #1e3a8a;border-radius:24px;padding:20px;margin:14px 0;box-shadow:0 8px 24px rgba(0,0,0,.08)}
@@ -201,7 +201,7 @@ function QrModal({ room, onClose }: { room: Room; onClose: () => void }) {
       .step .t{font-size:12px;color:#334155;line-height:1.3}
       .foot{margin-top:auto;padding-top:18px;color:#94a3b8;font-size:11px}</style></head><body>
       <div class="page">
-        <div class="band"><div class="logo">📡</div><div><h1>UNIT ELEKTRONIKA BANDARA</h1><p>A.P.T. PRANOTO · SAMARINDA · Helpdesk IT</p></div></div>
+        <div class="band"><div class="logo">📡</div><div><h1>BANDARA AJI PANGERAN TUMENGGUNG PRANOTO</h1><p>Sistem Pelaporan Otomatis</p></div></div>
         <div class="judul">ADA GANGGUAN?<br>LAPOR DI SINI 📲</div>
         <div class="sub">Pindai QR di bawah dengan kamera HP Anda — tanpa aplikasi, tanpa login.</div>
         ${teknisiSvg}
