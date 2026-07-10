@@ -432,19 +432,32 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
+  // Catatan power + status perangkat ditulis ATOMIK (satu transaksi): mencegah kondisi
+  // "kartu Dimatikan padahal catatan terakhir Hidup" bila salah satu query gagal.
   // Append entri baru (tidak menimpa catatan Hidup/Mati sebelumnya di hari yang sama).
-  const [ins] = await pool.query(
-    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
-     VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
-  );
-
-  // Menghidupkan peralatan = mulai monitoring: aktifkan pantauan otomatis & bersihkan
-  // kategori "dimatikan"/override agar ping berikutnya menentukan status riil.
-  await pool.query(
-    "UPDATE devices SET monitor_enabled=1, alarm_override=0, offline_since=NULL, off_reason = CASE WHEN off_reason='dimatikan' THEN NULL ELSE off_reason END WHERE id=?",
-    [deviceId]
-  );
+  const conn = await pool.getConnection();
+  let insertId;
+  try {
+    await conn.beginTransaction();
+    const [ins] = await conn.query(
+      `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
+       VALUES (?, ?, 'on', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
+    );
+    insertId = ins.insertId;
+    // Menghidupkan peralatan = mulai monitoring: aktifkan pantauan otomatis & bersihkan
+    // kategori "dimatikan"/override agar ping berikutnya menentukan status riil.
+    await conn.query(
+      "UPDATE devices SET monitor_enabled=1, alarm_override=0, offline_since=NULL, off_reason = CASE WHEN off_reason='dimatikan' THEN NULL ELSE off_reason END WHERE id=?",
+      [deviceId]
+    );
+    await conn.commit();
+  } catch (e) {
+    try { await conn.rollback(); } catch { /* abaikan */ }
+    conn.release();
+    return res.status(500).json({ error: 'Gagal menyimpan status peralatan. Silakan coba lagi.' });
+  }
+  conn.release();
   const [[updatedDev]] = await pool.query('SELECT * FROM devices WHERE id=?', [deviceId]);
   req.app.get('io')?.emit('device:update', updatedDev);
 
@@ -462,7 +475,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
     }
   }
 
-  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE id=?', [ins.insertId]);
+  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE id=?', [insertId]);
   res.json({ poweron: rows[0], device: updatedDev, verified, distance, warning, flagged });
 });
 
@@ -512,17 +525,29 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   fs.writeFileSync(path.join(INSPECTION_DIR, filename), req.file.buffer);
   const photoUrl = `/uploads/inspections/${filename}`;
 
+  // Catatan power + status perangkat ditulis ATOMIK (satu transaksi) agar tak divergen.
   // Append entri baru (tidak menimpa catatan Hidup/Mati sebelumnya di hari yang sama).
-  const [ins] = await pool.query(
-    `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
-     VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
-  );
-
-  await pool.query(
-    "UPDATE devices SET monitor_enabled=0, off_reason='dimatikan', status='offline', alarm_override=0, offline_since=NULL WHERE id=?",
-    [deviceId]
-  );
+  const conn = await pool.getConnection();
+  let insertId;
+  try {
+    await conn.beginTransaction();
+    const [ins] = await conn.query(
+      `INSERT INTO equipment_poweron (device_id, on_date, state, note, photo_url, photo_hash, verified, distance_m, flagged, done_by, done_by_name, unit_id)
+       VALUES (?, ?, 'off', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
+    );
+    insertId = ins.insertId;
+    await conn.query(
+      "UPDATE devices SET monitor_enabled=0, off_reason='dimatikan', status='offline', alarm_override=0, offline_since=NULL WHERE id=?",
+      [deviceId]
+    );
+    await conn.commit();
+  } catch (e) {
+    try { await conn.rollback(); } catch { /* abaikan */ }
+    conn.release();
+    return res.status(500).json({ error: 'Gagal menyimpan status peralatan. Silakan coba lagi.' });
+  }
+  conn.release();
   const [[updatedDev]] = await pool.query('SELECT * FROM devices WHERE id=?', [deviceId]);
   req.app.get('io')?.emit('device:update', updatedDev);
 
@@ -540,7 +565,7 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
     }
   }
 
-  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE id=?', [ins.insertId]);
+  const [rows] = await pool.query('SELECT * FROM equipment_poweron WHERE id=?', [insertId]);
   res.json({ poweroff: rows[0], device: updatedDev, verified, distance, warning, flagged });
 });
 
