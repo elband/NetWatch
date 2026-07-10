@@ -371,26 +371,6 @@ export default function Noc() {
               </table>
             </div>
           </div>
-          <div style={card}>
-            <div style={cardTitle}>🌐 INTERNET / UPLINK (MIKROTIK)</div>
-            <div style={{ padding: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (data?.uplink?.length || 0) ? 8 : 0 }}>
-                <span style={{ fontSize: 17, fontWeight: 900, color: internet.ok == null ? C.dim : internet.ok ? C.online : C.offline }}>{internet.ok == null ? '— N/A' : internet.ok ? '● INTERNET UP' : '○ INTERNET DOWN'}</span>
-                {internet.rxBps != null
-                  ? <span className="mono" style={{ fontSize: 11, color: C.online, whiteSpace: 'nowrap', textAlign: 'right' }}>↓ {fmtMbps(internet.rxBps)} · ↑ {fmtMbps(internet.txBps || 0)}<br /><span style={{ color: C.dim, fontSize: 9 }}>Mbps{internet.ping != null ? ` · ${internet.ping}ms` : ''}</span></span>
-                  : (internet.ping != null && <span className="mono" style={{ fontSize: 12, color: internet.ping < 60 ? C.online : C.warning }}>{internet.ping} ms</span>)}
-              </div>
-              {(data?.uplink || []).length === 0
-                ? <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.4 }}>Tandai perangkat sumbernya: menu <b style={{ color: C.text }}>Perangkat → centang "Sumber Internet/Uplink"</b>.</div>
-                : data!.uplink.map((u) => (
-                  <div key={u.id} onClick={() => { const d = devices.find((x) => x.id === u.id); if (d) setSel(d); }} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, padding: '3px 0', cursor: 'pointer' }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 999, background: stColor(u.status), boxShadow: `0 0 6px ${stColor(u.status)}` }} />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</span>
-                    <span className="mono" style={{ marginLeft: 'auto', color: u.status === 'offline' ? C.offline : C.dim }}>{u.status === 'offline' ? 'DOWN' : u.ping_ms + 'ms'}</span>
-                  </div>
-                ))}
-            </div>
-          </div>
           <div style={{ ...card, flex: 1, minHeight: 84, display: 'flex', flexDirection: 'column' }}>
             <div style={cardTitle}>🔍 INSPEKSI TEKNISI HARI INI · {data?.inspections?.length || 0} <span style={{ fontWeight: 500, color: C.dim }}>· auto-scroll</span></div>
             <div ref={inspScrollRef} className="noc-scroll" style={{ overflow: 'auto', flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -555,6 +535,49 @@ export default function Noc() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+          {/* INTERNET / UPLINK (dipindah ke bawah Status Teknisi) */}
+          <div style={card}>
+            <div style={cardTitle}>🌐 INTERNET / UPLINK (MIKROTIK)</div>
+            <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Status utama: tint sesuai kondisi + dot berdenyut saat UP + pill latensi */}
+              {(() => {
+                const c = internet.ok == null ? C.dim : internet.ok ? C.online : C.offline;
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 10, background: internet.ok == null ? C.panel2 : internet.ok ? 'rgba(34,197,94,.10)' : 'rgba(239,68,68,.10)', border: `1px solid ${c}33` }}>
+                    <span style={{ position: 'relative', display: 'inline-flex', width: 12, height: 12, flexShrink: 0 }}>
+                      {internet.ok ? <span className="animate-ping" style={{ position: 'absolute', inset: 0, borderRadius: 999, background: C.online, opacity: 0.55 }} /> : null}
+                      <span style={{ position: 'relative', width: 12, height: 12, borderRadius: 999, background: c, boxShadow: `0 0 8px ${c}` }} />
+                    </span>
+                    <span style={{ fontSize: 18, fontWeight: 900, letterSpacing: 0.3, color: c }}>{internet.ok == null ? 'N/A' : internet.ok ? 'INTERNET UP' : 'INTERNET DOWN'}</span>
+                    {internet.ping != null && <span className="mono" style={{ marginLeft: 'auto', fontSize: 11, color: internet.ping < 60 ? C.online : C.warning, background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 999, padding: '1px 8px', flexShrink: 0 }}>{internet.ping} ms</span>}
+                  </div>
+                );
+              })()}
+              {/* Kecepatan real (SNMP uplink) — kartu download / upload */}
+              {internet.rxBps != null && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[{ icon: '↓', label: 'DOWNLOAD', val: fmtMbps(internet.rxBps), c: C.online }, { icon: '↑', label: 'UPLOAD', val: fmtMbps(internet.txBps || 0), c: C.accent }].map((s) => (
+                    <div key={s.label} style={{ background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 9, padding: '6px 10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 800, letterSpacing: 0.5, color: C.dim }}><span style={{ color: s.c, fontSize: 13, fontWeight: 900 }}>{s.icon}</span>{s.label}</div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 1 }}><span className="mono" style={{ fontSize: 22, fontWeight: 900, color: s.c, lineHeight: 1.1 }}>{s.val}</span><span style={{ fontSize: 10, color: C.dim }}>Mbps</span></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Perangkat sumber uplink */}
+              {(data?.uplink || []).length === 0
+                ? <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.4 }}>Tandai perangkat sumbernya: menu <b style={{ color: C.text }}>Perangkat → centang "Sumber Internet/Uplink"</b>.</div>
+                : <div style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}>
+                    {data!.uplink.map((u) => (
+                      <div key={u.id} onClick={() => { const d = devices.find((x) => x.id === u.id); if (d) setSel(d); }} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, padding: '2px 0', cursor: 'pointer' }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 999, flexShrink: 0, background: stColor(u.status), boxShadow: `0 0 6px ${stColor(u.status)}` }} />
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</span>
+                        <span className="mono" style={{ marginLeft: 'auto', color: u.status === 'offline' ? C.offline : C.dim, flexShrink: 0 }}>{u.status === 'offline' ? 'DOWN' : u.ping_ms + 'ms'}</span>
+                      </div>
+                    ))}
+                  </div>}
             </div>
           </div>
           <div style={{ ...card, display: 'flex', flexDirection: 'column' }}>
