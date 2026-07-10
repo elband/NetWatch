@@ -435,7 +435,7 @@ export default function Noc() {
             )}
           </div>
           {/* TELEMETRI / TREN */}
-          <div style={{ ...card, height: 168, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ ...card, height: 144, display: 'flex', flexDirection: 'column' }}>
             {sel ? (
               <>
                 <div style={{ ...cardTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -456,11 +456,11 @@ export default function Noc() {
             ) : (
               <>
                 <div style={cardTitle}>📈 TREN INSIDEN 7 HARI</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, padding: 12, flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, padding: '6px 12px 4px', flex: 1 }}>
                   {(data?.trend || []).map((t) => (
-                    <div key={t.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
+                    <div key={t.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, height: '100%', justifyContent: 'flex-end' }}>
                       <div className="mono" style={{ fontSize: 11, color: t.count ? C.text : C.dim }}>{t.count}</div>
-                      <div style={{ width: '70%', height: `${(t.count / trendMax) * 100}%`, minHeight: 2, background: t.count ? C.accent : '#1e293b', borderRadius: 3 }} />
+                      <div style={{ width: '50%', maxWidth: 32, height: `${(t.count / trendMax) * 100}%`, minHeight: 2, background: t.count ? C.accent : '#1e293b', borderRadius: 3 }} />
                       <div style={{ fontSize: 9, color: C.dim }}>{new Date(t.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short' })}</div>
                     </div>
                   ))}
