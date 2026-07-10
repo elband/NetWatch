@@ -115,8 +115,40 @@ export async function buildLogbook(month, q, unitId = null) {
   return { month: mm, devices: list };
 }
 
+const emptyRecap = () => ({
+  inspeksi: { total: 0, baik: 0, perhatian: 0, rusak: 0 }, power: { on: 0, off: 0 },
+  maintenance: { total: 0, selesai: 0 }, insiden: { total: 0, downtime_min: 0 }, metrik: null,
+});
+
+// Detail SATU perangkat: info perangkat lengkap + rekap & kronologi bulan tsb. Rekap/kronologi
+// dipinjam dari buildLogbook (logika identik & ter-scope unit); info perangkat di-query terpisah
+// agar halaman tetap tampil meski perangkat tak punya aktivitas bulan itu.
+export async function buildLogbookDevice(month, deviceId, unitId = null) {
+  const id = Number(deviceId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const ufd = unitFilter(unitId, 'd.unit_id');
+  const [[dev]] = await pool.query(
+    `SELECT d.id, d.name, d.ip, d.type, d.category, d.icon, d.loc, d.status, d.cpu, d.mem, d.ping_ms,
+            d.monitor_enabled, d.off_reason, d.always_on, d.inspect_required, d.last_checked_at, d.offline_since,
+            COALESCE(d.lat, loc.lat) AS lat, COALESCE(d.lng, loc.lng) AS lng
+       FROM devices d LEFT JOIN locations loc ON loc.id = d.location_id
+      WHERE d.id = ?${ufd.clause}`,
+    [id, ...ufd.params]
+  );
+  if (!dev) return null; // tak ada / di luar unit
+  const { month: mm, devices } = await buildLogbook(month, '', unitId);
+  const base = devices.find((d) => d.id === id);
+  return { month: mm, device: { ...dev, recap: base?.recap || emptyRecap(), events: base?.events || [] } };
+}
+
 router.get('/', async (req, res) => {
   res.json(await buildLogbook(req.query.month, req.query.q, req.unitId));
+});
+
+router.get('/device/:id', async (req, res) => {
+  const data = await buildLogbookDevice(req.query.month, req.params.id, req.unitId);
+  if (!data) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  res.json(data);
 });
 
 router.get('/export', async (req, res) => {

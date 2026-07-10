@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { openImage } from '../components/ImageLightbox';
 
-interface LogEvent { date: string; time: string; kind: 'inspeksi' | 'power' | 'maintenance' | 'insiden'; label: string; status: string; detail: string; by: string; photo_url: string; verified: boolean }
-interface LogMetrik { up_pct: number; avg_ping: number; max_ping: number; samples: number }
-interface LogRecap { inspeksi: { total: number; baik: number; perhatian: number; rusak: number }; power: { on: number; off: number }; maintenance: { total: number; selesai: number }; insiden: { total: number; downtime_min: number }; metrik: LogMetrik | null }
+export interface LogEvent { date: string; time: string; kind: 'inspeksi' | 'power' | 'maintenance' | 'insiden'; label: string; status: string; detail: string; by: string; photo_url: string; verified: boolean }
+export interface LogMetrik { up_pct: number; avg_ping: number; max_ping: number; samples: number }
+export interface LogRecap { inspeksi: { total: number; baik: number; perhatian: number; rusak: number }; power: { on: number; off: number }; maintenance: { total: number; selesai: number }; insiden: { total: number; downtime_min: number }; metrik: LogMetrik | null }
 interface LogDevice { id: number; name: string; ip: string; type: string; loc: string | null; recap: LogRecap; events: LogEvent[] }
 
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
@@ -16,7 +16,7 @@ const KIND_META: Record<LogEvent['kind'], { icon: string; label: string; cls: st
 };
 // Badge Jenis per-event. Aksi power dipisah jadi Hidupkan/Matikan (bukan satu kategori
 // gabungan "Hidup/Mati") agar tiap kegiatan tampil sebagai jenis tersendiri.
-function kindBadge(e: LogEvent): { icon: string; label: string; cls: string } {
+export function kindBadge(e: LogEvent): { icon: string; label: string; cls: string } {
   if (e.kind === 'power') {
     return e.status === 'mati'
       ? { icon: '⏻', label: 'Matikan', cls: 'text-slate-300 bg-slate-500/15 border-slate-500/30' }
@@ -25,15 +25,15 @@ function kindBadge(e: LogEvent): { icon: string; label: string; cls: string } {
   return KIND_META[e.kind];
 }
 const powerJenis = (e: LogEvent) => (e.status === 'mati' ? 'Matikan' : 'Hidupkan');
-const fmtDate = (s: string) => (s ? new Date(s + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }) : '-');
-const monthLabel = (m: string) => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); };
+export const fmtDate = (s: string) => (s ? new Date(s + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }) : '-');
+export const monthLabel = (m: string) => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); };
 
 export default function Logbook() {
   const [month, setMonth] = useState(thisMonth());
   const [q, setQ] = useState('');
   const [devices, setDevices] = useState<LogDevice[]>([]);
   const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState<Record<number, boolean>>({});
+  const nav = useNavigate();
 
   function load() {
     setLoading(true);
@@ -86,60 +86,33 @@ export default function Logbook() {
         <div className="bg-surface border border-border rounded-xl text-center py-12 text-text2 text-sm">Tidak ada aktivitas peralatan pada {monthLabel(month)}.</div>
       ) : (
         <div className="space-y-3">
-          {devices.map((d) => {
-            const isOpen = open[d.id] ?? false;
-            return (
-              <div key={d.id} className="bg-surface border border-border rounded-xl overflow-hidden">
-                <button onClick={() => setOpen((o) => ({ ...o, [d.id]: !isOpen }))} className="w-full flex items-start justify-between gap-3 p-3.5 text-left hover:bg-text/5">
-                  <div className="min-w-0">
-                    <div className="font-semibold text-sm truncate">{d.name}</div>
-                    <div className="text-text2 text-[10px] truncate">{d.type} · {d.ip}{d.loc ? ` · 📍 ${d.loc}` : ''}</div>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {d.recap.metrik && <Chip label={`🟢 Uptime ${d.recap.metrik.up_pct}%`} sub={`lat ${d.recap.metrik.avg_ping}/${d.recap.metrik.max_ping} ms`} />}
-                      <Chip label={`🔍 ${d.recap.inspeksi.total} inspeksi`} sub={`${d.recap.inspeksi.baik}B/${d.recap.inspeksi.perhatian}P/${d.recap.inspeksi.rusak}R`} />
-                      <Chip label={`⚡ ${d.recap.power.on}× hidup · ${d.recap.power.off}× mati`} />
-                      <Chip label={`🛠️ ${d.recap.maintenance.total} maint.`} sub={`${d.recap.maintenance.selesai} selesai`} />
-                      <Chip label={`🚨 ${d.recap.insiden.total} insiden`} sub={d.recap.insiden.downtime_min ? `${d.recap.insiden.downtime_min} mnt down` : undefined} />
-                    </div>
-                  </div>
-                  <span className="text-text2 text-xs shrink-0 mt-1">{isOpen ? '▲' : '▼'} {d.events.length}</span>
-                </button>
-                {isOpen && (
-                  <div className="border-t border-border/60 overflow-x-auto">
-                    <table className="w-full text-[11px]">
-                      <thead>
-                        <tr className="text-text2 text-left border-b border-border/60">
-                          <th className="px-3 py-2 font-medium">Tanggal</th><th className="px-3 py-2 font-medium">Jenis</th><th className="px-3 py-2 font-medium">Uraian</th><th className="px-3 py-2 font-medium">Status</th><th className="px-3 py-2 font-medium">Oleh</th><th className="px-3 py-2 font-medium">Foto</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {d.events.map((e, i) => {
-                          const km = kindBadge(e);
-                          return (
-                            <tr key={i} className="border-b border-border/30 last:border-0">
-                              <td className="px-3 py-2 whitespace-nowrap font-mono">{fmtDate(e.date)}{e.time ? ` ${e.time}` : ''}</td>
-                              <td className="px-3 py-2 whitespace-nowrap"><span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] ${km.cls}`}>{km.icon} {km.label}</span></td>
-                              <td className="px-3 py-2"><div>{e.label}</div>{e.detail && <div className="text-text2 text-[10px]">{e.detail}</div>}</td>
-                              <td className="px-3 py-2 whitespace-nowrap capitalize">{e.status || '-'}</td>
-                              <td className="px-3 py-2 whitespace-nowrap text-text2">{e.by || '-'}</td>
-                              <td className="px-3 py-2">{e.photo_url ? <button onClick={() => openImage(e.photo_url)} className="leading-none" title={e.verified ? 'Terverifikasi' : 'Belum terverifikasi'}>📷{e.verified ? '✅' : '⚠️'}</button> : '-'}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+          {devices.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => nav(`/logbook/${d.id}?month=${month}`)}
+              className="w-full text-left bg-surface border border-border rounded-xl p-3.5 flex items-start justify-between gap-3 hover:border-accent/40 hover:bg-text/5 transition-colors"
+            >
+              <div className="min-w-0">
+                <div className="font-semibold text-sm truncate">{d.name}</div>
+                <div className="text-text2 text-[10px] truncate">{d.type} · {d.ip}{d.loc ? ` · 📍 ${d.loc}` : ''}</div>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {d.recap.metrik && <Chip label={`🟢 Uptime ${d.recap.metrik.up_pct}%`} sub={`lat ${d.recap.metrik.avg_ping}/${d.recap.metrik.max_ping} ms`} />}
+                  <Chip label={`🔍 ${d.recap.inspeksi.total} inspeksi`} sub={`${d.recap.inspeksi.baik}B/${d.recap.inspeksi.perhatian}P/${d.recap.inspeksi.rusak}R`} />
+                  <Chip label={`⚡ ${d.recap.power.on}× hidup · ${d.recap.power.off}× mati`} />
+                  <Chip label={`🛠️ ${d.recap.maintenance.total} maint.`} sub={`${d.recap.maintenance.selesai} selesai`} />
+                  <Chip label={`🚨 ${d.recap.insiden.total} insiden`} sub={d.recap.insiden.downtime_min ? `${d.recap.insiden.downtime_min} mnt down` : undefined} />
+                </div>
               </div>
-            );
-          })}
+              <span className="text-text2 text-[11px] shrink-0 mt-1 flex items-center gap-1 whitespace-nowrap">{d.events.length} aktivitas <span className="text-accent">→</span></span>
+            </button>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function Chip({ label, sub }: { label: string; sub?: string }) {
+export function Chip({ label, sub }: { label: string; sub?: string }) {
   return <span className="inline-flex items-center gap-1 text-[10px] bg-surface2 border border-border rounded-full px-2 py-0.5">{label}{sub && <span className="text-text2">· {sub}</span>}</span>;
 }
 

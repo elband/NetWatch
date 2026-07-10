@@ -41,6 +41,7 @@ import MasterData from './pages/MasterData';
 import SshTerminal from './pages/SshTerminal';
 import EquipmentPerf from './pages/EquipmentPerf';
 import Logbook from './pages/Logbook';
+import LogbookDevice from './pages/LogbookDevice';
 import ApiDocs from './pages/ApiDocs';
 import SuratKeluar from './pages/SuratKeluar';
 import LaporanBulanan from './pages/LaporanBulanan';
@@ -105,6 +106,7 @@ export default function App() {
           <Route path="/jadwal" element={<Jadwal />} />
           <Route path="/equipment" element={<EquipmentPerf />} />
           <Route path="/logbook" element={<Logbook />} />
+          <Route path="/logbook/:id" element={<LogbookDevice />} />
           <Route path="/api-docs" element={<ApiDocs />} />
           <Route path="/diklat" element={<Diklat />} />
           <Route path="/dokumen" element={<Dokumen />} />
