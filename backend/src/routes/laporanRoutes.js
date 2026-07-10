@@ -132,6 +132,12 @@ export async function buildLaporanData(monthIn, unitId = null) {
       WHERE (m.plan_month=? OR (m.done_at>=? AND m.done_at<?))${ufM.clause} ORDER BY m.scheduled_date`,
     [month, start, end, ...ufM.params]
   );
+  // Override koordinator (buka akses inspeksi) — dicatat sebagai kegiatan harian di laporan.
+  const [ovrDay] = await pool.query(
+    `SELECT work_date, reason, created_by_name, created_at FROM equipment_inspect_overrides
+      WHERE work_date>=? AND work_date<?${uf.clause} ORDER BY work_date`,
+    [start, end, ...uf.params]
+  );
   const hariMap = new Map(); // key: YYYY-MM-DD
   const ensureDay = (dateStr) => {
     const key = String(dateStr).slice(0, 10);
@@ -162,6 +168,11 @@ export async function buildLaporanData(monthIn, unitId = null) {
     const d = ensureDay(ev);
     if (r.done_by || r.created_by) d.petugas.add(r.done_by || r.created_by);
     d.items.push({ jam: r.done_at ? jam(r.done_at) : '-', peralatan: r.dev || '-', kegiatan: `Maintenance/Pemeliharaan: ${r.task}`, hasil: r.status === 'selesai' ? 'Selesai' : r.status === 'batal' ? 'Batal' : 'Rencana' });
+  }
+  for (const r of ovrDay) {
+    const d = ensureDay(r.work_date);
+    if (r.created_by_name) d.petugas.add(r.created_by_name);
+    d.items.push({ jam: r.created_at ? jam(r.created_at) : '-', peralatan: '-', kegiatan: `Koordinator membuka akses inspeksi hari ini (absen belum/salah tercatat) — alasan: ${r.reason}`, hasil: 'Izin' });
   }
   const kegiatanHarian = [...hariMap.values()].sort((a, b) => a.tanggal.localeCompare(b.tanggal)).map((d) => ({
     tanggal: d.tanggal, hari: d.hari, petugas: [...d.petugas].join(', ') || 'Elband',

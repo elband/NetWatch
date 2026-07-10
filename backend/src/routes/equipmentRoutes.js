@@ -127,26 +127,16 @@ function currentSlot(d = new Date()) {
 // ===== Override inspeksi koordinator =====
 // Bila absen ter-record salah tanggal (mis. bug timezone) teknisi tak lolos gerbang
 // "sudah absen hari ini" → tak bisa inspeksi/hidupkan/matikan. Koordinator/admin bisa
-// membuka akses untuk unit-nya HARI INI dengan alasan. Disimpan di settings.inspect_override:
-//   { "<unitId>"|"all": { date, reason, by, by_name, at } }.
-async function getInspectOverrides() {
-  const [r] = await pool.query("SELECT setting_value FROM settings WHERE setting_key='inspect_override'");
-  try { const v = r[0]?.setting_value; return (typeof v === 'string' ? JSON.parse(v) : v) || {}; } catch { return {}; }
-}
-async function setInspectOverrides(obj) {
-  await pool.query(
-    "INSERT INTO settings (setting_key, setting_value) VALUES ('inspect_override', ?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
-    [JSON.stringify(obj)]
-  );
-}
-// Override AKTIF (tanggal = hari ini) untuk unit tsb atau 'all' global → objek, else null.
+// membuka akses untuk unit-nya HARI INI dengan alasan. Dicatat APPEND-ONLY di tabel
+// equipment_inspect_overrides (catatan permanen → tampil di Laporan Bulanan).
+// Override AKTIF (work_date = hari ini) untuk unit tsb (atau global unit_id NULL) → baris, else null.
 async function inspectOverrideFor(unitId) {
-  const today = dateKey(new Date());
-  const all = await getInspectOverrides();
-  for (const k of [unitId != null ? String(unitId) : null, 'all'].filter(Boolean)) {
-    if (all[k] && all[k].date === today) return all[k];
-  }
-  return null;
+  const [rows] = await pool.query(
+    `SELECT reason, created_by_name AS by_name, created_at AS at, work_date
+       FROM equipment_inspect_overrides WHERE work_date=? AND (unit_id=? OR unit_id IS NULL) ORDER BY id DESC LIMIT 1`,
+    [dateKey(new Date()), unitId ?? null]
+  );
+  return rows[0] || null;
 }
 // Terjadwal dinas (pagi/siang/malam) hari ini?
 async function hasWorkShiftToday(userId) {
@@ -182,6 +172,46 @@ async function hasAttendedToday(user) {
   if (rows.length > 0) return true;
   // Override koordinator: dianggap sudah absen untuk unit ini hari ini.
   return !!(await inspectOverrideFor(user.unit_id));
+}
+
+// Status gerbang "Menghidupkan peralatan" untuk user ini — dicerminkan ke tombol ⚡ Hidupkan
+// di frontend agar tak tampak aktif lalu ditolak backend. Teknisi: harus terjadwal dinas hari
+// ini DAN sudah masuk jendela "buka 1 jam sebelum jam dinas" (shiftOpenGate, per unit).
+// Admin/koordinator: dikecualikan (selalu boleh). Selaras dengan gate di POST /poweron.
+async function powerGateFor(user) {
+  const roles = user.roles?.length ? user.roles : (user.role ? [user.role] : []);
+  if (roles.includes('admin') || roles.includes('koordinator')) {
+    return { hasShift: true, allowed: true, opensAt: null };
+  }
+  const g = await shiftOpenGate(pool, user.id);
+  return { hasShift: g.hasShift, allowed: g.allowed, opensAt: g.opensAt };
+}
+
+// Auto-Hidup saat override: membuka/memperbarui izin inspeksi juga MELANJUTKAN monitoring
+// semua peralatan yang sebelumnya "dimatikan" (off_reason='dimatikan') di unit tsb — tanpa
+// alur foto Hidupkan; koordinator sudah menanggung alasannya (tercatat append-only). Hanya
+// perangkat yang benar-benar di-matikan lewat tombol Matikan yang ikut dinyalakan: aset fisik
+// & perangkat standby (monitor_enabled=0 tanpa off_reason='dimatikan') TIDAK terpengaruh, dan
+// perangkat always-on memang tak pernah ber-off_reason 'dimatikan'. Mirror alur Hidupkan satuan.
+// Mengembalikan jumlah perangkat yang dilanjutkan + emit device:update utk tampilan real-time.
+async function resumeDimatikanForUnit(req, unitId) {
+  const uf = unitFilter(unitId, 'unit_id');
+  const [paused] = await pool.query(
+    `SELECT id FROM devices WHERE off_reason='dimatikan'${uf.clause}`,
+    uf.params
+  );
+  if (!paused.length) return 0;
+  const ids = paused.map((r) => r.id);
+  await pool.query(
+    'UPDATE devices SET monitor_enabled=1, alarm_override=0, offline_since=NULL, off_reason=NULL WHERE id IN (?)',
+    [ids]
+  );
+  const io = req.app.get('io');
+  if (io) {
+    const [rows] = await pool.query('SELECT * FROM devices WHERE id IN (?)', [ids]);
+    for (const d of rows) io.emit('device:update', d);
+  }
+  return ids.length;
 }
 
 // ===================== INSPEKSI HARIAN =====================
@@ -227,6 +257,7 @@ router.get('/inspections', async (req, res) => {
     openSlots: openSlots(),
     canInput: await canInspect(req.user),
     attended: await hasAttendedToday(req.user),
+    powerGate: await powerGateFor(req.user),
     inspectOverride: await inspectOverrideFor(req.unitId),
     inspectRadiusM: await getInspectRadius(),
     devices: list,
@@ -243,11 +274,15 @@ router.get('/inspect-override', async (req, res) => {
 router.post('/inspect-override', requireRole('admin', 'koordinator'), async (req, res) => {
   const reason = String(req.body?.reason || '').trim();
   if (!reason) return res.status(400).json({ error: 'Alasan wajib diisi.' });
-  const key = req.unitId != null ? String(req.unitId) : 'all';
-  const all = await getInspectOverrides();
-  all[key] = { date: dateKey(new Date()), reason, by: req.user.id, by_name: req.user.name, at: new Date().toISOString() };
-  await setInspectOverrides(all);
-  res.json({ ok: true, override: all[key] });
+  const unitId = req.unitId != null ? Number(req.unitId) : null;
+  // Append-only: tiap pembukaan tercatat permanen (untuk Laporan Bulanan & audit).
+  await pool.query(
+    'INSERT INTO equipment_inspect_overrides (unit_id, work_date, reason, created_by, created_by_name) VALUES (?,?,?,?,?)',
+    [unitId, dateKey(new Date()), reason, req.user.id, req.user.name]
+  );
+  // Auto-Hidup: lanjutkan monitoring peralatan yang sebelumnya "dimatikan" di unit ini.
+  const resumed = await resumeDimatikanForUnit(req, unitId);
+  res.json({ ok: true, override: await inspectOverrideFor(unitId), resumed });
 });
 
 router.post('/inspections', withInspectionPhoto, async (req, res) => {

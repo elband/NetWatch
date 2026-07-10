@@ -311,6 +311,9 @@ function InspeksiTab({ isManager }: { isManager: boolean }) {
   const [canInput, setCanInput] = useState(false);
   const [radiusM, setRadiusM] = useState(DEFAULT_RADIUS_M); // radius kerja (Pengaturan)
   const [attended, setAttended] = useState(true); // sudah absen masuk hari ini? (default true agar tak berkedip)
+  // Gerbang "Menghidupkan peralatan" dari server (mirror POST /poweron): teknisi harus terjadwal
+  // dinas hari ini & masuk jendela "buka 1 jam sebelum jam dinas". Default terbuka agar tak berkedip.
+  const [powerGate, setPowerGate] = useState<{ hasShift: boolean; allowed: boolean; opensAt: string | null }>({ hasShift: true, allowed: true, opensAt: null });
   const [edit, setEdit] = useState<{ dev: EquipmentRow; slot: '09' | '12' | '15' } | null>(null);
   const [powerOn, setPowerOn] = useState<EquipmentRow | null>(null);
   const [powerOff, setPowerOff] = useState<EquipmentRow | null>(null);
@@ -329,6 +332,7 @@ function InspeksiTab({ isManager }: { isManager: boolean }) {
       setCanInput(res.data.canInput);
       setRadiusM(Number(res.data.inspectRadiusM) || DEFAULT_RADIUS_M);
       setAttended(res.data.attended !== false);
+      setPowerGate(res.data.powerGate || { hasShift: true, allowed: true, opensAt: null });
       setOverride(res.data.inspectOverride || null);
     });
   }
@@ -452,9 +456,13 @@ function InspeksiTab({ isManager }: { isManager: boolean }) {
                 </div>
               ) : (() => {
                 const canPress = canInput && isToday;
-                const canHidupkan = canPress && attended; // wajib sudah absen masuk dulu
-                // Mematikan: cukup sudah absen masuk hari ini (boleh di luar jam dinas — alat
-                // sering dimatikan di akhir hari). Koord/admin tercakup dalam `attended`.
+                // Menghidupkan juga tunduk gerbang server (POST /poweron): terjadwal dinas hari ini
+                // & sudah masuk jendela "buka 1 jam sebelum jam dinas". Cerminkan di sini agar tombol
+                // tak tampak aktif lalu ditolak. Admin/koord: powerGate selalu terbuka.
+                const powerOpen = powerGate.hasShift && powerGate.allowed;
+                const canHidupkan = canPress && attended && powerOpen; // absen + jendela dinas
+                // Mematikan: cukup sudah absen masuk hari ini (boleh di luar jam dinas — alat sering
+                // dimatikan di akhir hari, tanpa gerbang jendela). Koord/admin tercakup dalam `attended`.
                 const canMatikan = attended && isToday;
                 const isOn = d.monitor_enabled !== 0;
                 return (
@@ -473,7 +481,7 @@ function InspeksiTab({ isManager }: { isManager: boolean }) {
                       <button
                         disabled={!canHidupkan || isOn}
                         onClick={() => canHidupkan && !isOn && setPowerOn(d)}
-                        title={!canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : !attended ? 'Absen masuk dulu untuk bisa menghidupkan peralatan' : isOn ? 'Peralatan sudah hidup & dimonitor' : 'Hidupkan + mulai monitoring (wajib foto dokumentasi)'}
+                        title={isOn ? 'Peralatan sudah hidup & dimonitor' : !canPress ? 'Terkunci (hanya hari ini & teknisi on-duty)' : !attended ? 'Absen masuk dulu untuk bisa menghidupkan peralatan' : !powerGate.hasShift ? 'Anda tidak terjadwal dinas hari ini' : !powerGate.allowed ? `Menghidupkan peralatan dibuka pukul ${powerGate.opensAt} (1 jam sebelum jam dinas Anda)` : 'Hidupkan + mulai monitoring (wajib foto dokumentasi)'}
                         className={`flex-1 border rounded px-2 py-1.5 text-[11px] font-semibold ${isOn
                           ? 'bg-success/15 border-success/40 text-success cursor-default'
                           : canHidupkan ? 'border-accent/40 text-accent hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
@@ -552,7 +560,14 @@ function InspectOverrideModal({ existing, onClose, onSaved }: { existing: Inspec
     if (!reason.trim()) return setErr('Alasan wajib diisi.');
     setBusy(true); setErr('');
     try {
-      await api.post('/equipment/inspect-override', { reason: reason.trim() });
+      const res = await api.post('/equipment/inspect-override', { reason: reason.trim() });
+      if (res.data?.resumed > 0) {
+        await alertDialog({
+          title: 'Inspeksi Dibuka',
+          message: `Akses inspeksi & hidupkan/matikan dibuka untuk hari ini.\n\n${res.data.resumed} peralatan yang sebelumnya "Dimatikan" otomatis dilanjutkan monitoringnya (status kembali Hidup).`,
+          variant: 'success',
+        });
+      }
       onSaved();
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Gagal menyimpan.');
@@ -562,7 +577,7 @@ function InspectOverrideModal({ existing, onClose, onSaved }: { existing: Inspec
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-1">🔓 Izinkan Inspeksi Hari Ini</h3>
-        <p className="text-[11px] text-text2 mb-3">Membuka akses <b>inspeksi + hidupkan/matikan peralatan</b> untuk teknisi yang terjadwal dinas <b>hari ini</b> di unit Anda — meski absen belum/salah tercatat. Berlaku sampai ganti hari.</p>
+        <p className="text-[11px] text-text2 mb-3">Membuka akses <b>inspeksi + hidupkan/matikan peralatan</b> untuk teknisi yang terjadwal dinas <b>hari ini</b> di unit Anda — meski absen belum/salah tercatat. Berlaku sampai ganti hari. Peralatan yang sebelumnya <b>"Dimatikan"</b> otomatis dilanjutkan monitoringnya (kembali <b>Hidup</b>).</p>
         <label className="block text-[11px] text-text2 mb-1">Alasan <span className="text-danger">*</span></label>
         <textarea className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs min-h-[70px] mb-2" placeholder="mis. absen pagi ter-record tanggal kemarin (bug), teknisi sudah hadir." value={reason} onChange={(e) => setReason(e.target.value)} />
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}

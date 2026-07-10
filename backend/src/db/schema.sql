@@ -771,6 +771,21 @@ CREATE TABLE IF NOT EXISTS equipment_poweron (
   FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- Override koordinator (append-only): saat koordinator MEMBUKA akses inspeksi/hidup-matikan
+-- peralatan untuk teknisi terjadwal pada satu hari (mis. absen salah tanggal). Wajib alasan;
+-- jadi catatan permanen & tampil di Laporan Bulanan sebagai kegiatan harian.
+CREATE TABLE IF NOT EXISTS equipment_inspect_overrides (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  work_date DATE NOT NULL,
+  reason VARCHAR(255) NOT NULL,
+  created_by INT DEFAULT NULL,
+  created_by_name VARCHAR(120) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_inspovr_unit_date (unit_id, work_date),
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 -- Dokumentasi foto penyelesaian jendela maintenance (banyak foto per jendela).
 CREATE TABLE IF NOT EXISTS maintenance_window_photos (
   id INT AUTO_INCREMENT PRIMARY KEY,
