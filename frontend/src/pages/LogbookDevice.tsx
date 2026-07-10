@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { openImage } from '../components/ImageLightbox';
-import { kindBadge, fmtDate, monthLabel, type LogEvent, type LogRecap } from './Logbook';
+import { kindBadge, fmtDate, monthLabel, buildPrintHtml, type LogEvent, type LogRecap } from './Logbook';
 
 // Detail satu peralatan: identitas + info teknis + rekap bulan + kronologi aktivitas.
 interface DeviceDetail {
@@ -12,6 +12,7 @@ interface DeviceDetail {
   monitor_enabled: number; off_reason: string | null; always_on: number; inspect_required: number;
   last_checked_at: string | null; offline_since: string | null; lat: number | null; lng: number | null;
   recap: LogRecap; events: LogEvent[];
+  daily: { date: string; up_pct: number; avg_ping: number; samples: number }[];
 }
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
@@ -41,6 +42,21 @@ export default function LogbookDevice() {
 
   const setMonth = (m: string) => { const n = new URLSearchParams(sp); n.set('month', m); setSp(n, { replace: true }); };
 
+  async function exportExcel() {
+    if (!d) return;
+    const res = await api.get(`/logbook/device/${id}/export`, { params: { month }, responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a'); a.href = url; a.download = `logbook-${d.name}-${month}.xlsx`; a.click();
+    URL.revokeObjectURL(url);
+  }
+  function cetak() {
+    if (!d) return;
+    const w = window.open('', '_blank'); if (!w) return;
+    w.document.write(buildPrintHtml([d], month));
+    w.document.close();
+    setTimeout(() => { try { w.focus(); w.print(); } catch { /**/ } }, 900);
+  }
+
   const monitorLabel = !d ? ''
     : d.always_on ? '🕒 Selalu aktif 24 jam'
     : d.monitor_enabled === 0 ? '⚫ Dimatikan · dijeda'
@@ -50,7 +66,11 @@ export default function LogbookDevice() {
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <button onClick={() => nav(`/logbook?month=${month}`)} className="text-text2 hover:text-text text-xs font-semibold flex items-center gap-1">← Logbook Peralatan</button>
-        <input type="month" className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-xs" value={month} onChange={(e) => setMonth(e.target.value)} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="month" className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-xs" value={month} onChange={(e) => setMonth(e.target.value)} />
+          {d && <button onClick={cetak} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs font-semibold">🖨️ Cetak</button>}
+          {d && <button onClick={exportExcel} className="border border-accent2/40 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">⬇️ Excel</button>}
+        </div>
       </div>
 
       {loading ? (
@@ -90,6 +110,49 @@ export default function LogbookDevice() {
             <Stat label="🛠️ Maintenance" value={String(d.recap.maintenance.total)} sub={`${d.recap.maintenance.selesai} selesai`} />
             <Stat label="🚨 Insiden" value={String(d.recap.insiden.total)} sub={d.recap.insiden.downtime_min ? `${d.recap.insiden.downtime_min} mnt down` : 'tanpa downtime'} />
           </div>
+
+          {/* Tren uptime harian */}
+          {d.daily.length > 0 && (
+            <div className="bg-surface border border-border rounded-xl p-4 mb-3">
+              <div className="text-sm font-semibold mb-3">📈 Tren Uptime Harian</div>
+              <div className="flex items-end gap-1 h-28">
+                {d.daily.map((day) => {
+                  const col = day.up_pct >= 99 ? 'bg-success' : day.up_pct >= 95 ? 'bg-warn' : 'bg-danger';
+                  return (
+                    <div key={day.date} className="flex-1 flex flex-col items-center gap-1 h-full justify-end min-w-0" title={`${day.date} · ${day.up_pct}% uptime · lat ${day.avg_ping} ms · ${day.samples} sampel`}>
+                      {d.daily.length <= 20 && <span className="text-[8px] text-text2">{day.up_pct}</span>}
+                      <div className={`w-full rounded-t ${col}`} style={{ height: `${Math.max(2, day.up_pct)}%` }} />
+                      <span className="text-[8px] text-text2">{new Date(day.date + 'T00:00:00').getDate()}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-text2 mt-2">Persentase waktu online per hari (di luar jendela maintenance). 🟢 ≥99% · 🟡 ≥95% · 🔴 &lt;95%.</div>
+            </div>
+          )}
+
+          {/* Galeri dokumentasi (foto dari inspeksi / hidup-mati / maintenance) */}
+          {(() => {
+            const photos = d.events.filter((e) => e.photo_url);
+            if (!photos.length) return null;
+            return (
+              <div className="bg-surface border border-border rounded-xl p-4 mb-3">
+                <div className="text-sm font-semibold mb-3">🖼️ Galeri Dokumentasi <span className="text-text2 font-normal text-xs">· {photos.length} foto</span></div>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                  {photos.map((e, i) => {
+                    const km = kindBadge(e);
+                    return (
+                      <button key={i} onClick={() => openImage(e.photo_url)} title={`${km.label} · ${fmtDate(e.date)}${e.by ? ' · ' + e.by : ''}`} className="relative aspect-square rounded-lg overflow-hidden border border-border hover:border-accent/50">
+                        <img src={e.photo_url} alt={e.label} loading="lazy" className="w-full h-full object-cover" />
+                        <span className="absolute top-1 left-1 text-[10px] leading-none px-1 py-0.5 rounded bg-black/60 text-white">{km.icon}</span>
+                        <span className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[8px] px-1 py-0.5 flex items-center justify-between"><span>{fmtDate(e.date)}</span><span>{e.verified ? '✅' : '⚠️'}</span></span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Kronologi aktivitas */}
           <div className="bg-surface border border-border rounded-xl overflow-hidden">

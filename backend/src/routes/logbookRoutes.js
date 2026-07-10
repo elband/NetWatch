@@ -138,7 +138,16 @@ export async function buildLogbookDevice(month, deviceId, unitId = null) {
   if (!dev) return null; // tak ada / di luar unit
   const { month: mm, devices } = await buildLogbook(month, '', unitId);
   const base = devices.find((d) => d.id === id);
-  return { month: mm, device: { ...dev, recap: base?.recap || emptyRecap(), events: base?.events || [] } };
+  // Tren uptime harian dari device_metrics (kecualikan sampel dalam jendela maintenance).
+  const { start, end } = monthRange(month);
+  const [drows] = await pool.query(
+    `SELECT DATE(recorded_at) d, ROUND(AVG(status <> 'offline') * 100, 2) up_pct, ROUND(AVG(ping_ms)) avg_ping, COUNT(*) samples
+       FROM device_metrics WHERE device_id = ? AND recorded_at >= ? AND recorded_at < ? AND in_maint = 0
+      GROUP BY DATE(recorded_at) ORDER BY d`,
+    [id, start, end]
+  );
+  const daily = drows.map((r) => ({ date: dstr(r.d), up_pct: Number(r.up_pct) || 0, avg_ping: Number(r.avg_ping) || 0, samples: Number(r.samples) || 0 }));
+  return { month: mm, device: { ...dev, recap: base?.recap || emptyRecap(), events: base?.events || [], daily } };
 }
 
 router.get('/', async (req, res) => {
@@ -149,6 +158,26 @@ router.get('/device/:id', async (req, res) => {
   const data = await buildLogbookDevice(req.query.month, req.params.id, req.unitId);
   if (!data) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
   res.json(data);
+});
+
+// Excel khusus satu perangkat (kronologi bulan tsb).
+router.get('/device/:id/export', async (req, res) => {
+  const data = await buildLogbookDevice(req.query.month, req.params.id, req.unitId);
+  if (!data) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+  const d = data.device;
+  const KIND = { inspeksi: 'Inspeksi Harian', power: 'Hidupkan/Matikan', maintenance: 'Maintenance', insiden: 'Insiden' };
+  const rows = d.events.length
+    ? d.events.map((e) => ({
+        Tanggal: e.date, Jam: e.time || '-',
+        Jenis: e.kind === 'power' ? (e.status === 'mati' ? 'Matikan' : 'Hidupkan') : (KIND[e.kind] || e.kind),
+        Uraian: e.label, Status: e.status || '-', Catatan: e.detail || '-', Oleh: e.by || '-',
+      }))
+    : [{ Tanggal: '-', Jam: '-', Jenis: '-', Uraian: '(tidak ada aktivitas)', Status: '-', Catatan: '-', Oleh: '-' }];
+  const buf = await jsonToBuffer(`Logbook ${data.month}`, rows);
+  const safe = String(d.name).replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'perangkat';
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="logbook-${safe}-${data.month}.xlsx"`);
+  res.send(buf);
 });
 
 router.get('/export', async (req, res) => {

@@ -116,8 +116,8 @@ export function Chip({ label, sub }: { label: string; sub?: string }) {
   return <span className="inline-flex items-center gap-1 text-[10px] bg-surface2 border border-border rounded-full px-2 py-0.5">{label}{sub && <span className="text-text2">· {sub}</span>}</span>;
 }
 
-// HTML untuk cetak/PDF (dibuka di jendela baru).
-function buildPrintHtml(devices: LogDevice[], month: string): string {
+// HTML untuk cetak/PDF (dibuka di jendela baru). Dipakai daftar (semua) & halaman detail (1 device).
+export function buildPrintHtml(devices: LogDevice[], month: string): string {
   const origin = window.location.origin;
   const esc = (t: string) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const KIND: Record<string, string> = { inspeksi: 'Inspeksi', power: 'Hidup/Mati', maintenance: 'Maintenance', insiden: 'Insiden' };
