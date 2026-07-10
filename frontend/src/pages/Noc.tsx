@@ -21,7 +21,9 @@ interface NTrend { date: string; count: number }
 interface NKpi { total: number; online: number; warning: number; offline: number; activeInc: number; teknisiOn: number; availability: number }
 interface NUplink { id: number; name: string; ip: string; type: string | null; status: 'online' | 'warning' | 'offline'; ping_ms: number }
 interface NInternet { ok: boolean | null; ping: number | null; rxBps?: number | null; txBps?: number | null }
-interface NData { unit: { id: number; code: string; name: string; icon: string }; devices: NDevice[]; locations: NLoc[]; today: NInc[]; activeIncidents: NInc[]; technicians: NTech[]; deviceStats: NStat[]; topLocations: NTopLoc[]; services: NService[]; trend: NTrend[]; kpi: NKpi; uplink: NUplink[]; internet: NInternet; inspections: NInsp[]; ts: number }
+interface NFlight { id: number; dir: 'dep' | 'arr'; flight: string; airline: string; time: string; date: string; city: string; iata: string; airport: string; status: string; gate: string; counter: number | null; conveyor: number | null; reason: string }
+interface NFlights { departures: NFlight[]; arrivals: NFlight[]; updatedAt: number | null; ok: boolean }
+interface NData { unit: { id: number; code: string; name: string; icon: string }; devices: NDevice[]; locations: NLoc[]; today: NInc[]; activeIncidents: NInc[]; technicians: NTech[]; deviceStats: NStat[]; topLocations: NTopLoc[]; services: NService[]; trend: NTrend[]; kpi: NKpi; uplink: NUplink[]; internet: NInternet; inspections: NInsp[]; flights?: NFlights | null; ts: number }
 interface Metric { status: string; ping_ms: number; cpu: number | null; mem: number | null; recorded_at: string }
 
 const C = { online: '#22c55e', warning: '#f59e0b', offline: '#ef4444', dim: '#64748b', bg: '#070b10', panel: '#0f1620', panel2: '#0b1017', border: '#1e293b', accent: '#38bdf8', text: '#e2e8f0' };
@@ -31,6 +33,15 @@ const worst = (ds: NDevice[]) => (ds.some((d) => d.status === 'offline') ? 'offl
 const stColor = (s: string) => (s === 'offline' ? C.offline : s === 'warning' ? C.warning : s === 'online' ? C.online : C.dim);
 const incColor = (s: string) => (s === 'aktif' ? C.offline : s === 'proses' ? C.warning : C.online);
 const prioColor = (p: string) => (p === 'kritis' ? C.offline : p === 'tinggi' ? C.warning : C.dim);
+// Warna status penerbangan FIDS dari teks remark (mis. "Departured On-Time", "Delayed", "Boarding", "Cancelled").
+const flightSt = (s: string) => {
+  const t = (s || '').toLowerCase();
+  if (/cancel|batal/.test(t)) return C.offline;
+  if (/delay|lambat|late/.test(t)) return C.warning;
+  if (/board|final call|gate open|check.?in/.test(t)) return C.accent;
+  if (/on.?time|depart|arriv|land/.test(t)) return C.online;
+  return C.dim;
+};
 // Kode shift bandara: P=Pagi, S=Siang, N=Malam(Dinas Kantor), L=Libur, DL=Dinas Luar, C=Cuti.
 const shiftInfo = (s: string | null): { label: string; c: string; on: boolean } => {
   if (s === 'pagi') return { label: 'P', c: C.online, on: true };
@@ -188,6 +199,7 @@ export default function Noc() {
   // Auto-scroll daftar Gangguan Aktif & Inspeksi (loop pelan; jeda saat kursor di atasnya).
   const incScrollRef = useAutoScroll(data?.activeIncidents.length ?? 0);
   const inspScrollRef = useAutoScroll(data?.inspections?.length ?? 0);
+  const fidsScrollRef = useAutoScroll((data?.flights?.departures?.length ?? 0) + (data?.flights?.arrivals?.length ?? 0));
 
   // ===== Peta Leaflet =====
   const elRef = useRef<HTMLDivElement>(null);
@@ -434,8 +446,10 @@ export default function Noc() {
               </div>
             )}
           </div>
+          {/* Baris bawah: Telemetri/Tren + Penerbangan (FIDS) berdampingan */}
+          <div style={{ display: 'flex', gap: 10, height: 144, minHeight: 0 }}>
           {/* TELEMETRI / TREN */}
-          <div style={{ ...card, height: 144, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ ...card, flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             {sel ? (
               <>
                 <div style={{ ...cardTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -468,6 +482,35 @@ export default function Noc() {
                 <div style={{ fontSize: 10, color: C.dim, padding: '0 12px 8px' }}>Klik marker/perangkat untuk telemetri detail.</div>
               </>
             )}
+          </div>
+          {/* PENERBANGAN (FIDS) — jadwal keberangkatan & kedatangan bandara */}
+          {data?.flights && (
+            <div style={{ ...card, width: 340, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ ...cardTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>✈️ PENERBANGAN</span>
+                <span style={{ fontWeight: 500, color: C.dim }}>🛫 {data.flights.departures.length} · 🛬 {data.flights.arrivals.length}</span>
+              </div>
+              <div ref={fidsScrollRef} className="noc-scroll" style={{ overflow: 'auto', flex: 1, padding: '4px 8px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {(() => {
+                  const all = [...data.flights.departures, ...data.flights.arrivals];
+                  if (all.length === 0) return <div style={{ fontSize: 11, color: C.dim }}>{data.flights.ok ? 'Tidak ada jadwal.' : 'Memuat / FIDS tak terjangkau…'}</div>;
+                  return all.map((fl) => {
+                    const col = flightSt(fl.status);
+                    const dep = fl.dir === 'dep';
+                    return (
+                      <div key={fl.dir + fl.id} title={`${fl.airline ? fl.airline + ' · ' : ''}${fl.flight} · ${fl.status || '—'}${fl.gate ? ' · Gate ' + fl.gate : ''}${fl.counter ? ' · Konter ' + fl.counter : ''}${fl.conveyor ? ' · Belt ' + fl.conveyor : ''}${fl.reason ? ' · ' + fl.reason : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, lineHeight: 1.25 }}>
+                        <span style={{ fontSize: 11, flexShrink: 0 }}>{dep ? '🛫' : '🛬'}</span>
+                        <span className="mono" style={{ color: C.text, width: 34, flexShrink: 0 }}>{fl.time || '--:--'}</span>
+                        <span className="mono" style={{ color: C.accent, width: 56, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fl.flight || '—'}</span>
+                        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: C.dim }}>{dep ? '→ ' : '← '}{fl.city || fl.iata || fl.airport || '—'}</span>
+                        <span title={fl.status} style={{ width: 8, height: 8, borderRadius: 999, background: col, boxShadow: `0 0 5px ${col}`, flexShrink: 0 }} />
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          )}
           </div>
         </div>
 

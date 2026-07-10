@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { getUplinkSpeed } from '../services/uplinkSpeed.js';
+import { getFids } from '../services/fidsService.js';
 import { localDate } from '../utils/localDate.js';
 
 // Wallboard Publik (NOC): halaman layar-dinding TANPA login, digerbangi token rahasia
@@ -131,7 +132,10 @@ router.get('/public', async (req, res) => {
     txBps: spd?.txBps ?? null,
   };
 
-  res.json({ unit: v.unit, devices, locations, today, activeIncidents: activeInc, technicians: techs, deviceStats, topLocations, services, trend, kpi, uplink, internet, inspections, ts: Date.now() });
+  // Jadwal penerbangan FIDS (null bila FIDS_BASE_URL tak diset → panel disembunyikan).
+  const flights = getFids();
+
+  res.json({ unit: v.unit, devices, locations, today, activeIncidents: activeInc, technicians: techs, deviceStats, topLocations, services, trend, kpi, uplink, internet, inspections, flights, ts: Date.now() });
 });
 
 // Telemetri per perangkat (riwayat metrik singkat) — untuk panel telemetri saat diklik.

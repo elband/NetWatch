@@ -59,6 +59,15 @@ export const env = {
     apiKeyHeader: process.env.SIKEREN_API_KEY_HEADER || 'X-API-Key',
     account: process.env.SIKEREN_ACCOUNT || '', // id/username akun Murdoko di SiKeren (opsional)
   },
+  // FIDS (Flight Information Display System) bandara — sumber jadwal keberangkatan &
+  // kedatangan untuk panel Penerbangan di Command Center/Wallboard. Base URL diisi di .env
+  // (mis. http://103.210.122.2); KOSONG = fitur nonaktif (panel tak muncul di wallboard).
+  // Endpoint (Laravel, paginasi terkunci 5/hal): GET {baseUrl}/api/transaksi/keberangkatan|kedatangan
+  fids: {
+    baseUrl: (process.env.FIDS_BASE_URL || '').replace(/\/$/, ''),
+    apiKey: process.env.FIDS_API_KEY || '',            // opsional (API saat ini publik tanpa kunci)
+    apiKeyHeader: process.env.FIDS_API_KEY_HEADER || 'X-API-Key',
+  },
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   // URL publik aplikasi — dipakai untuk menyusun link di notifikasi WA (klik utk ambil/ingatkan).
   appUrl: (process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173').replace(/\/$/, ''),
