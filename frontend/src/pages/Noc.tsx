@@ -497,17 +497,17 @@ export default function Noc() {
           </div>
           <div style={{ ...card, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <div style={cardTitle}>👷 STATUS TEKNISI</div>
-            <div className="noc-scroll" style={{ overflow: 'auto', flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="noc-scroll" style={{ overflow: 'auto', flex: 1, padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 3 }}>
               {(data?.technicians || []).length === 0 ? <div style={{ fontSize: 11, color: C.dim }}>—</div> : data!.technicians.map((t) => {
                 const si = shiftInfo(t.shift_type);
                 const busy = t.handling > 0;
                 return (
-                  <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: 999, background: busy ? C.warning : si.c, boxShadow: `0 0 6px ${busy ? C.warning : si.c}` }} />
+                  <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 999, flexShrink: 0, background: busy ? C.warning : si.c, boxShadow: `0 0 5px ${busy ? C.warning : si.c}` }} />
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.emoji || '👤'} {t.name}</span>
-                    <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
-                      {busy && <span style={{ fontSize: 10, color: C.warning }}>🛠 {t.handling}</span>}
-                      <span className="mono" title="Kode shift hari ini" style={{ fontSize: 10, fontWeight: 800, color: si.c, border: `1px solid ${si.c}66`, borderRadius: 4, padding: '0 5px', minWidth: 16, textAlign: 'center' }}>{si.label}</span>
+                    <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {busy && <span style={{ fontSize: 9.5, color: C.warning }}>🛠 {t.handling}</span>}
+                      <span className="mono" title="Kode shift hari ini" style={{ fontSize: 9, fontWeight: 800, color: si.c, border: `1px solid ${si.c}66`, borderRadius: 3, padding: '0 4px', minWidth: 14, textAlign: 'center' }}>{si.label}</span>
                     </span>
                   </div>
                 );
