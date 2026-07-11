@@ -17,8 +17,19 @@ export const DEFAULT_SHIFT_WINDOWS = {
 };
 
 // Shift wajib (selalu punya jendela) vs opsional (hanya bila dikonfigurasi).
+// Kunci opsional HARUS 'malam' agar selaras dgn enum DB shift_type, "Atur Jam Dinas"
+// (jadwalRoutes menyimpan units.config.shift_windows.malam) & frontend (Jadwal.tsx).
 const REQUIRED_WINS = ['pagi', 'siang'];
 const OPTIONAL_WINS = ['malam'];
+
+// ===== Tipe shift — SATU sumber kebenaran =====
+// Semua logika "hari dinas / on-duty" HARUS mengacu ke daftar ini, jangan meng-hardcode
+// literal ('pagi','siang','malam') di query/route lain — itu sumber bug bila daftar berubah.
+// WORK = shift kerja (dihitung on-duty & target inspeksi); NONWORK = tak punya jam dinas.
+export const WORK_SHIFT_TYPES = [...REQUIRED_WINS, ...OPTIONAL_WINS]; // ['pagi','siang','malam']
+export const NONWORK_SHIFT_TYPES = ['libur', 'dinas_luar', 'cuti'];
+export const ALL_SHIFT_TYPES = [...WORK_SHIFT_TYPES, ...NONWORK_SHIFT_TYPES]; // selaras enum DB
+
 
 // Window aktif yang dipakai seluruh logika on-duty. Bisa di-override Koordinator
 // dari UI Jadwal (tersimpan di settings.shift_windows). Objek ini di-MUTASI in-place
@@ -188,7 +199,6 @@ export async function getDutyStatus(conn, userId, when = new Date()) {
 
 // ===== Gate "buka 1 jam sebelum jam dinas" (absensi & hidupkan-peralatan) =====
 const OPEN_BEFORE_MIN = 60;
-const WORK_SHIFTS = ['pagi', 'siang', 'malam'];
 
 const fmtHour = (h) => {
   const norm = ((h % 24) + 24) % 24;
@@ -206,8 +216,8 @@ const fmtHour = (h) => {
 export async function shiftOpenGate(conn, userId, when = new Date()) {
   const [[u]] = await conn.query('SELECT unit_id FROM users WHERE id = ? LIMIT 1', [userId]);
   const [rows] = await conn.query(
-    "SELECT shift_type FROM shifts WHERE user_id = ? AND shift_date = ? AND shift_type IN ('pagi','siang','malam')",
-    [userId, dateKey(when)]
+    'SELECT shift_type FROM shifts WHERE user_id = ? AND shift_date = ? AND shift_type IN (?)',
+    [userId, dateKey(when), WORK_SHIFT_TYPES]
   );
   if (!rows.length) return { hasShift: false, allowed: true, opensAt: null, shiftType: null };
   const win = getUnitWindows(u?.unit_id);
@@ -215,7 +225,7 @@ export async function shiftOpenGate(conn, userId, when = new Date()) {
   let best = null;
   for (const r of rows) {
     const w = win[r.shift_type];
-    if (!w || !WORK_SHIFTS.includes(r.shift_type)) continue;
+    if (!w || !WORK_SHIFT_TYPES.includes(r.shift_type)) continue;
     const openH = w.start - OPEN_BEFORE_MIN / 60;
     if (best == null || openH < best.openH) best = { openH, start: w.start, shiftType: r.shift_type };
   }

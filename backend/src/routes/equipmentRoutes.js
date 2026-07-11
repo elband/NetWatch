@@ -8,7 +8,7 @@ import exifr from 'exifr';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
-import { getDutyStatus, dateKey, shiftOpenGate } from '../config/shifts.js';
+import { getDutyStatus, dateKey, shiftOpenGate, WORK_SHIFT_TYPES } from '../config/shifts.js';
 import { withInspectionPhoto, INSPECTION_DIR, randName, randToken } from '../middleware/upload.js';
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
@@ -141,8 +141,8 @@ async function inspectOverrideFor(unitId) {
 // Terjadwal dinas (pagi/siang/malam) hari ini?
 async function hasWorkShiftToday(userId) {
   const [rows] = await pool.query(
-    "SELECT 1 FROM shifts WHERE user_id=? AND shift_date=? AND shift_type IN ('pagi','siang','malam') LIMIT 1",
-    [userId, dateKey(new Date())]
+    'SELECT 1 FROM shifts WHERE user_id=? AND shift_date=? AND shift_type IN (?) LIMIT 1',
+    [userId, dateKey(new Date()), WORK_SHIFT_TYPES]
   );
   return rows.length > 0;
 }

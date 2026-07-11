@@ -4,7 +4,7 @@ import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
-import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows, getUnitWindows } from '../config/shifts.js';
+import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows, getUnitWindows, ALL_SHIFT_TYPES } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -89,7 +89,7 @@ router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, re
 router.put('/:userId/:date', requireRole('admin', 'koordinator'), async (req, res) => {
   const { userId, date } = req.params;
   const { shiftType } = req.body;
-  if (!['pagi', 'siang', 'malam', 'libur', 'dinas_luar', 'cuti'].includes(shiftType)) {
+  if (!ALL_SHIFT_TYPES.includes(shiftType)) {
     return res.status(400).json({ error: 'shiftType tidak valid' });
   }
   // Unit shift mengikuti unit milik USER TARGET; teknisi di luar scope unit = tidak terlihat (404).

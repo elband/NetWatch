@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { getUplinkSpeed } from '../services/uplinkSpeed.js';
 import { getFids } from '../services/fidsService.js';
 import { localDate } from '../utils/localDate.js';
+import { WORK_SHIFT_TYPES } from '../config/shifts.js';
 
 // Wallboard Publik (NOC): halaman layar-dinding TANPA login, digerbangi token rahasia
 // di URL (?key=…) & di-scope ke satu unit (?unit=KODE). Data lengkap (dgn IP) sesuai
@@ -111,7 +112,7 @@ router.get('/public', async (req, res) => {
   const online = devices.filter((d) => d.status === 'online').length;
   const warning = devices.filter((d) => d.status === 'warning').length;
   const offline = devices.filter((d) => d.status === 'offline').length;
-  const teknisiOn = techs.filter((t) => ['pagi', 'siang', 'malam'].includes(t.shift_type)).length;
+  const teknisiOn = techs.filter((t) => WORK_SHIFT_TYPES.includes(t.shift_type)).length;
   const kpi = { total, online, warning, offline, activeInc: activeInc.length, teknisiOn, availability: total ? Math.round((online / total) * 100) : 100 };
 
   // Sumber internet / uplink (Mikrotik/SFP/WAN): utamakan perangkat yang DITANDAI is_uplink

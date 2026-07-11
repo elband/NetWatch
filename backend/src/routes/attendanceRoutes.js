@@ -5,7 +5,7 @@ import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/un
 import { queueWaNotification } from '../jobs/waQueue.js';
 import { audit } from '../services/audit.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
-import { shiftOpenGate, dateKey } from '../config/shifts.js';
+import { shiftOpenGate, dateKey, NONWORK_SHIFT_TYPES } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -195,7 +195,7 @@ router.get('/recap', requireRole('admin', 'koordinator'), async (req, res) => {
     const [[at]] = await pool.query('SELECT COUNT(check_in_at) hadir, COALESCE(SUM(flagged),0) flagged FROM attendance WHERE user_id=? AND work_date>=? AND work_date<?', [t.id, start, end]);
     const [present] = await pool.query("SELECT DATE_FORMAT(work_date,'%Y-%m-%d') d FROM attendance WHERE user_id=? AND check_in_at IS NOT NULL AND work_date>=? AND work_date<?", [t.id, start, end]);
     const presentSet = new Set(present.map((r) => r.d));
-    const [shifts] = await pool.query("SELECT DATE_FORMAT(shift_date,'%Y-%m-%d') d FROM shifts WHERE user_id=? AND shift_type NOT IN ('libur','dinas_luar','cuti') AND shift_date>=? AND shift_date<? AND shift_date<=?", [t.id, start, end, today]);
+    const [shifts] = await pool.query("SELECT DATE_FORMAT(shift_date,'%Y-%m-%d') d FROM shifts WHERE user_id=? AND shift_type NOT IN (?) AND shift_date>=? AND shift_date<? AND shift_date<=?", [t.id, NONWORK_SHIFT_TYPES, start, end, today]);
     const [leaves] = await pool.query("SELECT type, DATE_FORMAT(start_date,'%Y-%m-%d') s, DATE_FORMAT(end_date,'%Y-%m-%d') e FROM leave_requests WHERE user_id=? AND status='disetujui' AND start_date<? AND end_date>=?", [t.id, end, start]);
     const leaveSet = new Set();
     const byType = { izin: 0, sakit: 0, cuti: 0, dinas_luar: 0 };
@@ -231,12 +231,12 @@ router.get('/absences', requireRole('admin', 'koordinator'), async (req, res) =>
        LEFT JOIN attendance a ON a.user_id=s.user_id AND a.work_date=s.shift_date AND a.check_in_at IS NOT NULL
        LEFT JOIN absence_reviews ar ON ar.user_id=s.user_id AND ar.work_date=s.shift_date
        LEFT JOIN users du ON du.id=ar.decided_by
-      WHERE s.shift_type NOT IN ('libur','dinas_luar','cuti')${uf.clause}
+      WHERE s.shift_type NOT IN (?)${uf.clause}
         AND s.shift_date>=? AND s.shift_date<? AND s.shift_date<CURDATE()
         AND a.id IS NULL
         AND NOT EXISTS (SELECT 1 FROM leave_requests lr WHERE lr.user_id=s.user_id AND lr.status='disetujui' AND s.shift_date BETWEEN lr.start_date AND lr.end_date)
       ORDER BY (ar.status IS NULL) DESC, s.shift_date DESC, u.name`,
-    [...uf.params, start, end]
+    [NONWORK_SHIFT_TYPES, ...uf.params, start, end]
   );
   res.json({ month, absences: rows });
 });

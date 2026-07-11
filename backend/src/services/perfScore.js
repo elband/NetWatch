@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import { SLA_MINUTES } from '../config/shifts.js';
+import { SLA_MINUTES, WORK_SHIFT_TYPES } from '../config/shifts.js';
 import { unitFilter } from '../middleware/unitScope.js';
 
 // =============================================================================
@@ -72,8 +72,8 @@ export async function scoreTeknisi(userId, start, end, unitId) {
   );
   // Target inspeksi = jumlah HARI DINAS teknisi bulan itu (shift kerja pagi/siang/malam).
   const [[hd]] = await pool.query(
-    "SELECT COUNT(DISTINCT shift_date) d FROM shifts WHERE user_id=? AND shift_type IN ('pagi','siang','malam') AND shift_date>=? AND shift_date<?",
-    [userId, start, end]
+    'SELECT COUNT(DISTINCT shift_date) d FROM shifts WHERE user_id=? AND shift_type IN (?) AND shift_date>=? AND shift_date<?',
+    [userId, WORK_SHIFT_TYPES, start, end]
   );
   const hariDinas = Number(hd.d) || 0;
   // PM: dinilai dari Maintenance Bulanan (equipment_maintenance) yang dikelola di tab

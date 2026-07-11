@@ -6,6 +6,7 @@ import { logger } from '../config/logger.js';
 import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 import { computeDuePlans } from '../controllers/assetOpsController.js';
 import { computeLowStock } from '../controllers/sparepartController.js';
+import { WORK_SHIFT_TYPES } from '../config/shifts.js';
 
 const inUnit = (rowUnit, userUnit) => rowUnit == null || userUnit == null || Number(rowUnit) === Number(userUnit);
 
@@ -51,9 +52,10 @@ export async function sendDailyMaintenanceReminders() {
      FROM users u
      JOIN shifts s ON s.user_id = u.id
      WHERE s.shift_date = CURDATE()
-       AND s.shift_type IN ('pagi', 'siang', 'malam')
+       AND s.shift_type IN (?)
        AND (u.role = 'teknisi' OR JSON_CONTAINS(u.roles, '"teknisi"'))
-       AND u.phone IS NOT NULL AND u.phone <> ''`
+       AND u.phone IS NOT NULL AND u.phone <> ''`,
+    [WORK_SHIFT_TYPES]
   );
   // Koordinator per unit (penerima reminder PM walau tidak dinas).
   const [coords] = await pool.query(
