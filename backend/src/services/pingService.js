@@ -9,6 +9,15 @@ import { nextIncidentId } from '../utils/incidentId.js';
 // Step final insiden (selaras dengan incidentController.FINAL_STEP).
 const FINAL_STEP = 2;
 
+// Guard "monitor buta" — cegah alarm palsu MASSAL saat server monitoring sendiri
+// kehilangan konektivitas (semua perangkat tampak offline padahal sehat). Sebuah unit
+// dianggap "buta" pada sweep bila perangkat uplink-nya ikut offline, ATAU rasio perangkat
+// "seharusnya nyala" yang mendadak offline melewati ambang (dgn jumlah minimum agar unit
+// kecil tak salah pemicu). Alarm hilir di unit buta ditunda; perangkat uplink sendiri tetap
+// dialarmkan sbg akar masalah.
+const MASS_OFFLINE_RATIO = 0.6; // ≥60% perangkat "seharusnya nyala" offline → curiga outage monitor
+const MASS_OFFLINE_MIN = 4;     // hanya berlaku bila unit memantau ≥4 perangkat "seharusnya nyala"
+
 function meterFromStatus(prevStatus, alive, avgMs, thresholds) {
   if (!alive) return { status: 'offline', pingMs: 0 };
   const pingMs = Math.round(avgMs || 0);
@@ -79,6 +88,11 @@ export async function checkAllDevices(io) {
   // Kumpulan baris metrik time-series untuk satu sweep → satu bulk insert di akhir.
   const metricRows = [];
 
+  // Pembuatan insiden otomatis DITUNDA sampai akhir sweep agar guard "monitor buta"
+  // (per unit) bisa dihitung dari seluruh hasil probe sweep ini terlebih dulu.
+  const alarmCandidates = [];       // perangkat offline-stabil yg lolos debounce → kandidat tiket
+  const unitStats = new Map();      // unitKey → { expected, deadExpected, uplinkOffline }
+
   for (const device of devices) {
     // Perangkat tanpa IP (ip diawali "N/A") tidak bisa di-ping dan tidak boleh
     // dideteksi otomatis offline/insiden. Tiket untuk perangkat ini hanya aktif
@@ -117,6 +131,18 @@ export async function checkAllDevices(io) {
     // tidak memicu insiden (guard `!offReason` di bawah) & tampil jelas di UI.
     if (underMaint && finalStatus !== 'online') offReason = 'maintenance';
 
+    // Statistik per unit untuk guard "monitor buta". Hanya perangkat "seharusnya nyala"
+    // (offReason null — bukan dimatikan/maintenance) yang dihitung, agar perangkat yang
+    // memang sengaja mati di jam malam tak mengembungkan rasio. Perangkat uplink yang
+    // offline = sinyal kuat internet/segmen putus.
+    {
+      const uk = device.unit_id ?? '__none__';
+      const st = unitStats.get(uk) || { expected: 0, deadExpected: 0, uplinkOffline: false };
+      if (!offReason) { st.expected++; if (finalStatus === 'offline') st.deadExpected++; }
+      if (device.is_uplink && !alive) st.uplinkOffline = true;
+      unitStats.set(uk, st);
+    }
+
     // Lacak kapan perangkat MULAI offline (offline_since): set saat offline pertama,
     // pertahankan selama masih offline, kosongkan saat tidak offline lagi. Dipakai
     // sebagai debounce "offline stabil X waktu" sebelum tiket otomatis dibuat.
@@ -138,43 +164,12 @@ export async function checkAllDevices(io) {
     // null → 0 dtk → belum dibuat tiket (memberi waktu perangkat yang cuma flap pulih).
     const offlineSec = device.offline_since ? (Date.now() - new Date(device.offline_since).getTime()) / 1000 : 0;
 
-    // Perangkat yang OFFLINE STABIL (≥ ambang) & belum punya insiden aktif → otomatis
-    // dibuatkan insiden ke POOL, lalu notifikasi ke teknisi on-duty. Dengan begitu
-    // insiden muncul di dashboard teknisi on-duty (pool) & koordinator. Tidak dibuat
-    // bila kategori "dimatikan"/maintenance, atau belum cukup lama offline (anti-flap).
+    // Perangkat yang OFFLINE STABIL (≥ ambang) & belum punya insiden aktif → kandidat
+    // insiden otomatis. Pembuatan tiketnya DITUNDA ke akhir sweep (setelah guard
+    // "monitor buta" dihitung). Tidak jadi kandidat bila kategori "dimatikan"/maintenance,
+    // atau belum cukup lama offline (anti-flap).
     if (finalStatus === 'offline' && !offReason && offlineSec >= thresholds.autoDetectOfflineSec) {
-      const conn = await pool.getConnection();
-      try {
-        const [existing] = await conn.query(
-          "SELECT id FROM incidents WHERE device_id = ? AND status != 'selesai' LIMIT 1",
-          [device.id]
-        );
-        if (!existing.length) {
-          const id = await nextIncidentId(conn);
-          const issue = 'Perangkat tidak merespons - deteksi otomatis';
-          await conn.query(
-            `INSERT INTO incidents (id, device_id, device_name, ip, issue, priority, tech_id, status, step, source, unit_id)
-             VALUES (?, ?, ?, ?, ?, 'kritis', NULL, 'aktif', 0, 'auto', ?)`,
-            [id, device.id, device.name, device.ip, issue, device.unit_id ?? null]
-          );
-          const sinceTxt = device.offline_since ? ` sejak ${new Date(device.offline_since).toLocaleString('id-ID')}` : '';
-          const stabilMnt = Math.round(thresholds.autoDetectOfflineSec / 60);
-          await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
-            id, `Deteksi otomatis: perangkat OFFLINE stabil${thresholds.autoDetectOfflineSec ? ` ≥ ${stabilMnt} mnt` : ''}${sinceTxt} (lolos debounce anti-flapping).`,
-          ]);
-          const n = await snapshotAndNotifyOnDuty(conn, { id, priority: 'kritis', deviceName: device.name, issue });
-          await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
-            id, n ? `Notifikasi dikirim ke ${n} teknisi on-duty.` : 'Tidak ada teknisi on-duty — insiden menunggu di pool.',
-          ]);
-          io?.emit('incident:new', { id, device: device.name });
-        }
-      } catch (e) {
-        // Kegagalan membuat insiden untuk SATU perangkat tidak boleh menjatuhkan
-        // seluruh sweep (perangkat lain harus tetap dipantau). Catat & lanjut.
-        logger.error({ err: e?.message || String(e), deviceId: device.id }, '[pingSweep] gagal membuat insiden otomatis');
-      } finally {
-        conn.release();
-      }
+      alarmCandidates.push(device);
     }
 
     // === Auto-Resolve berbasis stabilitas (anti-flapping) ====================
@@ -222,6 +217,58 @@ export async function checkAllDevices(io) {
         }
       }
     } catch { /* jangan ganggu sweep bila proses auto-resolve gagal */ }
+  }
+
+  // === Guard "monitor buta": tentukan unit yang diduga alami outage sisi-monitor ======
+  const blindUnits = new Set();
+  for (const [uk, st] of unitStats) {
+    const massOffline = st.expected >= MASS_OFFLINE_MIN && st.deadExpected / st.expected >= MASS_OFFLINE_RATIO;
+    if (st.uplinkOffline || massOffline) blindUnits.add(uk);
+  }
+  if (blindUnits.size) {
+    logger.warn({ blindUnits: [...blindUnits], candidates: alarmCandidates.length },
+      '[pingSweep] dugaan outage sisi-monitor — alarm hilir di unit terdampak ditunda');
+  }
+
+  // Buat insiden otomatis untuk kandidat yang lolos guard. Di unit "buta", alarm hilir
+  // ditunda (cegah badai alarm palsu); perangkat uplink itu sendiri TETAP dialarmkan
+  // sebagai akar masalah. Debounce tetap berjalan (offline_since bertahan), jadi perangkat
+  // yang benar-benar mati akan tetap teralarm pada sweep berikutnya saat monitor pulih.
+  for (const device of alarmCandidates) {
+    const uk = device.unit_id ?? '__none__';
+    if (blindUnits.has(uk) && !device.is_uplink) continue; // ditunda (alarm palsu massal)
+    const conn = await pool.getConnection();
+    try {
+      const [existing] = await conn.query(
+        "SELECT id FROM incidents WHERE device_id = ? AND status != 'selesai' LIMIT 1",
+        [device.id]
+      );
+      if (!existing.length) {
+        const id = await nextIncidentId(conn);
+        const issue = 'Perangkat tidak merespons - deteksi otomatis';
+        await conn.query(
+          `INSERT INTO incidents (id, device_id, device_name, ip, issue, priority, tech_id, status, step, source, unit_id)
+           VALUES (?, ?, ?, ?, ?, 'kritis', NULL, 'aktif', 0, 'auto', ?)`,
+          [id, device.id, device.name, device.ip, issue, device.unit_id ?? null]
+        );
+        const sinceTxt = device.offline_since ? ` sejak ${new Date(device.offline_since).toLocaleString('id-ID')}` : '';
+        const stabilMnt = Math.round(thresholds.autoDetectOfflineSec / 60);
+        await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
+          id, `Deteksi otomatis: perangkat OFFLINE stabil${thresholds.autoDetectOfflineSec ? ` ≥ ${stabilMnt} mnt` : ''}${sinceTxt} (lolos debounce anti-flapping).`,
+        ]);
+        const n = await snapshotAndNotifyOnDuty(conn, { id, priority: 'kritis', deviceName: device.name, issue });
+        await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
+          id, n ? `Notifikasi dikirim ke ${n} teknisi on-duty.` : 'Tidak ada teknisi on-duty — insiden menunggu di pool.',
+        ]);
+        io?.emit('incident:new', { id, device: device.name });
+      }
+    } catch (e) {
+      // Kegagalan membuat insiden untuk SATU perangkat tidak boleh menjatuhkan seluruh
+      // sweep (perangkat lain harus tetap dipantau). Catat & lanjut.
+      logger.error({ err: e?.message || String(e), deviceId: device.id }, '[pingSweep] gagal membuat insiden otomatis');
+    } finally {
+      conn.release();
+    }
   }
 
   // Bulk insert riwayat metrik (satu query untuk seluruh perangkat).
