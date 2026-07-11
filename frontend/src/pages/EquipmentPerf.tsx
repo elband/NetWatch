@@ -104,6 +104,7 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const trackRef = useRef<MediaStreamTrack | null>(null);
   const sharpCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sharpTimer = useRef<number | null>(null);
   const watchIdRef = useRef<number | null>(null);
@@ -112,6 +113,12 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
   const [sharp, setSharp] = useState(0);
   const [pos, setPos] = useState<GeoPoint | null>(null);
   const [posErr, setPosErr] = useState('');
+  // Zoom: pakai zoom NATIVE bila track kamera mendukung (getCapabilities().zoom) — foto ikut
+  // ter-zoom karena frame video sudah zoom. Bila tidak (mis. webcam laptop), fallback ke zoom
+  // DIGITAL: crop tengah frame saat capture + CSS scale untuk preview.
+  const [zoom, setZoom] = useState(1);
+  const [nativeZoom, setNativeZoom] = useState(false);
+  const [zoomRange, setZoomRange] = useState<{ min: number; max: number; step: number }>({ min: 1, max: 4, step: 0.25 });
 
   function stopWatchers() {
     if (sharpTimer.current != null) { clearInterval(sharpTimer.current); sharpTimer.current = null; }
@@ -120,9 +127,20 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
   function stop() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    trackRef.current = null;
     stopWatchers();
-    setSharp(0); setActive(false);
+    setSharp(0); setActive(false); setZoom(1);
   }
+  // Set zoom (dijepit ke rentang). Native → applyConstraints ke track; digital → dipakai
+  // saat crop capture & CSS scale preview.
+  function applyZoom(next: number) {
+    const z = Math.min(zoomRange.max, Math.max(zoomRange.min, Math.round(next * 100) / 100));
+    setZoom(z);
+    if (nativeZoom && trackRef.current) {
+      trackRef.current.applyConstraints({ advanced: [{ zoom: z } as unknown as MediaTrackConstraintSet] }).catch(() => {});
+    }
+  }
+  const zoomInc = Math.max(zoomRange.step, Math.round(((zoomRange.max - zoomRange.min) / 8) * 100) / 100);
   // Saat kamera aktif: wiring stream → <video>, jalankan loop ketajaman & watch lokasi.
   useEffect(() => {
     if (!active) return;
@@ -152,6 +170,18 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
     }
     try {
       streamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      // Deteksi zoom native track (umumnya kamera HP). Bila ada, pakai itu; jika tidak → digital.
+      const track = streamRef.current.getVideoTracks()[0] || null;
+      trackRef.current = track;
+      let nz = false, range = { min: 1, max: 4, step: 0.25 };
+      try {
+        const caps = track?.getCapabilities?.() as (MediaTrackCapabilities & { zoom?: { min: number; max: number; step?: number } }) | undefined;
+        if (caps?.zoom && typeof caps.zoom.max === 'number' && caps.zoom.max > (caps.zoom.min ?? 1)) {
+          nz = true;
+          range = { min: caps.zoom.min ?? 1, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
+        }
+      } catch { /* getCapabilities tak didukung → digital */ }
+      setNativeZoom(nz); setZoomRange(range); setZoom(nz ? range.min : 1);
       setActive(true);
     } catch {
       setErr('Tidak bisa mengakses kamera. Izinkan akses kamera di browser lalu coba lagi. (Unggah dari galeri dinonaktifkan untuk inspeksi.)');
@@ -165,7 +195,15 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
     canvas.width = v.videoWidth; canvas.height = v.videoHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    // Zoom digital: crop area tengah seukuran 1/zoom lalu skala ke penuh (native zoom sudah
+    // ter-zoom di frame video → gambar penuh apa adanya).
+    if (!nativeZoom && zoom > 1) {
+      const zw = v.videoWidth / zoom, zh = v.videoHeight / zoom;
+      const sx = (v.videoWidth - zw) / 2, sy = (v.videoHeight - zh) / 2;
+      ctx.drawImage(v, sx, sy, zw, zh, 0, 0, canvas.width, canvas.height);
+    } else {
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    }
     canvas.toBlob((blob) => {
       if (blob) onCapture(new File([blob], `kamera-${Date.now()}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }));
       stop();
@@ -198,10 +236,19 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
         <div className="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-3">
           {/* Kamera + gerbang ketajaman */}
           <div>
-            <div className="relative">
-              <video ref={videoRef} playsInline muted className="w-full rounded-lg border border-border bg-black max-h-[58vh] object-contain" />
+            <div className="relative overflow-hidden rounded-lg border border-border bg-black">
+              <video ref={videoRef} playsInline muted className="w-full bg-black max-h-[58vh] object-contain"
+                style={{ transform: !nativeZoom && zoom > 1 ? `scale(${zoom})` : undefined, transformOrigin: 'center center' }} />
               <div className={`absolute left-1/2 -translate-x-1/2 bottom-3 px-3 py-1.5 rounded-full text-[11px] font-semibold flex items-center gap-1.5 ${isSharp ? 'bg-success/90 text-white' : 'bg-black/75 text-white'}`}>
                 {isSharp ? '✅ Foto tajam — siap' : '🔍 Memeriksa ketajaman…'}
+              </div>
+              {/* Kontrol zoom (native bila didukung, jika tidak digital). */}
+              <div className="absolute top-2 right-2 flex flex-col items-center gap-1 bg-black/55 rounded-full p-1">
+                <button type="button" aria-label="Perbesar" onClick={() => applyZoom(zoom + zoomInc)} disabled={zoom >= zoomRange.max}
+                  className="w-8 h-8 rounded-full bg-white/90 text-black text-lg font-bold leading-none flex items-center justify-center disabled:opacity-40">+</button>
+                <span className="text-[10px] font-semibold text-white tabular-nums px-0.5">{zoom.toFixed(1)}×</span>
+                <button type="button" aria-label="Perkecil" onClick={() => applyZoom(zoom - zoomInc)} disabled={zoom <= zoomRange.min}
+                  className="w-8 h-8 rounded-full bg-white/90 text-black text-lg font-bold leading-none flex items-center justify-center disabled:opacity-40">−</button>
               </div>
             </div>
             <div className="mt-1.5 h-1.5 rounded bg-surface2 overflow-hidden" title="Indikator ketajaman">
