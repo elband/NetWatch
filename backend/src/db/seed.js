@@ -73,10 +73,10 @@ async function seed() {
     const [techRows] = await conn.query("SELECT id FROM users WHERE role='teknisi' ORDER BY id");
     const techIds = techRows.map((r) => r.id);
     const patterns = [
-      ['pagi', 'pagi', 'malam', 'malam', 'siang', 'siang', 'libur'],
-      ['siang', 'siang', 'pagi', 'pagi', 'libur', 'malam', 'malam'],
-      ['malam', 'libur', 'siang', 'siang', 'pagi', 'pagi', 'siang'],
-      ['libur', 'malam', 'malam', 'libur', 'malam', 'libur', 'pagi'],
+      ['pagi', 'pagi', 'Normal', 'Normal', 'siang', 'siang', 'libur'],
+      ['siang', 'siang', 'pagi', 'pagi', 'libur', 'Normal', 'Normal'],
+      ['Normal', 'libur', 'siang', 'siang', 'pagi', 'pagi', 'siang'],
+      ['libur', 'Normal', 'Normal', 'libur', 'Normal', 'libur', 'pagi'],
     ];
     const today = new Date();
     let shiftRows = 0;

@@ -5,11 +5,11 @@ import { hasRole } from '../utils/roles';
 import type { Shift, User } from '../types';
 
 // Kode & label resmi (selaras dengan Laporan Bulanan): N = Dinas Kantor, P = Pagi, S = Siang, L = Libur.
-const SHIFT_COLOR: Record<string, string> = { pagi: 'text-success bg-success/10', siang: 'text-warn bg-warn/10', malam: 'text-accent2 bg-accent2/10', libur: 'text-danger bg-danger/10', dinas_luar: 'text-[#a78bfa] bg-[#a78bfa]/10', cuti: 'text-[#f472b6] bg-[#f472b6]/10' };
-const SHIFT_ABBR: Record<string, string> = { pagi: 'P', siang: 'S', malam: 'N', libur: 'L', dinas_luar: 'DL', cuti: 'C' };
-const SHIFT_LABEL: Record<string, string> = { pagi: 'Dinas Pagi', siang: 'Dinas Siang', malam: 'Dinas Kantor', libur: 'Libur', dinas_luar: 'Dinas Luar', cuti: 'Cuti' };
+const SHIFT_COLOR: Record<string, string> = { pagi: 'text-success bg-success/10', siang: 'text-warn bg-warn/10', Normal: 'text-accent2 bg-accent2/10', libur: 'text-danger bg-danger/10', dinas_luar: 'text-[#a78bfa] bg-[#a78bfa]/10', cuti: 'text-[#f472b6] bg-[#f472b6]/10' };
+const SHIFT_ABBR: Record<string, string> = { pagi: 'P', siang: 'S', Normal: 'N', libur: 'L', dinas_luar: 'DL', cuti: 'C' };
+const SHIFT_LABEL: Record<string, string> = { pagi: 'Dinas Pagi', siang: 'Dinas Siang', Normal: 'Dinas Kantor (Normal)', libur: 'Libur', dinas_luar: 'Dinas Luar', cuti: 'Cuti' };
 // DL (dinas_luar) tidak masuk siklus klik — hanya lewat pengajuan teknisi + persetujuan koordinator.
-const SHIFTS = ['malam', 'pagi', 'siang', 'libur'];
+const SHIFTS = ['Normal', 'pagi', 'siang', 'libur'];
 
 // Pakai komponen tanggal lokal (bukan toISOString) agar tidak bergeser akibat
 // konversi ke UTC (WIB = UTC+7 menyebabkan tanggal lokal mundur 1 hari).
@@ -125,7 +125,7 @@ export default function Jadwal() {
 
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-3 text-[10px] text-text2">
-          {(['malam', 'pagi', 'siang', 'libur', 'dinas_luar', 'cuti'] as const).map((s) => (
+          {(['Normal', 'pagi', 'siang', 'libur', 'dinas_luar', 'cuti'] as const).map((s) => (
             <span key={s} className={`px-2 py-0.5 rounded font-bold ${SHIFT_COLOR[s]}`}>{SHIFT_ABBR[s]} = {SHIFT_LABEL[s]}</span>
           ))}
           {canEdit && <span className="text-text2">· klik sel untuk ganti shift · DL & C (Cuti) hanya dari pengajuan teknisi yang disetujui</span>}
@@ -163,7 +163,7 @@ export default function Jadwal() {
           </thead>
           <tbody>
             {rowTechs.map((t) => {
-              const c = { pagi: 0, siang: 0, malam: 0, libur: 0 } as Record<string, number>;
+              const c = { pagi: 0, siang: 0, Normal: 0, libur: 0 } as Record<string, number>;
               return (
                 <tr key={t.id} className="hover:bg-surface2/40">
                   <td className="sticky left-0 z-10 bg-surface text-left text-[12px] px-3 py-1.5 border-b border-r border-border whitespace-nowrap">{t.name}</td>
@@ -186,7 +186,7 @@ export default function Jadwal() {
                     );
                   })}
                   <td className="border-b border-l border-border text-[9px] text-text2 px-1.5 py-1.5 whitespace-nowrap">
-                    <span className="text-success">{c.pagi}</span>/<span className="text-warn">{c.siang}</span>/<span className="text-accent2">{c.malam}</span>/<span className="text-danger">{c.libur}</span>
+                    <span className="text-success">{c.pagi}</span>/<span className="text-warn">{c.siang}</span>/<span className="text-accent2">{c.Normal}</span>/<span className="text-danger">{c.libur}</span>
                   </td>
                 </tr>
               );
@@ -204,16 +204,16 @@ export default function Jadwal() {
 }
 
 // ===================== ATUR JAM DINAS (SHIFT WINDOWS) =====================
-type ShiftKey = 'pagi' | 'siang' | 'malam';
+type ShiftKey = 'pagi' | 'siang' | 'Normal';
 interface Win { start: number; end: number }
-// Pagi & Siang wajib (selalu jendela on-duty). Dinas Kantor (N) opsional —
+// Pagi & Siang wajib (selalu jendela on-duty). Dinas Kantor "Normal" (N) opsional —
 // ditambahkan koordinator lewat tombol "+ Tambah Aturan".
-const OPTIONAL_KEYS: ShiftKey[] = ['malam'];
-const ROW_ORDER: ShiftKey[] = ['pagi', 'siang', 'malam'];
+const OPTIONAL_KEYS: ShiftKey[] = ['Normal'];
+const ROW_ORDER: ShiftKey[] = ['pagi', 'siang', 'Normal'];
 const ROW_META: Record<ShiftKey, { abbr: string; label: string; color: string }> = {
   pagi: { abbr: 'P', label: 'Dinas Pagi', color: 'var(--color-success)' },
   siang: { abbr: 'S', label: 'Dinas Siang', color: 'var(--color-warn)' },
-  malam: { abbr: 'N', label: 'Dinas Kantor', color: 'var(--color-accent2)' },
+  Normal: { abbr: 'N', label: 'Dinas Kantor (Normal)', color: 'var(--color-accent2)' },
 };
 const hourToTime = (h: number) => {
   const hh = Math.floor(h); const mm = Math.round((h - hh) * 60);
@@ -259,7 +259,7 @@ function ShiftRulesModal({ onClose }: { onClose: () => void }) {
     setOk(false);
   }
   function addRule(key: ShiftKey) {
-    setWins((w) => (w ? { ...w, [key]: defaults[key] || { start: 20, end: 5 } } : w));
+    setWins((w) => (w ? { ...w, [key]: defaults[key] || { start: 4, end: 22 } } : w));
     setOk(false);
   }
   function removeRule(key: ShiftKey) {

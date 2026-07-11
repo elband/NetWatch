@@ -21,7 +21,7 @@ router.use(unitScope); // scoping multi-unit
 
 const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-const SHIFT_CODE = { pagi: 'P', siang: 'S', malam: 'N', libur: 'L', dinas_luar: 'DL', cuti: 'C' };
+const SHIFT_CODE = { pagi: 'P', siang: 'S', Normal: 'N', libur: 'L', dinas_luar: 'DL', cuti: 'C' };
 // Jam operasional harian peralatan (05:00–20:00 = 15 jam) untuk evaluasi kinerja.
 const OPS_HOURS_PER_DAY = 15;
 

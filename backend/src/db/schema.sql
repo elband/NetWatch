@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   shift_date DATE NOT NULL,
-  shift_type ENUM('pagi','siang','malam','libur','dinas_luar','cuti') NOT NULL DEFAULT 'libur',
+  shift_type ENUM('pagi','siang','Normal','libur','dinas_luar','cuti') NOT NULL DEFAULT 'libur',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_user_date (user_id, shift_date),

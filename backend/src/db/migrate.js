@@ -137,8 +137,42 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'users', 'device_id', 'VARCHAR(80) DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'attendance', 'accuracy_m', 'INT DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'attendance', 'device_id', 'VARCHAR(80) DEFAULT NULL');
-  // Tambah status 'dinas_luar' pada jadwal (aturan = Libur: tidak on-duty).
-  try { await conn.query("ALTER TABLE shifts MODIFY COLUMN shift_type ENUM('pagi','siang','malam','libur','dinas_luar','cuti') NOT NULL DEFAULT 'libur'"); } catch { /* sudah */ }
+  // Jadwal dinas: shift opsional "Dinas Kantor" kini bernama 'Normal' (04:00–22:00),
+  // menggantikan 'malam' lama. Migrasi idempotent: hanya berjalan bila enum masih memuat
+  // 'malam' → perluas enum, pindahkan baris data, lalu buang 'malam'. (aturan 'dinas_luar'
+  // & 'cuti' = seperti Libur: tidak on-duty.)
+  try {
+    const [[col]] = await conn.query(
+      "SELECT COLUMN_TYPE ct FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME='shifts' AND COLUMN_NAME='shift_type'",
+      [env.db.database]
+    );
+    if (col && /'malam'/.test(col.ct)) {
+      await conn.query("ALTER TABLE shifts MODIFY COLUMN shift_type ENUM('pagi','siang','malam','Normal','libur','dinas_luar','cuti') NOT NULL DEFAULT 'libur'");
+      await conn.query("UPDATE shifts SET shift_type='Normal' WHERE shift_type='malam'");
+    }
+    await conn.query("ALTER TABLE shifts MODIFY COLUMN shift_type ENUM('pagi','siang','Normal','libur','dinas_luar','cuti') NOT NULL DEFAULT 'libur'");
+  } catch { /* sudah ter-migrate */ }
+  // Pindahkan kunci jam-dinas 'malam' → 'Normal' pada JSON config (units.config.shift_windows
+  // & settings.shift_windows) bila ada sisa konfigurasi lama.
+  try {
+    const [units] = await conn.query("SELECT id, config FROM units");
+    for (const u of units) {
+      let cfg = typeof u.config === 'string' ? JSON.parse(u.config || '{}') : (u.config || {});
+      const sw = cfg?.shift_windows;
+      if (sw && sw.malam && !sw.Normal) {
+        sw.Normal = sw.malam; delete sw.malam;
+        await conn.query('UPDATE units SET config=? WHERE id=?', [JSON.stringify(cfg), u.id]);
+      }
+    }
+    const [[gs]] = await conn.query("SELECT setting_value FROM settings WHERE setting_key='shift_windows'");
+    if (gs?.setting_value) {
+      let sw = typeof gs.setting_value === 'string' ? JSON.parse(gs.setting_value) : gs.setting_value;
+      if (sw && sw.malam && !sw.Normal) {
+        sw.Normal = sw.malam; delete sw.malam;
+        await conn.query("UPDATE settings SET setting_value=? WHERE setting_key='shift_windows'", [JSON.stringify(sw)]);
+      }
+    }
+  } catch { /* abaikan; tak ada config lama */ }
   // Laporan hasil diklat (diunggah setelah pelaksanaan).
   await addColumnIfMissing(conn, env.db.database, 'pengajuan_diklat', 'laporan_url', 'VARCHAR(255) DEFAULT NULL AFTER file_pendukung');
   await addColumnIfMissing(conn, env.db.database, 'pengajuan_diklat', 'laporan_at', 'DATETIME DEFAULT NULL AFTER laporan_url');

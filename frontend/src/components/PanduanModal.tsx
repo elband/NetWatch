@@ -306,7 +306,7 @@ export default function PanduanModal({ onClose }: Props) {
                     {[
                       { shift: 'Pagi', jam: '05:00 – 13:00', color: 'bg-yellow-50 border-yellow-200' },
                       { shift: 'Siang', jam: '12:00 – 20:00', color: 'bg-orange-50 border-orange-200' },
-                      { shift: 'Malam', jam: '20:00 – 05:00', color: 'bg-indigo-50 border-indigo-200' },
+                      { shift: 'Normal (Dinas Kantor)', jam: '04:00 – 22:00', color: 'bg-indigo-50 border-indigo-200' },
                       { shift: 'Libur / Dinas Luar / Cuti', jam: '—', color: 'bg-gray-50 border-gray-200' },
                     ].map((s) => (
                       <div key={s.shift} className={`flex justify-between items-center rounded-lg border px-3 py-2 text-[12px] ${s.color}`}>

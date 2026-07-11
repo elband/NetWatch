@@ -10,7 +10,7 @@ import { downtimeMs, fmtDowntime, downtimeColor } from '../utils/downtime';
 import { nextStepLabel } from '../utils/steps';
 import type { Incident, IncidentQueue, Device } from '../types';
 
-const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi (05–13)', siang: 'Siang (12–20)', malam: 'Malam (20–05)' };
+const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi (05–13)', siang: 'Siang (12–20)', Normal: 'Normal (04–22)' };
 
 export default function MyIncidents() {
   const [queue, setQueue] = useState<IncidentQueue | null>(null);

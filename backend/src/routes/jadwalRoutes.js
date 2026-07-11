@@ -11,13 +11,14 @@ router.use(requireAuth);
 router.use(unitScope);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
-// Kode resmi selaras Laporan Bulanan: N = Dinas Kantor (disimpan sbg 'malam'), P = Pagi, S = Siang, L = Libur.
-const ABBR = { pagi: 'P', siang: 'S', malam: 'N', libur: 'L', dinas_luar: 'DL', cuti: 'C' };
-// Terima singkatan (N/P/S/L/DL/C; M tetap diterima utk kompatibilitas) maupun kata penuh, tidak peka huruf besar/kecil.
+// Kode resmi selaras Laporan Bulanan: N = Dinas Kantor (disimpan sbg 'Normal'), P = Pagi, S = Siang, L = Libur.
+const ABBR = { pagi: 'P', siang: 'S', Normal: 'N', libur: 'L', dinas_luar: 'DL', cuti: 'C' };
+// Terima singkatan (N/P/S/L/DL/C; M & 'malam' tetap diterima utk kompatibilitas impor lama) maupun
+// kata penuh, tidak peka huruf besar/kecil.
 const SHIFT_FROM = {
   p: 'pagi', pagi: 'pagi',
   s: 'siang', siang: 'siang',
-  n: 'malam', m: 'malam', malam: 'malam', kantor: 'malam',
+  n: 'Normal', normal: 'Normal', m: 'Normal', malam: 'Normal', kantor: 'Normal',
   l: 'libur', libur: 'libur',
   dl: 'dinas_luar', dinas_luar: 'dinas_luar', 'dinas luar': 'dinas_luar',
   c: 'cuti', cuti: 'cuti',
@@ -65,15 +66,15 @@ router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, re
     if (start === end) return res.status(400).json({ error: `Jam mulai & selesai shift "${k}" tidak boleh sama.` });
     out[k] = { start, end };
   }
-  // Dinas Kantor (malam) opsional — hanya disimpan bila dikirim & valid. Tidak dikirim = dinonaktifkan.
-  const m = body.malam;
+  // Dinas Kantor (Normal) opsional — hanya disimpan bila dikirim & valid. Tidak dikirim = dinonaktifkan.
+  const m = body.Normal;
   if (m && typeof m === 'object' && (m.start != null || m.end != null)) {
     const start = Number(m.start), end = Number(m.end);
     if (![start, end].every((n) => Number.isFinite(n) && n >= 0 && n <= 24)) {
       return res.status(400).json({ error: 'Jam shift "Dinas Kantor" tidak valid (gunakan 0–24).' });
     }
     if (start === end) return res.status(400).json({ error: 'Jam mulai & selesai shift "Dinas Kantor" tidak boleh sama.' });
-    out.malam = { start, end };
+    out.Normal = { start, end };
   }
   // Simpan ke units.config.shift_windows (per unit).
   const [[u]] = await pool.query('SELECT config FROM units WHERE id = ?', [unitId]);

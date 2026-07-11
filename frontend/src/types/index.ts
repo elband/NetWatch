@@ -420,7 +420,7 @@ export interface Incident {
   collaborators?: { user_id: number; name: string; emoji: string | null }[];
 }
 
-export type ShiftType = 'pagi' | 'siang' | 'malam' | 'libur';
+export type ShiftType = 'pagi' | 'siang' | 'Normal' | 'libur';
 
 export interface DutyStatus {
   onDuty: boolean;
@@ -440,7 +440,7 @@ export interface Shift {
   user_id: number;
   user_name: string;
   shift_date: string;
-  shift_type: 'pagi' | 'siang' | 'malam' | 'libur';
+  shift_type: 'pagi' | 'siang' | 'Normal' | 'libur';
 }
 
 export interface WaLogEntry {

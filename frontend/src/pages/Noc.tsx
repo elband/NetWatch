@@ -42,11 +42,11 @@ const flightSt = (s: string) => {
   if (/on.?time|depart|arriv|land/.test(t)) return C.online;
   return C.dim;
 };
-// Kode shift bandara: P=Pagi, S=Siang, N=Malam(Dinas Kantor), L=Libur, DL=Dinas Luar, C=Cuti.
+// Kode shift bandara: P=Pagi, S=Siang, N=Normal (Dinas Kantor), L=Libur, DL=Dinas Luar, C=Cuti.
 const shiftInfo = (s: string | null): { label: string; c: string; on: boolean } => {
   if (s === 'pagi') return { label: 'P', c: C.online, on: true };
   if (s === 'siang') return { label: 'S', c: C.online, on: true };
-  if (s === 'malam') return { label: 'N', c: C.online, on: true };
+  if (s === 'Normal') return { label: 'N', c: C.online, on: true };
   if (s === 'dinas_luar') return { label: 'DL', c: C.accent, on: false };
   if (s === 'cuti') return { label: 'C', c: C.dim, on: false };
   return { label: 'L', c: C.dim, on: false };
@@ -266,7 +266,7 @@ export default function Noc() {
   }
 
   const sys = kpi.offline > 0 ? { t: `${kpi.offline} PERANGKAT GANGGUAN`, c: C.offline } : kpi.warning > 0 ? { t: `${kpi.warning} WARNING`, c: C.warning } : { t: 'ALL SYSTEMS OPERATIONAL', c: C.online };
-  const onDuty = (data?.technicians || []).filter((t) => ['pagi', 'siang', 'malam'].includes(t.shift_type || ''));
+  const onDuty = (data?.technicians || []).filter((t) => ['pagi', 'siang', 'Normal'].includes(t.shift_type || ''));
   const trendMax = Math.max(1, ...(data?.trend || []).map((t) => t.count));
   const card: React.CSSProperties = { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10 };
   const cardTitle: React.CSSProperties = { fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, color: '#94a3b8', padding: '5px 10px', borderBottom: `1px solid ${C.border}` };

@@ -7,26 +7,26 @@
 // =====================================================================
 
 // Nilai default pabrik — dipakai bila belum ada pengaturan kustom di DB.
-// Pagi & Siang SELALU jadi jendela on-duty. Dinas Kantor (N/malam) OPSIONAL:
+// Pagi & Siang SELALU jadi jendela on-duty. Dinas Kantor "Normal" OPSIONAL:
 // hanya jadi jendela on-duty bila koordinator menambahkannya lewat "Atur Jam Dinas"
 // (default jam di bawah dipakai sebagai nilai awal saat aturan ditambahkan).
 export const DEFAULT_SHIFT_WINDOWS = {
-  pagi: { start: 5, end: 13 },   // 05:00 - 13:00
-  siang: { start: 12, end: 20 }, // 12:00 - 20:00
-  malam: { start: 20, end: 5 },  // 20:00 - 05:00 (lintas tengah malam) — nilai awal bila diaktifkan
+  pagi: { start: 5, end: 13 },     // 05:00 - 13:00
+  siang: { start: 12, end: 20 },   // 12:00 - 20:00
+  Normal: { start: 4, end: 22 },   // 04:00 - 22:00 (Dinas Kantor) — nilai awal bila diaktifkan
 };
 
 // Shift wajib (selalu punya jendela) vs opsional (hanya bila dikonfigurasi).
-// Kunci opsional HARUS 'malam' agar selaras dgn enum DB shift_type, "Atur Jam Dinas"
-// (jadwalRoutes menyimpan units.config.shift_windows.malam) & frontend (Jadwal.tsx).
+// Kunci opsional HARUS 'Normal' agar selaras dgn enum DB shift_type, "Atur Jam Dinas"
+// (jadwalRoutes menyimpan units.config.shift_windows.Normal) & frontend (Jadwal.tsx).
 const REQUIRED_WINS = ['pagi', 'siang'];
-const OPTIONAL_WINS = ['malam'];
+const OPTIONAL_WINS = ['Normal'];
 
 // ===== Tipe shift — SATU sumber kebenaran =====
 // Semua logika "hari dinas / on-duty" HARUS mengacu ke daftar ini, jangan meng-hardcode
-// literal ('pagi','siang','malam') di query/route lain — itu sumber bug bila daftar berubah.
+// literal ('pagi','siang','Normal') di query/route lain — itu sumber bug bila daftar berubah.
 // WORK = shift kerja (dihitung on-duty & target inspeksi); NONWORK = tak punya jam dinas.
-export const WORK_SHIFT_TYPES = [...REQUIRED_WINS, ...OPTIONAL_WINS]; // ['pagi','siang','malam']
+export const WORK_SHIFT_TYPES = [...REQUIRED_WINS, ...OPTIONAL_WINS]; // ['pagi','siang','Normal']
 export const NONWORK_SHIFT_TYPES = ['libur', 'dinas_luar', 'cuti'];
 export const ALL_SHIFT_TYPES = [...WORK_SHIFT_TYPES, ...NONWORK_SHIFT_TYPES]; // selaras enum DB
 
@@ -34,19 +34,19 @@ export const ALL_SHIFT_TYPES = [...WORK_SHIFT_TYPES, ...NONWORK_SHIFT_TYPES]; //
 // Window aktif yang dipakai seluruh logika on-duty. Bisa di-override Koordinator
 // dari UI Jadwal (tersimpan di settings.shift_windows). Objek ini di-MUTASI in-place
 // oleh loadShiftWindows() agar binding yang sudah di-import ikut melihat nilai terbaru.
-// Default: hanya pagi & siang (malam tidak on-duty kecuali diaktifkan).
+// Default: hanya pagi & siang (Normal/Dinas Kantor tidak on-duty kecuali diaktifkan).
 export const SHIFT_WINDOWS = {
   pagi: { ...DEFAULT_SHIFT_WINDOWS.pagi },
   siang: { ...DEFAULT_SHIFT_WINDOWS.siang },
 };
 
 // Jam dinas PER UNIT (Fase jam-dinas). Diisi dari units.config.shift_windows.
-// { [unitId]: { pagi:{start,end}, siang:{start,end}, malam?:{start,end} } }.
+// { [unitId]: { pagi:{start,end}, siang:{start,end}, Normal?:{start,end} } }.
 // Unit tanpa override memakai SHIFT_WINDOWS global.
 export const UNIT_SHIFT_WINDOWS = {};
 
 // Normalisasi objek windows dari sumber apa pun → pagi/siang wajib (fallback ke base),
-// malam opsional. `base` = nilai fallback bila field tidak valid.
+// Normal opsional. `base` = nilai fallback bila field tidak valid.
 function normalizeWindows(v, base) {
   const out = {};
   for (const k of REQUIRED_WINS) {
@@ -76,7 +76,7 @@ export async function loadShiftWindows(conn) {
     if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
     const g = normalizeWindows(v, DEFAULT_SHIFT_WINDOWS);
     SHIFT_WINDOWS.pagi = g.pagi; SHIFT_WINDOWS.siang = g.siang;
-    if (g.malam) SHIFT_WINDOWS.malam = g.malam; else delete SHIFT_WINDOWS.malam;
+    if (g.Normal) SHIFT_WINDOWS.Normal = g.Normal; else delete SHIFT_WINDOWS.Normal;
   } catch { /* pertahankan nilai global saat ini */ }
   // Per-unit dari units.config.shift_windows.
   try {

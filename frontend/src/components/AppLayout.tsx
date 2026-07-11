@@ -15,7 +15,7 @@ const ROLE_COLOR: Record<string, string> = {
   teknisi: '#0ea5e9',
   viewer: '#a78bfa',
 };
-const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi · 05.00–13.00', siang: 'Siang · 12.00–20.00', malam: 'Malam · 20.00–05.00' };
+const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi · 05.00–13.00', siang: 'Siang · 12.00–20.00', Normal: 'Normal · 04.00–22.00' };
 const ROLE_ORDER: Role[] = ['admin', 'koordinator', 'teknisi', 'viewer'];
 
 // Gabungkan menu dari semua peran user: item unik per id (dan per label, agar
