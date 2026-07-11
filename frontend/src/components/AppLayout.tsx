@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api, getActiveUnitId, setActiveUnitId } from '../api/client';
 import { hasRole, userRoles } from '../utils/roles';
+import { useShiftWindows, shiftLabel } from '../utils/shifts';
 import { NAV_ITEMS, PAGE_TITLES, UNIT_ONLY, type NavEntry } from './NavConfig';
 import NotificationCenter from './NotificationCenter';
 import ThemeToggle from './ThemeToggle';
@@ -15,7 +16,6 @@ const ROLE_COLOR: Record<string, string> = {
   teknisi: '#0ea5e9',
   viewer: '#a78bfa',
 };
-const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi · 05.00–13.00', siang: 'Siang · 12.00–20.00', Normal: 'Normal · 04.00–22.00' };
 const ROLE_ORDER: Role[] = ['admin', 'koordinator', 'teknisi', 'viewer'];
 
 // Gabungkan menu dari semua peran user: item unik per id (dan per label, agar
@@ -61,6 +61,7 @@ export default function AppLayout() {
   const [showProfile, setShowProfile] = useState(false);
   const location = useLocation();
   const [duty, setDuty] = useState<{ onDuty: boolean; shift: string | null } | null>(null);
+  const shiftWindows = useShiftWindows(); // jam dinas dinamis per-unit (bukan hardcode)
 
   const isTech = hasRole(user, 'teknisi');
   const isManager = hasRole(user, 'koordinator', 'admin');
@@ -116,7 +117,7 @@ export default function AppLayout() {
           <>
             <div className="text-center hidden md:block">
               <div className="text-text2 text-[9px] uppercase">{duty?.onDuty ? '☀️' : '🌙'} Shift</div>
-              <div className="text-[11px] font-semibold">{duty?.shift ? SHIFT_LABEL[duty.shift] : 'Di luar jadwal'}</div>
+              <div className="text-[11px] font-semibold">{duty?.shift ? shiftLabel(duty.shift, shiftWindows) : 'Di luar jadwal'}</div>
             </div>
             <span className="flex items-center gap-1.5">
               <span className="relative flex h-2.5 w-2.5">

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { unlockAudio, playAlarm, playTestBeep, audioReady } from '../utils/alarmSound';
+import { WORK_SHIFT_TYPES } from '../utils/shifts';
 
 // ===== COMMAND CENTER — Wallboard Publik NOC (tanpa login, token ?key=, per-unit ?unit=).
 // Tata letak: Header · Sidebar kiri (Layer/Top Lokasi/Statistik) · Tengah (KPI/Peta/Telemetri)
@@ -266,7 +267,7 @@ export default function Noc() {
   }
 
   const sys = kpi.offline > 0 ? { t: `${kpi.offline} PERANGKAT GANGGUAN`, c: C.offline } : kpi.warning > 0 ? { t: `${kpi.warning} WARNING`, c: C.warning } : { t: 'ALL SYSTEMS OPERATIONAL', c: C.online };
-  const onDuty = (data?.technicians || []).filter((t) => ['pagi', 'siang', 'Normal'].includes(t.shift_type || ''));
+  const onDuty = (data?.technicians || []).filter((t) => (WORK_SHIFT_TYPES as readonly string[]).includes(t.shift_type || ''));
   const trendMax = Math.max(1, ...(data?.trend || []).map((t) => t.count));
   const card: React.CSSProperties = { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10 };
   const cardTitle: React.CSSProperties = { fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, color: '#94a3b8', padding: '5px 10px', borderBottom: `1px solid ${C.border}` };

@@ -1,8 +1,20 @@
+import { useShiftWindows, fmtWindow } from '../utils/shifts';
+
 interface Props {
   onClose: () => void;
 }
 
 export default function PanduanModal({ onClose }: Props) {
+  const shiftWindows = useShiftWindows(); // jam dinas dinamis per-unit
+  // Baris shift untuk tabel panduan: jam diambil dari window efektif unit (bukan hardcode).
+  // Normal (Dinas Kantor) opsional — hanya tampil bila diaktifkan koordinator.
+  const shiftRows = [
+    { shift: 'Pagi', jam: fmtWindow(shiftWindows.pagi, ':') || '05:00 – 13:00', color: 'bg-yellow-50 border-yellow-200' },
+    { shift: 'Siang', jam: fmtWindow(shiftWindows.siang, ':') || '12:00 – 20:00', color: 'bg-orange-50 border-orange-200' },
+    ...(shiftWindows.Normal ? [{ shift: 'Normal (Dinas Kantor)', jam: fmtWindow(shiftWindows.Normal, ':')!, color: 'bg-indigo-50 border-indigo-200' }] : []),
+    { shift: 'Libur / Dinas Luar / Cuti', jam: '—', color: 'bg-gray-50 border-gray-200' },
+  ];
+
   function printPdf() {
     window.print();
   }
@@ -303,12 +315,7 @@ export default function PanduanModal({ onClose }: Props) {
                 <div>
                   <div className="font-semibold text-gray-800 text-[13px] mb-2 flex items-center gap-2">🗓️ Jenis Shift</div>
                   <div className="space-y-2">
-                    {[
-                      { shift: 'Pagi', jam: '05:00 – 13:00', color: 'bg-yellow-50 border-yellow-200' },
-                      { shift: 'Siang', jam: '12:00 – 20:00', color: 'bg-orange-50 border-orange-200' },
-                      { shift: 'Normal (Dinas Kantor)', jam: '04:00 – 22:00', color: 'bg-indigo-50 border-indigo-200' },
-                      { shift: 'Libur / Dinas Luar / Cuti', jam: '—', color: 'bg-gray-50 border-gray-200' },
-                    ].map((s) => (
+                    {shiftRows.map((s) => (
                       <div key={s.shift} className={`flex justify-between items-center rounded-lg border px-3 py-2 text-[12px] ${s.color}`}>
                         <span className="font-medium">{s.shift}</span>
                         <span className="text-gray-500 font-mono">{s.jam}</span>

@@ -8,11 +8,11 @@ import InviteCollabModal from '../components/InviteCollabModal';
 import IncidentDetailModal from '../components/IncidentDetailModal';
 import { downtimeMs, fmtDowntime, downtimeColor } from '../utils/downtime';
 import { nextStepLabel } from '../utils/steps';
+import { useShiftWindows, shiftLabel } from '../utils/shifts';
 import type { Incident, IncidentQueue, Device } from '../types';
 
-const SHIFT_LABEL: Record<string, string> = { pagi: 'Pagi (05–13)', siang: 'Siang (12–20)', Normal: 'Normal (04–22)' };
-
 export default function MyIncidents() {
+  const shiftWindows = useShiftWindows(); // jam dinas dinamis per-unit
   const [queue, setQueue] = useState<IncidentQueue | null>(null);
   const [selected, setSelected] = useState<Incident | null>(null);
   const [reportFor, setReportFor] = useState<Incident | null>(null);
@@ -91,7 +91,7 @@ export default function MyIncidents() {
         </span>
         <div className="text-xs">
           {duty?.onDuty ? (
-            <><span className="font-semibold text-success">Anda sedang ON-DUTY</span>{duty.shift && <span className="text-text2"> · Shift {SHIFT_LABEL[duty.shift] || duty.shift}</span>}<span className="text-text2"> — silakan ambil insiden dari pool di bawah.</span></>
+            <><span className="font-semibold text-success">Anda sedang ON-DUTY</span>{duty.shift && <span className="text-text2"> · Shift {shiftLabel(duty.shift, shiftWindows)}</span>}<span className="text-text2"> — silakan ambil insiden dari pool di bawah.</span></>
           ) : (
             <><span className="font-semibold text-warn">Anda sedang TIDAK on-duty</span><span className="text-text2"> — insiden pool hanya bisa diambil saat jadwal dinas Anda aktif.</span></>
           )}
