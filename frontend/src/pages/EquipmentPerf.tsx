@@ -140,7 +140,6 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
       trackRef.current.applyConstraints({ advanced: [{ zoom: z } as unknown as MediaTrackConstraintSet] }).catch(() => {});
     }
   }
-  const zoomInc = Math.max(zoomRange.step, Math.round(((zoomRange.max - zoomRange.min) / 8) * 100) / 100);
   // Saat kamera aktif: wiring stream → <video>, jalankan loop ketajaman & watch lokasi.
   useEffect(() => {
     if (!active) return;
@@ -242,13 +241,13 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
               <div className={`absolute left-1/2 -translate-x-1/2 bottom-3 px-3 py-1.5 rounded-full text-[11px] font-semibold flex items-center gap-1.5 ${isSharp ? 'bg-success/90 text-white' : 'bg-black/75 text-white'}`}>
                 {isSharp ? '✅ Foto tajam — siap' : '🔍 Memeriksa ketajaman…'}
               </div>
-              {/* Kontrol zoom (native bila didukung, jika tidak digital). */}
-              <div className="absolute top-2 right-2 flex flex-col items-center gap-1 bg-black/55 rounded-full p-1">
-                <button type="button" aria-label="Perbesar" onClick={() => applyZoom(zoom + zoomInc)} disabled={zoom >= zoomRange.max}
-                  className="w-8 h-8 rounded-full bg-white/90 text-black text-lg font-bold leading-none flex items-center justify-center disabled:opacity-40">+</button>
-                <span className="text-[10px] font-semibold text-white tabular-nums px-0.5">{zoom.toFixed(1)}×</span>
-                <button type="button" aria-label="Perkecil" onClick={() => applyZoom(zoom - zoomInc)} disabled={zoom <= zoomRange.min}
-                  className="w-8 h-8 rounded-full bg-white/90 text-black text-lg font-bold leading-none flex items-center justify-center disabled:opacity-40">−</button>
+              {/* Kontrol zoom — slider (native bila didukung, jika tidak digital). */}
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/55 rounded-full px-3 py-1.5 max-w-[85%]">
+                <span className="text-[11px] text-white leading-none">🔍</span>
+                <input type="range" aria-label="Zoom kamera" min={zoomRange.min} max={zoomRange.max} step={zoomRange.step}
+                  value={zoom} onChange={(e) => applyZoom(Number(e.target.value))}
+                  className="w-32 sm:w-44 cursor-pointer" style={{ accentColor: 'var(--color-accent)' }} />
+                <span className="text-[11px] font-semibold text-white tabular-nums w-9 text-right">{zoom.toFixed(1)}×</span>
               </div>
             </div>
             <div className="mt-1.5 h-1.5 rounded bg-surface2 overflow-hidden" title="Indikator ketajaman">
