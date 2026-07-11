@@ -4,7 +4,7 @@ import { aoaToBuffer, bufferToAoa } from '../utils/xlsx.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
-import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows, getUnitWindows, ALL_SHIFT_TYPES } from '../config/shifts.js';
+import { dateKey, SHIFT_WINDOWS, DEFAULT_SHIFT_WINDOWS, loadShiftWindows, getUnitWindows, ALL_SHIFT_TYPES, REQUIRED_WINS } from '../config/shifts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -56,7 +56,7 @@ router.put('/shift-windows', requireRole('admin', 'koordinator'), async (req, re
   if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu untuk mengatur jam dinasnya.' });
   const body = req.body || {};
   const out = {};
-  for (const k of ['pagi', 'siang']) {
+  for (const k of REQUIRED_WINS) {
     const o = body[k];
     if (!o || typeof o !== 'object') return res.status(400).json({ error: `Jam untuk shift "${k}" wajib diisi.` });
     const start = Number(o.start), end = Number(o.end);

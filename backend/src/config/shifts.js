@@ -19,8 +19,8 @@ export const DEFAULT_SHIFT_WINDOWS = {
 // Shift wajib (selalu punya jendela) vs opsional (hanya bila dikonfigurasi).
 // Kunci opsional HARUS 'Normal' agar selaras dgn enum DB shift_type, "Atur Jam Dinas"
 // (jadwalRoutes menyimpan units.config.shift_windows.Normal) & frontend (Jadwal.tsx).
-const REQUIRED_WINS = ['pagi', 'siang'];
-const OPTIONAL_WINS = ['Normal'];
+export const REQUIRED_WINS = ['pagi', 'siang'];
+export const OPTIONAL_WINS = ['Normal'];
 
 // ===== Tipe shift — SATU sumber kebenaran =====
 // Semua logika "hari dinas / on-duty" HARUS mengacu ke daftar ini, jangan meng-hardcode

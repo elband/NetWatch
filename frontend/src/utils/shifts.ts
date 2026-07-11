@@ -9,6 +9,11 @@ export type ShiftKey = 'pagi' | 'siang' | 'Normal';
 export interface ShiftWin { start: number; end: number }
 export type ShiftWindows = Partial<Record<ShiftKey, ShiftWin>>;
 
+// Kunci jendela jam: pagi & siang WAJIB (selalu on-duty), Normal OPSIONAL (Dinas Kantor,
+// hanya aktif bila dikonfigurasi). Dipakai editor "Atur Jam Dinas" (Jadwal.tsx).
+export const REQUIRED_SHIFT_KEYS: ShiftKey[] = ['pagi', 'siang'];
+export const OPTIONAL_SHIFT_KEYS: ShiftKey[] = ['Normal'];
+
 // WORK = shift kerja (on-duty); NONWORK = tak punya jam dinas. Selaras backend WORK/NONWORK.
 export const WORK_SHIFT_TYPES = ['pagi', 'siang', 'Normal'] as const;
 export const NONWORK_SHIFT_TYPES = ['libur', 'dinas_luar', 'cuti'] as const;

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
+import { type ShiftKey, REQUIRED_SHIFT_KEYS, OPTIONAL_SHIFT_KEYS } from '../utils/shifts';
 import type { Shift, User } from '../types';
 
 // Kode & label resmi (selaras dengan Laporan Bulanan): N = Dinas Kantor, P = Pagi, S = Siang, L = Libur.
@@ -204,12 +205,11 @@ export default function Jadwal() {
 }
 
 // ===================== ATUR JAM DINAS (SHIFT WINDOWS) =====================
-type ShiftKey = 'pagi' | 'siang' | 'Normal';
 interface Win { start: number; end: number }
-// Pagi & Siang wajib (selalu jendela on-duty). Dinas Kantor "Normal" (N) opsional —
-// ditambahkan koordinator lewat tombol "+ Tambah Aturan".
-const OPTIONAL_KEYS: ShiftKey[] = ['Normal'];
-const ROW_ORDER: ShiftKey[] = ['pagi', 'siang', 'Normal'];
+// Kunci wajib/opsional dari util bersama (utils/shifts.ts). Pagi & Siang wajib; Dinas
+// Kantor "Normal" (N) opsional — ditambahkan koordinator lewat "+ Tambah Aturan".
+const OPTIONAL_KEYS = OPTIONAL_SHIFT_KEYS;
+const ROW_ORDER: ShiftKey[] = [...REQUIRED_SHIFT_KEYS, ...OPTIONAL_SHIFT_KEYS];
 const ROW_META: Record<ShiftKey, { abbr: string; label: string; color: string }> = {
   pagi: { abbr: 'P', label: 'Dinas Pagi', color: 'var(--color-success)' },
   siang: { abbr: 'S', label: 'Dinas Siang', color: 'var(--color-warn)' },
