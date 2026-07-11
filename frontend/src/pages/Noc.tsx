@@ -201,6 +201,8 @@ export default function Noc() {
   const incScrollRef = useAutoScroll(data?.activeIncidents.length ?? 0);
   const inspScrollRef = useAutoScroll(data?.inspections?.length ?? 0);
   const fidsScrollRef = useAutoScroll((data?.flights?.departures?.length ?? 0) + (data?.flights?.arrivals?.length ?? 0));
+  // Auto-scroll daftar peralatan di popup lokasi — reset saat lokasi berganti (rotasi).
+  const locScrollRef = useAutoScroll(focusLoc?.id ?? -1);
 
   // ===== Peta Leaflet =====
   const elRef = useRef<HTMLDivElement>(null);
@@ -409,21 +411,22 @@ export default function Noc() {
           <div style={{ ...card, flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }} onMouseEnter={() => setHoverMap(true)} onMouseLeave={() => setHoverMap(false)}>
             <div ref={elRef} style={{ position: 'absolute', inset: 0 }} />
             {focusLoc && (
-              <div key={focusLoc.id} className="noc-scroll" style={{ position: 'absolute', top: 12, right: 12, width: 236, maxHeight: 'calc(100% - 24px)', overflow: 'auto', background: 'rgba(9,13,19,.92)', border: `1px solid ${C.accent}55`, borderRadius: 10, padding: 10, zIndex: 500, animation: 'nocslide .45s ease', boxShadow: '0 8px 30px rgba(0,0,0,.5)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div key={focusLoc.id} style={{ position: 'absolute', top: 12, right: 12, width: 236, maxHeight: 'calc(100% - 24px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'rgba(9,13,19,.92)', border: `1px solid ${C.accent}55`, borderRadius: 10, padding: 10, zIndex: 500, animation: 'nocslide .45s ease', boxShadow: '0 8px 30px rgba(0,0,0,.5)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>{focusLoc.icon || '📍'} {focusLoc.name}</div>
                   <span className="mono" style={{ fontSize: 10, color: C.accent }}>{(focusIdx % locWithDevices.length) + 1}/{locWithDevices.length}</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {/* Daftar peralatan: auto-scroll NAIK bila melebihi tinggi kartu; jeda saat di-hover. */}
+                <div ref={locScrollRef} className="noc-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 5, overflow: 'auto', flex: 1, minHeight: 0 }}>
                   {(byLoc.get(focusLoc.id) || []).map((d) => (
-                    <div key={d.id} onClick={() => setSel(d)} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, cursor: 'pointer', background: C.panel2, border: `1px solid ${C.border}`, borderLeft: `3px solid ${stColor(d.status)}`, borderRadius: 6, padding: '5px 8px' }}>
+                    <div key={d.id} onClick={() => setSel(d)} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, cursor: 'pointer', background: C.panel2, border: `1px solid ${C.border}`, borderLeft: `3px solid ${stColor(d.status)}`, borderRadius: 6, padding: '5px 8px', flexShrink: 0 }}>
                       <span style={{ width: 8, height: 8, borderRadius: 999, background: stColor(d.status), boxShadow: `0 0 6px ${stColor(d.status)}` }} />
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.icon || ''} {d.name}</span>
                       <span className="mono" style={{ marginLeft: 'auto', color: d.status === 'offline' ? C.offline : C.dim, fontSize: 10 }}>{d.status === 'offline' ? 'DOWN' : d.ping_ms + 'ms'}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: 9, color: C.dim, marginTop: 6, textAlign: 'center' }}>▶ rotasi otomatis · hover untuk jeda</div>
+                <div style={{ fontSize: 9, color: C.dim, marginTop: 6, textAlign: 'center', flexShrink: 0 }}>▶ rotasi otomatis · hover untuk jeda</div>
               </div>
             )}
           </div>
