@@ -234,7 +234,10 @@ export interface Sparepart {
   unit_id: number | null;
   name: string;
   part_no: string | null;
+  sku: string | null;
   category: string | null;
+  category_id: number | null;
+  category_name?: string | null;
   satuan: string;
   stock_qty: string | number;
   min_qty: string | number;
@@ -252,6 +255,21 @@ export interface SparepartMove {
   note: string | null;
   moved_by_name?: string | null;
   moved_at: string;
+}
+export interface SparepartCategory {
+  id: number;
+  unit_id: number | null;
+  name: string;
+  items?: number;
+}
+export interface SparepartStats {
+  total_items: number;
+  total_stock: number;
+  low_count: number;
+  out_count: number;
+  moves_month: { masuk: number; keluar: number };
+  by_category: { category: string; items: number; stock: number }[];
+  low_items: { id: number; name: string; part_no: string | null; stock_qty: number; min_qty: number; satuan: string }[];
 }
 
 export interface DeviceMetricPoint {

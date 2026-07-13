@@ -503,6 +503,23 @@ async function migrate() {
     CONSTRAINT fk_spm_part FOREIGN KEY (sparepart_id) REFERENCES spareparts(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`);
 
+  // ── Manajemen Suku Cadang (perluasan sparepart): SKU/barcode per item + kategori master ──
+  // sku = kode unik yang di-encode ke QR (2D) & barcode 1D untuk scan masuk/keluar & label cetak.
+  await addColumnIfMissing(conn, env.db.database, 'spareparts', 'sku', 'VARCHAR(40) DEFAULT NULL AFTER part_no');
+  await addColumnIfMissing(conn, env.db.database, 'spareparts', 'category_id', 'INT DEFAULT NULL AFTER category');
+  await addUniqueIndexIfMissing(conn, env.db.database, 'spareparts', 'uniq_sp_sku', '(sku)');
+  // Master kategori barang/sparepart per unit (kategori lama free-text tetap ada di kolom `category`).
+  await conn.query(`CREATE TABLE IF NOT EXISTS sparepart_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    unit_id INT DEFAULT NULL,
+    name VARCHAR(80) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_spc (unit_id, name),
+    INDEX idx_spc_unit (unit_id)
+  ) ENGINE=InnoDB`);
+  // Backfill SKU untuk item lama (berbasis id → unik & terbaca): SP000123.
+  await conn.query("UPDATE spareparts SET sku = CONCAT('SP', LPAD(id, 6, '0')) WHERE sku IS NULL OR sku = ''");
+
   // ── Fase 5 (AAB): kondisi B/RR/RB, grup fasilitas, kebutuhan; checklist berkategori; obat air ──
   // 5a. Aset fisik: klasifikasi kondisi inventaris (berdampingan dgn op_status), grup fasilitas, kebutuhan pengadaan.
   await addColumnIfMissing(conn, env.db.database, 'devices', 'kondisi', "ENUM('B','RR','RB') DEFAULT NULL AFTER op_status");

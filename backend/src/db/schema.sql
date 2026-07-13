@@ -1068,7 +1068,9 @@ CREATE TABLE IF NOT EXISTS spareparts (
   unit_id INT DEFAULT NULL,
   name VARCHAR(150) NOT NULL,
   part_no VARCHAR(80) DEFAULT NULL,
-  category VARCHAR(80) DEFAULT NULL,
+  sku VARCHAR(40) DEFAULT NULL,          -- kode unik utk QR/barcode (scan & label)
+  category VARCHAR(80) DEFAULT NULL,     -- legacy free-text (dipertahankan)
+  category_id INT DEFAULT NULL,          -- master kategori (sparepart_categories)
   satuan VARCHAR(20) NOT NULL DEFAULT 'pcs',
   stock_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
   min_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -1077,7 +1079,16 @@ CREATE TABLE IF NOT EXISTS spareparts (
   active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_sp_sku (sku),
   INDEX idx_sp_unit (unit_id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS sparepart_categories (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  unit_id INT DEFAULT NULL,
+  name VARCHAR(80) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_spc (unit_id, name),
+  INDEX idx_spc_unit (unit_id)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS sparepart_moves (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
