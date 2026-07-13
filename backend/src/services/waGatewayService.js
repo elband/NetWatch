@@ -1,6 +1,13 @@
 import { env } from '../config/env.js';
 import { normalizeWaNumber } from '../utils/phone.js';
 
+// Error yang TIDAK boleh di-retry oleh worker (key salah, nomor invalid, dsb).
+// Mengulang error semacam ini hanya membuang percobaan dan berisiko kirim ganda
+// bila suatu saat gateway merespons lambat setelah pesan sebenarnya terkirim.
+export class WaPermanentError extends Error {
+  constructor(message) { super(message); this.name = 'WaPermanentError'; this.permanent = true; }
+}
+
 // Kirim pesan teks via gateway WhatsApp internal (dibangun sendiri).
 //   POST {baseUrl}/api/v1/messages/send
 //   Header: X-API-Key: <key>
@@ -8,13 +15,13 @@ import { normalizeWaNumber } from '../utils/phone.js';
 //   Respons sukses: { success: true, data: { id, status, to } }
 export async function sendWaGatewayMessage(phone, message) {
   if (!env.waGateway.apiKey) {
-    throw new Error('WAGATEWAY_API_KEY belum diset di .env — pesan tidak benar-benar terkirim');
+    throw new WaPermanentError('WAGATEWAY_API_KEY belum diset di .env — pesan tidak benar-benar terkirim');
   }
   // Gateway menerima format "08…" maupun "628…" dan menormalisasi sendiri, tetapi kita
   // tetap normalisasi ke 628xxxx agar log konsisten & nomor yang invalid tertangkap dini.
   const to = normalizeWaNumber(phone);
   if (!to) {
-    throw new Error('Nomor WhatsApp tujuan tidak tersedia/format tidak valid');
+    throw new WaPermanentError('Nomor WhatsApp tujuan tidak tersedia/format tidak valid');
   }
 
   const payload = { to, body: message };
@@ -47,7 +54,14 @@ export async function sendWaGatewayMessage(phone, message) {
   }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok || data.success !== true) {
-    throw new Error(data.message || data.error || `WA Gateway API error (HTTP ${resp.status})`);
+    const msg = data.message || data.error || `WA Gateway API error (HTTP ${resp.status})`;
+    // Klasifikasi permanen: kredensial/otorisasi salah (401/403) atau input tak valid
+    // (400/404, atau pesan gateway yang menyebut "API Key"/"tidak valid"/"unauthorized").
+    // Error ini tak akan sembuh dengan retry, jadi hentikan agar tak "mengirim terus".
+    const permanentHttp = [400, 401, 403, 404, 422].includes(resp.status);
+    const permanentMsg = /api\s*key|unauthorized|forbidden|tidak valid|invalid|not\s*found|nomor/i.test(msg);
+    if (permanentHttp || permanentMsg) throw new WaPermanentError(msg);
+    throw new Error(msg);
   }
   return data;
 }
