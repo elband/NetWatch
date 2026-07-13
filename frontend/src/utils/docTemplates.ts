@@ -290,6 +290,38 @@ export function suratHtml(s: Surat, qr: string, lkp: LkpHead, origin: string): s
       </body></html>`;
 }
 
+// Halaman Nota Dinas Kepala Seksi → Kepala Bandara, meneruskan Nota Dinas Koordinator.
+// Ditambahkan sebagai halaman terpisah pada dokumen setelah Kepala Seksi menandatangani (TTE).
+const KEPALA_BANDARA_YTH = 'Kepala Bandar Udara Aji Pangeran Tumenggung Pranoto Samarinda';
+export function kasiNotaDinasPage(s: Surat, lkp: LkpHead, kasiQr: string): string {
+  const esc = (t: string) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+  const cfg = lkp as unknown as Record<string, string>;
+  const dmy = (v?: string | null) => (v ? new Date(String(v).replace(' ', 'T')).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-');
+  const tglKoord = dmy(s.tanggal);
+  const tglKasi = s.kasi_signed_at ? dmy(s.kasi_signed_at) : tglKoord;
+  const ndDari = cfg.nd_dari || 'Koordinator Elektronika Bandara';
+  const kasiJab = cfg.kasie_jabatan || 'Kepala Seksi Teknik dan Operasi';
+  const kasiNama = s.kasi_signer_name || cfg.kasie_nama || '';
+  const kasiNip = s.kasi_signer_nip || cfg.kasie_nip || '';
+  const isi = `Menindaklanjuti Nota Dinas ${ndDari} Nomor ${s.nomor} tanggal ${tglKoord} perihal ${s.hal}, dengan ini kami ajukan kepada Bapak/Ibu Kepala Bandara untuk mohon arahan dan persetujuan guna proses lebih lanjut.`;
+  const ttd = kasiQr
+    ? `<div style="margin:6px auto;width:120px"><img src="${kasiQr}" style="width:104px;height:104px"><div style="font-size:8px;color:#0a0">✔ Ditandatangani elektronik</div><div style="font-size:8px;color:#444">${esc(s.kasi_sign_token || '')}</div></div>`
+    : '<br><br><br>';
+  return `<div style="page-break-before:always;font-family:'Times New Roman',serif;color:#000;font-size:13px;line-height:1.6;padding-top:8mm">
+      <div style="text-align:center;font-weight:bold;font-size:16px;text-decoration:underline;letter-spacing:1px">NOTA DINAS</div>
+      <div style="text-align:center;margin:2px 0 18px">Nomor: ${esc(s.nomor)}</div>
+      <table style="border-collapse:collapse"><tbody>
+        <tr><td style="width:74px;padding:1px 6px;vertical-align:top">Yth</td><td>:</td><td>${esc(KEPALA_BANDARA_YTH)}</td></tr>
+        <tr><td style="padding:1px 6px;vertical-align:top">Dari</td><td>:</td><td>${esc(kasiJab)}</td></tr>
+        <tr><td style="padding:1px 6px;vertical-align:top">Hal</td><td>:</td><td><b>${esc(s.hal)}</b></td></tr>
+        <tr><td style="padding:1px 6px;vertical-align:top">Tanggal</td><td>:</td><td>${tglKasi}</td></tr>
+      </tbody></table>
+      <div style="margin:16px 0;text-align:justify">${esc(isi)}</div>
+      <div style="margin:16px 0;text-align:justify">Demikian disampaikan, atas perhatian dan persetujuannya diucapkan terima kasih.</div>
+      <div style="margin-top:30px;width:62%;margin-left:auto;text-align:center">${esc(kasiJab)}<br>${ttd}<u><b>${esc(kasiNama)}</b></u><br>NIP. ${esc(kasiNip)}</div>
+    </div>`;
+}
+
 // Gabungkan Nota Dinas (hal.1) + LKP form (hal.2) + Lampiran (hal.3) dalam 1 HTML.
 export function buildCombinedIncidentDoc(s: Surat, notaQr: string, inc: Incident, lkpQr: string, lkp: LkpHead, origin: string, kasiQr = ''): string {
   const report = inc.report;
@@ -414,6 +446,12 @@ export interface BuildDocDeps {
 // - selain itu → surat tunggal
 export async function buildDocHtml(s: Surat, deps: BuildDocDeps): Promise<string> {
   const { lkp, origin } = deps;
+  // Setelah Kepala Seksi TTE, sisipkan halaman Nota Dinas Kasi → Kepala Bandara
+  // (meneruskan Nota Dinas Koordinator) di akhir dokumen nota-dinas & laporan.
+  const kasiPage = (s.kasi_status === 'disetujui' && s.kasi_sign_token)
+    ? kasiNotaDinasPage(s, lkp, await tokenQr(origin, s.kasi_sign_token, 120))
+    : '';
+  const withKasi = (html: string) => (kasiPage ? html.replace('</body>', `${kasiPage}</body>`) : html);
   if (s.jenis === 'Surat Pernyataan') {
     const kasiQr = await tokenQr(origin, s.kasi_sign_token, 130);
     // QR per pelaksana yang sudah TTE (token PK… di body JSON) → tautan verifikasi publik.
@@ -438,7 +476,7 @@ export async function buildDocHtml(s: Surat, deps: BuildDocDeps): Promise<string
         const notaQr = await tokenQr(origin, s.sign_token, 130);
         const lkpQr = await tokenQr(origin, inc.report?.sign_token, 150);
         const kasiQr = await tokenQr(origin, s.kasi_sign_token, 150);
-        return buildCombinedIncidentDoc(s, notaQr, inc, lkpQr, lkp, origin, kasiQr);
+        return withKasi(buildCombinedIncidentDoc(s, notaQr, inc, lkpQr, lkp, origin, kasiQr));
       }
     } catch (err) {
       console.error('[docTemplates] Gagal memuat insiden untuk dokumen gabungan:', err);
@@ -454,11 +492,11 @@ export async function buildDocHtml(s: Surat, deps: BuildDocDeps): Promise<string
         const cover = { nomor: s.nomor, tanggal: s.tanggal, tujuan: s.tujuan, signer_name: s.signer_name, signer_nip: s.signer_nip, sign_token: s.sign_token, kasi_signer_name: s.kasi_signer_name, kasi_signer_nip: s.kasi_signer_nip, kasi_sign_token: s.kasi_sign_token };
         // AAB dikenali dari reportKind eksplisit atau bentuk data (punya svcRekap).
         const isAab = deps.reportKind === 'aab' || (typeof data === 'object' && data !== null && 'svcRekap' in data);
-        if (isAab) return buildAabReportHtml(data as AabReportData, cover, qr, lkp, kasiQr);
+        if (isAab) return withKasi(buildAabReportHtml(data as AabReportData, cover, qr, lkp, kasiQr));
         const sel = deps.sections ?? new Set(SECTIONS.map((x) => x.key));
-        return buildReportHtml(data as LaporanData, cover, qr, lkp, sel, kasiQr);
+        return withKasi(buildReportHtml(data as LaporanData, cover, qr, lkp, sel, kasiQr));
       }
-    } catch { return suratHtml(s, qr, lkp, origin); }
+    } catch { return withKasi(suratHtml(s, qr, lkp, origin)); }
   }
-  return suratHtml(s, qr, lkp, origin);
+  return withKasi(suratHtml(s, qr, lkp, origin));
 }
