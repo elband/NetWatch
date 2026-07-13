@@ -436,6 +436,8 @@ export interface Incident {
   notes: IncidentNote[];
   report: IncidentReport | null;
   collaborators?: { user_id: number; name: string; emoji: string | null }[];
+  public_report_id?: string | null;
+  reporter?: { nama: string; nip: string | null; unit: string; hp: string | null } | null;
 }
 
 export type ShiftType = 'pagi' | 'siang' | 'Normal' | 'libur';

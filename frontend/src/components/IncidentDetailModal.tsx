@@ -33,6 +33,13 @@ export default function IncidentDetailModal({
   const device = devices?.find((d) => d.id === inc.device_id);
   const remotable = !!device?.ssh_username;
 
+  // Nomor HP pelapor → link wa.me (0xxx → 62xxx).
+  const waLink = (hp: string | null | undefined) => {
+    const d = String(hp || '').replace(/[^\d]/g, '');
+    if (d.length < 8) return null;
+    return `https://wa.me/${d.startsWith('0') ? '62' + d.slice(1) : d}`;
+  };
+
   const hasActions =
     !!onReport ||
     (inc.status !== 'selesai' && (!!onProgress || !!onResolve || !!onInvite || !!onToggleSparepart || (remotable && !!device)));
@@ -73,6 +80,24 @@ export default function IncidentDetailModal({
             <><br /><span className="text-success">Selesai: {inc.resolved_at} · Durasi: {inc.duration_min} menit</span></>
           )}
         </div>
+
+        {/* Pelapor (laporan publik) */}
+        {inc.reporter && (
+          <div className="bg-accent2/5 border border-accent2/20 rounded-lg p-3 mb-3.5 text-xs">
+            <div className="font-semibold text-accent2 mb-1">👤 Pelapor</div>
+            <div><strong>{inc.reporter.nama}</strong>{inc.reporter.unit ? ` · ${inc.reporter.unit}` : ''}</div>
+            {inc.reporter.nip && <div className="text-text2">NIP: {inc.reporter.nip}</div>}
+            <div className="text-text2 flex items-center gap-2 mt-0.5">
+              <span>📞 {inc.reporter.hp || '-'}</span>
+              {waLink(inc.reporter.hp) && (
+                <a href={waLink(inc.reporter.hp)!} target="_blank" rel="noopener noreferrer"
+                  className="text-success border border-success/30 bg-success/10 rounded px-2 py-0.5 text-[10px] font-medium">
+                  💬 Hubungi via WA
+                </a>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Step progress */}
         <div className="flex gap-1 mb-1.5">

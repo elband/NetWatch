@@ -102,7 +102,7 @@ export async function notifyAutoResolved(conn, incident, info = {}) {
 
 // Snapshot teknisi on-duty saat insiden masuk + kirim notifikasi ke mereka.
 // Mengembalikan jumlah teknisi yang diberi notifikasi.
-export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue, coordId = null }) {
+export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, issue, coordId = null, reporter = null }) {
   // Aturan: hanya teknisi yang SUDAH ABSEN MASUK hari ini yang di-snapshot & dinotifikasi.
   // Bila belum ada yang absen → daftar kosong; koordinator tetap dinotifikasi (fallback) di bawah.
   let onDutyIds = await getOnDutyCheckedInTechIds(conn);
@@ -116,12 +116,16 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
     await conn.query('INSERT IGNORE INTO incident_duty (incident_id, user_id) VALUES (?, ?)', [id, uid]);
   }
   const prio = priority === 'kritis' ? 'kritis' : 'warning';
+  // Laporan publik: cantumkan nama & HP pelapor agar teknisi bisa langsung menghubungi.
+  const reporterLine = reporter?.nama
+    ? `\n👤 Pelapor: ${reporter.nama}${reporter.hp && reporter.hp !== '-' ? ` (${reporter.hp})` : ''}`
+    : '';
   for (const uid of onDutyIds) {
     if (await isNotifyEnabledForUser('insiden_teknisi', uid)) {
       await queueWaNotification({
         type: 'alert',
         toUserId: uid,
-        message: `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}\nSegera AMBIL: ${takeLink(id)}`,
+        message: `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}${reporterLine}\nSegera AMBIL: ${takeLink(id)}`,
         relatedIncidentId: id,
       });
     }
@@ -154,6 +158,14 @@ async function attachNotes(incidents) {
     `SELECT c.incident_id, c.user_id, u.name, u.emoji FROM incident_collaborators c JOIN users u ON u.id = c.user_id WHERE c.incident_id IN (?)`,
     [ids]
   );
+  // Pelapor (laporan publik) — tautkan lewat incidents.public_report_id agar
+  // teknisi bisa melihat & menghubungi si pelapor dari detail insiden.
+  const reportIds = incidents.map((i) => i.public_report_id).filter(Boolean);
+  const reporterByReportId = {};
+  if (reportIds.length) {
+    const [prs] = await pool.query('SELECT id, nama, nip, unit, hp FROM public_reports WHERE id IN (?)', [reportIds]);
+    for (const p of prs) reporterByReportId[p.id] = { nama: p.nama, nip: p.nip, unit: p.unit, hp: p.hp };
+  }
   const byIncident = {};
   for (const n of notes) {
     (byIncident[n.incident_id] ||= []).push(n);
@@ -171,6 +183,7 @@ async function attachNotes(incidents) {
     notes: byIncident[i.id] || [],
     report: reportByIncident[i.id] || null,
     collaborators: collabByIncident[i.id] || [],
+    reporter: (i.public_report_id && reporterByReportId[i.public_report_id]) || null,
   }));
 }
 
