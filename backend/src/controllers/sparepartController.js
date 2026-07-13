@@ -1,8 +1,56 @@
 import { pool } from '../db/pool.js';
 import { unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
+import { env } from '../config/env.js';
+import { queueWaNotification } from '../jobs/waQueue.js';
+import { createNotification } from '../services/notify.js';
+import { isNotifyEnabledForUser } from '../services/notifyPrefs.js';
 
 // Label tujuan pengeluaran barang (khusus mutasi keluar) untuk tampilan/laporan.
 const purposeLabel = (p) => (p === 'maintenance' ? 'Maintenance' : p === 'perbaikan' ? 'Perbaikan' : '');
+
+// Beri tahu PIC tiket (teknisi penanggung jawab) & koordinator unit bahwa sparepart
+// dikeluarkan untuk perbaikan sebuah insiden — WA + lonceng + catatan kronologi tiket.
+async function notifyPerbaikanKeluar({ sp, qty, incidentId, note, issuerId, issuerName }) {
+  const [[inc]] = await pool.query(
+    'SELECT id, tech_id, coord_id, unit_id, device_name, issue, step FROM incidents WHERE id = ?', [incidentId]
+  );
+  if (!inc) return;
+  const barang = `${Number(qty)} ${sp.satuan} ${sp.name}${sp.sku ? ` (${sp.sku})` : ''}`;
+
+  // Catat ke kronologi tiket (audit trail) — tampil di detail insiden.
+  await pool.query(
+    'INSERT INTO incident_notes (incident_id, step, note) VALUES (?, ?, ?)',
+    [inc.id, inc.step ?? 0, `🧰 Sparepart dikeluarkan untuk perbaikan: ${barang}${note ? ` — ${note}` : ''} (oleh ${issuerName || 'teknisi'}).`]
+  );
+
+  // Penerima: teknisi PIC tiket + koordinator unit (coord_id bila ada, else semua koordinator unit).
+  const recipients = new Map(); // id → prefKey
+  if (inc.tech_id) recipients.set(inc.tech_id, 'insiden_teknisi');
+  if (inc.coord_id) {
+    recipients.set(inc.coord_id, 'insiden_koordinator');
+  } else {
+    const [coords] = await pool.query(
+      "SELECT id FROM users WHERE active = 1 AND (role = 'koordinator' OR JSON_CONTAINS(roles, '\"koordinator\"'))" +
+        (inc.unit_id ? ' AND (unit_id IS NULL OR unit_id = ?)' : ''),
+      inc.unit_id ? [inc.unit_id] : []
+    );
+    for (const c of coords) if (!recipients.has(c.id)) recipients.set(c.id, 'insiden_koordinator');
+  }
+  recipients.delete(issuerId); // jangan beri tahu diri sendiri
+
+  const link = `${env.appUrl}/incidents?focus=${inc.id}`;
+  const message = `🧰 SPAREPART KELUAR — Perbaikan\n${inc.id} | ${inc.device_name}\nBarang: ${barang}\nOleh: ${issuerName || 'teknisi'}${note ? `\nCatatan: ${note}` : ''}\nDetail tiket: ${link}`;
+  for (const [uid, prefKey] of recipients) {
+    if (await isNotifyEnabledForUser(prefKey, uid)) {
+      await queueWaNotification({ type: 'other', toUserId: uid, message, relatedIncidentId: inc.id });
+    }
+    await createNotification({
+      userId: uid, type: 'sparepart_out', priority: 'info',
+      title: `Sparepart keluar: ${sp.name}`, message: `${barang} untuk perbaikan ${inc.id}`,
+      refId: inc.id, refType: 'incident', link,
+    });
+  }
+}
 
 // Fase 4: sparepart & stok per unit. Stok = kolom stock_qty, diperbarui transaksional
 // bersama pencatatan sparepart_moves (masuk/keluar/adjust).
@@ -85,6 +133,16 @@ export async function move(req, res) {
       purpose: req.body.purpose, incidentId: req.body.incident_id,
       note: req.body.note, userId: req.user.id,
     });
+    // Pengeluaran untuk perbaikan → beri tahu PIC tiket & koordinator (tak boleh
+    // menggagalkan pencatatan stok bila notifikasi gagal).
+    if (req.body.type === 'keluar' && req.body.purpose === 'perbaikan' && req.body.incident_id) {
+      try {
+        await notifyPerbaikanKeluar({
+          sp, qty: req.body.qty, incidentId: req.body.incident_id, note: req.body.note,
+          issuerId: req.user.id, issuerName: req.user.name,
+        });
+      } catch { /* abaikan kegagalan notifikasi */ }
+    }
     res.status(201).json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
