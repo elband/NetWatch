@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, getActiveUnitId } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import type { Surat, Incident } from '../types';
 import { type LaporanData } from '../utils/laporanReport';
 import { buildDocHtml as buildDocHtmlShared, LKP_DEFAULT } from '../utils/docTemplates';
@@ -8,6 +9,66 @@ import { confirmDialog, promptDialog } from '../components/dialog';
 import { openImage } from '../components/ImageLightbox';
 
 const JENIS = ['Nota Dinas', 'Telaahan Staf', 'Surat Pengantar', 'Surat Pernyataan', 'Permintaan Barang', 'Surat Lain'];
+const ROMAN_BULAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+
+// Modal pengaturan penomoran surat (koordinator: unit sendiri; super admin: unit terpilih).
+// Menyimpan kode Nota Dinas Koordinator (nd_kode) & Nota Dinas Kepala Seksi (nd_kasi_kode).
+function NumberingModal({ unitId, onClose, onSaved }: { unitId: number | null; onClose: () => void; onSaved: () => void }) {
+  const [ndKode, setNdKode] = useState('');
+  const [ndKasiKode, setNdKasiKode] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (unitId == null) { setLoading(false); return; }
+    api.get(`/units/${unitId}/config`).then((r) => {
+      setNdKode(r.data.config?.nd_kode || '');
+      setNdKasiKode(r.data.config?.nd_kasi_kode || '');
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [unitId]);
+  const now = new Date();
+  const contoh = (kode: string, def: string) => `001/${(kode || def).trim()}/${ROMAN_BULAN[now.getMonth() + 1]}/${now.getFullYear()}`;
+  async function save() {
+    setBusy(true); setErr('');
+    try {
+      await api.put(`/units/${unitId}/config`, { nd_kode: ndKode.trim(), nd_kasi_kode: ndKasiKode.trim() });
+      onSaved(); onClose();
+    } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
+    finally { setBusy(false); }
+  }
+  const inp = 'w-full bg-surface2 border border-border rounded-md px-3 py-2 text-sm outline-none focus:border-accent font-mono';
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-bold">🔢 Pengaturan Penomoran Surat</h3><button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button></div>
+        {unitId == null ? (
+          <div className="bg-warn/10 border border-warn/30 text-warn rounded-md px-3 py-2 text-[12px]">Pilih satu unit di switcher header untuk mengatur penomoran.</div>
+        ) : loading ? (
+          <div className="text-text2 text-sm py-6 text-center">Memuat…</div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[11px] text-text2">Kode dipakai pada nomor surat, pola: <span className="font-mono">urut/KODE/BULAN-ROMAWI/TAHUN</span>. Nomor urut & bulan/tahun otomatis.</p>
+            <label className="block">
+              <span className="text-[11px] text-text2">Kode Nota Dinas Koordinator</span>
+              <input className={inp} value={ndKode} onChange={(e) => setNdKode(e.target.value)} placeholder="ELBAND/APTP" />
+              <span className="text-[10px] text-text2">Contoh: <b className="text-text">{contoh(ndKode, 'ELBAND/APTP')}</b></span>
+            </label>
+            <label className="block">
+              <span className="text-[11px] text-text2">Kode Nota Dinas Kepala Seksi <span className="text-text2/70">(→ Kepala Bandara)</span></span>
+              <input className={inp} value={ndKasiKode} onChange={(e) => setNdKasiKode(e.target.value)} placeholder="TEKOPS/APTP" />
+              <span className="text-[10px] text-text2">Contoh: <b className="text-text">{contoh(ndKasiKode, 'TEKOPS/APTP')}</b></span>
+            </label>
+            {err && <div className="text-[12px] text-danger">⚠️ {err}</div>}
+            <div className="flex gap-2 justify-end pt-1">
+              <button onClick={onClose} className="border border-border text-text2 rounded-md px-4 py-2 text-sm">Batal</button>
+              <button onClick={save} disabled={busy} className="bg-accent text-bg font-semibold rounded-md px-4 py-2 text-sm disabled:opacity-50">{busy ? 'Menyimpan…' : '💾 Simpan'}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface SplFormData {
   kasi_nama: string; kasi_nip: string; kasi_golongan: string; kasi_jabatan: string;
@@ -22,6 +83,9 @@ interface BarangFormData { keperluan: string; ppk_nama: string; ppk_nip: string;
 
 export default function SuratKeluar() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const numberingUnitId = getActiveUnitId() ?? user?.unit_id ?? null;
+  const [showNumbering, setShowNumbering] = useState(false);
   const [list, setList] = useState<Surat[]>([]);
   const [lkp, setLkp] = useState(LKP_DEFAULT);
   const [filter, setFilter] = useState<'all' | 'tte'>('all');
@@ -301,10 +365,13 @@ export default function SuratKeluar() {
           </div>
           <button onClick={() => navigate('/laporan-bulanan')} className="border border-accent2/50 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">📅 Laporan Bulanan</button>
           <button onClick={() => setShowKop(true)} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs font-semibold">🖼️ Kop Surat</button>
+          <button onClick={() => setShowNumbering(true)} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs font-semibold">🔢 Penomoran</button>
           <button onClick={() => { setShowForm(true); setSplData(defaultSplData()); setSplPegawai([{nama:'',nip:'',mulai:'18:00',selesai:'23:00'}]); setBarangItems([{nama:'',jumlah:'1',keterangan:'Paket'}]); setBarangData(defaultBarangData()); }} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Buat Surat</button>
         </div>
       </div>
       {msg && <div className="bg-accent2/10 border border-accent2/30 rounded-md px-3 py-2 text-[11px] text-accent2 mb-3">{msg}</div>}
+
+      {showNumbering && <NumberingModal unitId={numberingUnitId} onClose={() => setShowNumbering(false)} onSaved={() => setMsg('✅ Pengaturan penomoran tersimpan.')} />}
 
       {showKop && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowKop(false)}>

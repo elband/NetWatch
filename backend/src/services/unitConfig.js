@@ -3,7 +3,7 @@ import { pool } from '../db/pool.js';
 // Fase 4: identitas surat per unit. `lkp` efektif = global settings.lkp ditimpa
 // oleh override per-unit (units.config) HANYA untuk field per-unit di bawah.
 // Field kantor/atasan (bandara, kota, kasie_*) tetap global.
-export const PER_UNIT_LKP_FIELDS = ['nd_kode', 'kop_url', 'unit', 'koord_nama', 'koord_nip', 'koord_jabatan', 'nd_dari', 'nd_yth'];
+export const PER_UNIT_LKP_FIELDS = ['nd_kode', 'nd_kasi_kode', 'kop_url', 'unit', 'koord_nama', 'koord_nip', 'koord_jabatan', 'nd_dari', 'nd_yth'];
 
 // Baca units.config (JSON) untuk satu unit. Kembalikan objek ({} bila kosong).
 export async function getUnitConfig(unitId) {

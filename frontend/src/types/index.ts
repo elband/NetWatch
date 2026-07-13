@@ -567,6 +567,8 @@ export interface Surat {
   kasi_signed_at?: string | null;
   kasi_sign_token?: string | null;
   kasi_note?: string | null;
+  kasi_nomor?: string | null;
+  kasi_seq?: number | null;
   report_month?: string | null;
   sikeren_status?: 'terkirim' | 'gagal' | null;
   sikeren_ref?: string | null;

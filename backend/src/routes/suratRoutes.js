@@ -73,6 +73,20 @@ async function nextNomor(conn, jenis = 'Nota Dinas', unitId) {
   return { nomor: `${String(seq).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`, seq, bulan, tahun };
 }
 
+// Penomoran TERPISAH untuk Nota Dinas Kepala Seksi → Kepala Bandara: urut sendiri
+// (kolom kasi_seq) per unit per bulan, kode dari nd_kasi_kode (default TEKOPS/APTP).
+async function nextKasiNomor(conn, unitId, lkp) {
+  const kode = (lkp.nd_kasi_kode || 'TEKOPS/APTP').trim();
+  const now = new Date();
+  const bulan = now.getMonth() + 1, tahun = now.getFullYear();
+  const [rows] = await conn.query(
+    'SELECT COALESCE(MAX(kasi_seq),0)+1 AS s FROM nota_dinas WHERE bulan = ? AND tahun = ? AND unit_id = ? AND kasi_seq IS NOT NULL',
+    [bulan, tahun, unitId]
+  );
+  const seq = rows[0].s;
+  return { kasi_nomor: `${String(seq).padStart(3, '0')}/${kode}/${ROMAN[bulan]}/${tahun}`, kasi_seq: seq };
+}
+
 // Daftar surat keluar (koordinator/admin). Opsional ?signed=1 untuk yang ber-TTE.
 router.get('/', requireRole('koordinator', 'admin'), async (req, res) => {
   // Ambil nama pembuat TERKINI dari akun (created_by); fallback ke snapshot bila akun terhapus.
@@ -327,7 +341,10 @@ router.post('/:id/request-kasi', requireRole('koordinator', 'admin'), async (req
   if (!phone) return res.status(400).json({ error: 'Nomor WA Kepala Seksi belum diatur. Isi di Pengaturan (kasie_phone) atau kirim nomornya.' });
   // Token akses deterministik agar pengiriman ulang memakai tautan yang sama.
   const token = s.kasi_token || ('AK' + crypto.createHmac('sha256', env.jwtSecret).update(`TTD|${id}|${s.nomor}`).digest('hex').slice(0, 22).toUpperCase());
-  await pool.query("UPDATE nota_dinas SET kasi_token=?, kasi_status='menunggu', kasi_requested_at=NOW() WHERE id=?", [token, id]);
+  // Tetapkan nomor Nota Dinas Kepala Seksi sekali (stabil untuk pengiriman ulang).
+  let kasiNomor = s.kasi_nomor, kasiSeq = s.kasi_seq;
+  if (!kasiNomor) { const g = await nextKasiNomor(pool, s.unit_id, lkp); kasiNomor = g.kasi_nomor; kasiSeq = g.kasi_seq; }
+  await pool.query("UPDATE nota_dinas SET kasi_token=?, kasi_status='menunggu', kasi_requested_at=NOW(), kasi_nomor=?, kasi_seq=? WHERE id=?", [token, kasiNomor, kasiSeq, id]);
   const base = String(req.body.baseUrl || req.headers.origin || '').replace(/\/$/, '');
   const link = `${base}/ttd?token=${token}`;
   const msg = `*Permohonan Tanda Tangan Elektronik*\n\nYth. ${lkp.kasie_nama || 'Kepala Seksi'},\nMohon persetujuan & TTE dokumen berikut:\n\n• ${s.jenis} No. ${s.nomor}\n• Hal: ${s.hal}\n\nTinjau & tandatangani melalui tautan:\n${link}\n\nHormat kami,\n${lkp.koord_jabatan || 'Koordinator Unit Elektronika Bandara'}`;
@@ -409,7 +426,7 @@ export async function getTtdDoc(req, res) {
       jenis: s.jenis, nomor: s.nomor, hal: s.hal, tujuan: s.tujuan, body: s.body, tanggal: s.tanggal,
       creator_name: s.creator_name, signer_name: s.signer_name, signer_nip: s.signer_nip, sign_token: s.sign_token, signed_at: s.signed_at,
       kasi_status: s.kasi_status, kasi_signer_name: s.kasi_signer_name, kasi_signer_nip: s.kasi_signer_nip,
-      kasi_signed_at: s.kasi_signed_at, kasi_sign_token: s.kasi_sign_token, kasi_note: s.kasi_note,
+      kasi_signed_at: s.kasi_signed_at, kasi_sign_token: s.kasi_sign_token, kasi_note: s.kasi_note, kasi_nomor: s.kasi_nomor,
       report_month: s.report_month, lampiran: lamp,
     },
     laporan, report_kind: reportKind,

@@ -73,6 +73,9 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'kasi_signed_at', 'DATETIME DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'kasi_sign_token', 'VARCHAR(80) DEFAULT NULL');
   await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'kasi_note', 'VARCHAR(255) DEFAULT NULL');
+  // Penomoran terpisah untuk Nota Dinas Kepala Seksi → Kepala Bandara (urut sendiri per unit/bulan).
+  await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'kasi_nomor', 'VARCHAR(80) DEFAULT NULL');
+  await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'kasi_seq', 'INT DEFAULT NULL');
   // Penanda bahwa surat adalah pengantar Laporan Bulanan periode tertentu (YYYY-MM) → TTD tampilkan laporan penuh.
   await addColumnIfMissing(conn, env.db.database, 'nota_dinas', 'report_month', 'VARCHAR(7) DEFAULT NULL');
   // Status pengiriman ke SiKeren (verifikasi dokumen Laporan Bulanan a.n. Kepala Seksi).
