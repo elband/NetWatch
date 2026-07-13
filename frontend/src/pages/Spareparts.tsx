@@ -6,13 +6,62 @@ import { api, getActiveUnitId } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { confirmDialog } from '../components/dialog';
-import type { Sparepart, SparepartMove, SparepartCategory, SparepartStats } from '../types';
+import type { Sparepart, SparepartMove, SparepartCategory, SparepartStats, Incident } from '../types';
 
 const MOVE: Record<string, { label: string; cls: string }> = {
   masuk: { label: 'Masuk', cls: 'text-success' },
   keluar: { label: 'Keluar', cls: 'text-danger' },
   adjust: { label: 'Penyesuaian', cls: 'text-warn' },
 };
+
+const PURPOSE: Record<string, string> = { maintenance: '🔧 Maintenance', perbaikan: '🛠️ Perbaikan' };
+type Purpose = '' | 'maintenance' | 'perbaikan';
+
+// Selector tujuan pengeluaran barang (hanya untuk mutasi "keluar"):
+// Maintenance (perangkat opsional) atau Perbaikan Peralatan (wajib pilih tiket insiden).
+function KeluarTujuan({ purpose, setPurpose, incidentId, setIncidentId, deviceId, setDeviceId }: {
+  purpose: Purpose; setPurpose: (p: Purpose) => void;
+  incidentId: string; setIncidentId: (v: string) => void;
+  deviceId: string; setDeviceId: (v: string) => void;
+}) {
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [devices, setDevices] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    api.get('/incidents').then((r) => setIncidents((r.data.incidents || []).filter((i: Incident) => i.status !== 'selesai'))).catch(() => setIncidents([]));
+    api.get('/devices').then((r) => setDevices((r.data.devices || []).map((d: any) => ({ id: d.id, name: d.name })))).catch(() => setDevices([]));
+  }, []);
+  const sel = 'w-full bg-surface2 border border-border rounded-md px-2 py-1.5 text-xs outline-none focus:border-accent';
+  return (
+    <div className="bg-surface2/50 border border-border rounded-lg p-2.5 space-y-2">
+      <div>
+        <div className="text-[10px] text-text2 mb-1">Tujuan pengeluaran *</div>
+        <div className="flex gap-1">
+          {(['maintenance', 'perbaikan'] as const).map((p) => (
+            <button key={p} type="button" onClick={() => setPurpose(p)}
+              className={`flex-1 px-2 py-1.5 rounded-md text-[11px] border ${purpose === p ? 'bg-danger/15 text-danger border-danger/40 font-semibold' : 'bg-surface2 text-text2 border-border'}`}>{PURPOSE[p]}</button>
+          ))}
+        </div>
+      </div>
+      {purpose === 'perbaikan' && (
+        <label className="block"><span className="text-[10px] text-text2">Tiket insiden * <span className="text-text2/60">(perangkat ikut dari tiket)</span></span>
+          <select className={sel} value={incidentId} onChange={(e) => setIncidentId(e.target.value)}>
+            <option value="">— Pilih tiket —</option>
+            {incidents.map((i) => <option key={i.id} value={i.id}>{i.id} · {i.device_name} — {i.issue}</option>)}
+          </select>
+          {incidents.length === 0 && <span className="text-[10px] text-warn">Tidak ada tiket aktif di unit ini.</span>}
+        </label>
+      )}
+      {purpose === 'maintenance' && (
+        <label className="block"><span className="text-[10px] text-text2">Perangkat <span className="text-text2/60">(opsional)</span></span>
+          <select className={sel} value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+            <option value="">— Tanpa perangkat —</option>
+            {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </label>
+      )}
+    </div>
+  );
+}
 
 type Tab = 'dashboard' | 'master' | 'kategori' | 'mutasi' | 'laporan';
 
@@ -326,16 +375,17 @@ function MutasiTab() {
     <div className={`${card} overflow-x-auto`}>
       <table className="w-full text-xs">
         <thead><tr className="text-left text-text2 border-b border-border">
-          <th className="px-3 py-2.5">Waktu</th><th className="px-3 py-2.5">Jenis</th><th className="px-3 py-2.5">Barang</th><th className="px-3 py-2.5">Jumlah</th><th className="px-3 py-2.5">Perangkat</th><th className="px-3 py-2.5">Oleh</th><th className="px-3 py-2.5">Catatan</th>
+          <th className="px-3 py-2.5">Waktu</th><th className="px-3 py-2.5">Jenis</th><th className="px-3 py-2.5">Tujuan</th><th className="px-3 py-2.5">Barang</th><th className="px-3 py-2.5">Jumlah</th><th className="px-3 py-2.5">Perangkat / Tiket</th><th className="px-3 py-2.5">Oleh</th><th className="px-3 py-2.5">Catatan</th>
         </tr></thead>
         <tbody>
           {moves.map((m, i) => (
             <tr key={i} className="border-b border-border/60">
               <td className="px-3 py-2.5 text-text2 whitespace-nowrap">{new Date(m.moved_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</td>
               <td className={`px-3 py-2.5 font-medium ${MOVE[m.type]?.cls || ''}`}>{MOVE[m.type]?.label || m.type}</td>
+              <td className="px-3 py-2.5 text-text2">{m.purpose ? PURPOSE[m.purpose] : '—'}</td>
               <td className="px-3 py-2.5"><div className="font-medium">{m.sparepart_name}</div>{m.sku && <div className="text-[10px] text-text2 font-mono">{m.sku}</div>}</td>
               <td className="px-3 py-2.5 font-semibold">{Number(m.qty)} {m.satuan}</td>
-              <td className="px-3 py-2.5 text-text2">{m.device_name || '—'}</td>
+              <td className="px-3 py-2.5 text-text2">{m.incident_id ? <span className="font-mono">{m.incident_id}</span> : (m.device_name || '—')}{m.incident_issue ? <div className="text-[10px] text-text2/70 truncate max-w-[160px]">{m.incident_issue}</div> : null}</td>
               <td className="px-3 py-2.5 text-text2">{m.moved_by_name || '—'}</td>
               <td className="px-3 py-2.5 text-text2">{m.note || '—'}</td>
             </tr>
@@ -370,14 +420,15 @@ function LaporanTab() {
       const esc = (v: any) => String(v ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
       const period = from || to ? `Periode: ${from || '...'} s/d ${to || '...'}` : 'Semua periode';
       const stokRows = items.map((s: any) => `<tr><td>${esc(s.name)}</td><td>${esc(s.sku)}</td><td>${esc(s.category)}</td><td style="text-align:right">${Number(s.stock_qty)}</td><td style="text-align:right">${Number(s.min_qty)}</td><td>${esc(s.satuan)}</td><td>${esc(s.location)}</td><td>${Number(s.low) ? 'MENIPIS' : 'Aman'}</td></tr>`).join('');
-      const mvRows = moves.map((m: any) => `<tr><td>${new Date(m.moved_at).toLocaleString('id-ID')}</td><td>${esc(m.type)}</td><td>${esc(m.sparepart_name)}</td><td style="text-align:right">${Number(m.qty)} ${esc(m.satuan)}</td><td>${esc(m.device_name)}</td><td>${esc(m.moved_by_name)}</td><td>${esc(m.note)}</td></tr>`).join('');
+      const purposeTxt = (p: string) => (p === 'maintenance' ? 'Maintenance' : p === 'perbaikan' ? 'Perbaikan' : '');
+      const mvRows = moves.map((m: any) => `<tr><td>${new Date(m.moved_at).toLocaleString('id-ID')}</td><td>${esc(m.type)}</td><td>${esc(purposeTxt(m.purpose))}</td><td>${esc(m.sparepart_name)}</td><td style="text-align:right">${Number(m.qty)} ${esc(m.satuan)}</td><td>${esc(m.device_name)}</td><td>${esc(m.incident_id ? `${m.incident_id}${m.incident_issue ? ` — ${m.incident_issue}` : ''}` : '')}</td><td>${esc(m.moved_by_name)}</td><td>${esc(m.note)}</td></tr>`).join('');
       const html = `
         <style>*{font-family:Arial,sans-serif}h2{margin:0 0 2px}small{color:#555}table{width:100%;border-collapse:collapse;margin:8px 0 18px;font-size:11px}th,td{border:1px solid #999;padding:4px 6px;text-align:left}th{background:#eee}h3{margin:14px 0 4px;font-size:13px}@media print{@page{size:A4 landscape;margin:12mm}}</style>
         <h2>Laporan Manajemen Suku Cadang</h2><small>${period} · Dicetak ${new Date().toLocaleString('id-ID')}</small>
         <h3>Daftar Stok (${items.length})</h3>
         <table><thead><tr><th>Nama</th><th>SKU</th><th>Kategori</th><th>Stok</th><th>Min</th><th>Satuan</th><th>Lokasi</th><th>Status</th></tr></thead><tbody>${stokRows || '<tr><td colspan="8">Tidak ada data</td></tr>'}</tbody></table>
         <h3>Mutasi Stok (${moves.length})</h3>
-        <table><thead><tr><th>Waktu</th><th>Jenis</th><th>Barang</th><th>Jumlah</th><th>Perangkat</th><th>Oleh</th><th>Catatan</th></tr></thead><tbody>${mvRows || '<tr><td colspan="7">Tidak ada data</td></tr>'}</tbody></table>`;
+        <table><thead><tr><th>Waktu</th><th>Jenis</th><th>Tujuan</th><th>Barang</th><th>Jumlah</th><th>Perangkat</th><th>Tiket</th><th>Oleh</th><th>Catatan</th></tr></thead><tbody>${mvRows || '<tr><td colspan="9">Tidak ada data</td></tr>'}</tbody></table>`;
       printHtml(html, 'Laporan Suku Cadang');
     } finally { setBusy(''); }
   }
@@ -402,6 +453,9 @@ function MoveModal({ sp, onClose, onSaved }: { sp: Sparepart; onClose: () => voi
   const [type, setType] = useState<'masuk' | 'keluar' | 'adjust'>('masuk');
   const [qty, setQty] = useState('');
   const [note, setNote] = useState('');
+  const [purpose, setPurpose] = useState<Purpose>('');
+  const [incidentId, setIncidentId] = useState('');
+  const [deviceId, setDeviceId] = useState('');
   const [moves, setMoves] = useState<SparepartMove[]>([]);
   const [stock, setStock] = useState(Number(sp.stock_qty));
   const [busy, setBusy] = useState(false);
@@ -412,10 +466,20 @@ function MoveModal({ sp, onClose, onSaved }: { sp: Sparepart; onClose: () => voi
 
   async function submit() {
     if (qty.trim() === '' || !Number.isFinite(Number(qty)) || Number(qty) < 0) { setError('Jumlah harus angka ≥ 0.'); return; }
+    if (type === 'keluar') {
+      if (!purpose) { setError('Pilih tujuan pengeluaran: Maintenance atau Perbaikan.'); return; }
+      if (purpose === 'perbaikan' && !incidentId) { setError('Pilih tiket insiden untuk pengeluaran perbaikan.'); return; }
+    }
     setBusy(true); setError('');
     try {
-      const r = await api.post(`/spareparts/${sp.id}/move`, { type, qty: Number(qty), note });
-      setStock(r.data.stock_qty); setQty(''); setNote(''); load(); onSaved();
+      const body: any = { type, qty: Number(qty), note };
+      if (type === 'keluar') {
+        body.purpose = purpose;
+        if (purpose === 'perbaikan') body.incident_id = incidentId;
+        if (purpose === 'maintenance' && deviceId) body.device_id = Number(deviceId);
+      }
+      const r = await api.post(`/spareparts/${sp.id}/move`, body);
+      setStock(r.data.stock_qty); setQty(''); setNote(''); setPurpose(''); setIncidentId(''); setDeviceId(''); load(); onSaved();
     } catch (e: any) { setError(e?.response?.data?.error || 'Gagal mencatat.'); }
     finally { setBusy(false); }
   }
@@ -434,6 +498,7 @@ function MoveModal({ sp, onClose, onSaved }: { sp: Sparepart; onClose: () => voi
               <button key={t} onClick={() => setType(t)} className={`px-3 py-1 rounded-md text-[11px] border ${type === t ? 'bg-accent text-bg border-accent font-semibold' : 'bg-surface2 text-text2 border-border'}`}>{MOVE[t].label}</button>
             ))}
           </div>
+          {type === 'keluar' && <KeluarTujuan purpose={purpose} setPurpose={setPurpose} incidentId={incidentId} setIncidentId={setIncidentId} deviceId={deviceId} setDeviceId={setDeviceId} />}
           <div className="grid grid-cols-2 gap-2">
             <label className="block"><span className="text-[10px] text-text2">{type === 'adjust' ? 'Stok jadi' : 'Jumlah'} ({sp.satuan})</span><input className={inp2} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} /></label>
             <label className="block"><span className="text-[10px] text-text2">Catatan</span><input className={inp2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. pengadaan / servis" /></label>
@@ -447,7 +512,7 @@ function MoveModal({ sp, onClose, onSaved }: { sp: Sparepart; onClose: () => voi
               <div className="space-y-1">
                 {moves.map((m) => (
                   <div key={m.id} className="flex items-center justify-between text-[11px] bg-surface2 border border-border rounded-md px-2.5 py-1.5">
-                    <span className={MOVE[m.type].cls}>{MOVE[m.type].label} {Number(m.qty)} {sp.satuan}</span>
+                    <span className={MOVE[m.type].cls}>{MOVE[m.type].label} {Number(m.qty)} {sp.satuan}{m.purpose ? ` · ${PURPOSE[m.purpose]}` : ''}{m.incident_id ? ` · ${m.incident_id}` : ''}</span>
                     <span className="text-text2">{m.device_name ? `${m.device_name} · ` : ''}{new Date(m.moved_at).toLocaleDateString('id-ID')}</span>
                   </div>
                 ))}
@@ -500,8 +565,13 @@ function ScanModal({ onClose }: { onClose: () => void }) {
   const [type, setType] = useState<'masuk' | 'keluar' | 'adjust'>('masuk');
   const [qty, setQty] = useState('1');
   const [note, setNote] = useState('');
+  const [purpose, setPurpose] = useState<Purpose>('');
+  const [incidentId, setIncidentId] = useState('');
+  const [deviceId, setDeviceId] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+
+  const resetKeluar = () => { setPurpose(''); setIncidentId(''); setDeviceId(''); };
 
   const stopCam = useCallback(() => { try { readerRef.current?.reset(); } catch { /* noop */ } }, []);
 
@@ -512,7 +582,7 @@ function ScanModal({ onClose }: { onClose: () => void }) {
     setErr(''); setMsg('');
     try {
       const r = await api.get('/spareparts/lookup', { params: { code: c } });
-      setFound(r.data.sparepart); setType('masuk'); setQty('1'); setNote(''); setPhase('found');
+      setFound(r.data.sparepart); setType('masuk'); setQty('1'); setNote(''); resetKeluar(); setPhase('found');
     } catch (e: any) {
       setErr(e?.response?.data?.error || `Kode "${c}" tidak ditemukan.`);
       startCam();
@@ -539,11 +609,21 @@ function ScanModal({ onClose }: { onClose: () => void }) {
   async function submit() {
     if (!found) return;
     if (qty.trim() === '' || !Number.isFinite(Number(qty)) || Number(qty) < 0) { setErr('Jumlah harus angka ≥ 0.'); return; }
+    if (type === 'keluar') {
+      if (!purpose) { setErr('Pilih tujuan pengeluaran: Maintenance atau Perbaikan.'); return; }
+      if (purpose === 'perbaikan' && !incidentId) { setErr('Pilih tiket insiden untuk pengeluaran perbaikan.'); return; }
+    }
     setBusy(true); setErr('');
     try {
-      const r = await api.post(`/spareparts/${found.id}/move`, { type, qty: Number(qty), note });
+      const body: any = { type, qty: Number(qty), note };
+      if (type === 'keluar') {
+        body.purpose = purpose;
+        if (purpose === 'perbaikan') body.incident_id = incidentId;
+        if (purpose === 'maintenance' && deviceId) body.device_id = Number(deviceId);
+      }
+      const r = await api.post(`/spareparts/${found.id}/move`, body);
       setMsg(`✅ ${MOVE[type].label} ${qty} ${found.satuan} — ${found.name}. Stok kini ${r.data.stock_qty}.`);
-      setFound(null); startCam();
+      setFound(null); resetKeluar(); startCam();
     } catch (e: any) { setErr(e?.response?.data?.error || 'Gagal mencatat.'); }
     finally { setBusy(false); }
   }
@@ -582,6 +662,7 @@ function ScanModal({ onClose }: { onClose: () => void }) {
                 <button key={t} onClick={() => setType(t)} className={`px-3 py-1 rounded-md text-[11px] border ${type === t ? 'bg-accent text-bg border-accent font-semibold' : 'bg-surface2 text-text2 border-border'}`}>{MOVE[t].label}</button>
               ))}
             </div>
+            {type === 'keluar' && <div className="mb-2"><KeluarTujuan purpose={purpose} setPurpose={setPurpose} incidentId={incidentId} setIncidentId={setIncidentId} deviceId={deviceId} setDeviceId={setDeviceId} /></div>}
             <div className="grid grid-cols-2 gap-2 mb-2">
               <label className="block"><span className="text-[10px] text-text2">{type === 'adjust' ? 'Stok jadi' : 'Jumlah'} ({found.satuan})</span><input className={inp2} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} /></label>
               <label className="block"><span className="text-[10px] text-text2">Catatan</span><input className={inp2} value={note} onChange={(e) => setNote(e.target.value)} /></label>

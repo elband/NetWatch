@@ -519,6 +519,10 @@ async function migrate() {
   ) ENGINE=InnoDB`);
   // Backfill SKU untuk item lama (berbasis id → unik & terbaca): SP000123.
   await conn.query("UPDATE spareparts SET sku = CONCAT('SP', LPAD(id, 6, '0')) WHERE sku IS NULL OR sku = ''");
+  // Tujuan pengeluaran barang (khusus type='keluar'): 'maintenance' (opsional kaitan perangkat)
+  // atau 'perbaikan' (wajib kaitan tiket insiden). incident_id merujuk tiket perbaikan.
+  await addColumnIfMissing(conn, env.db.database, 'sparepart_moves', 'purpose', "VARCHAR(20) DEFAULT NULL AFTER type");
+  await addColumnIfMissing(conn, env.db.database, 'sparepart_moves', 'incident_id', 'VARCHAR(20) DEFAULT NULL AFTER device_id');
 
   // ── Fase 5 (AAB): kondisi B/RR/RB, grup fasilitas, kebutuhan; checklist berkategori; obat air ──
   // 5a. Aset fisik: klasifikasi kondisi inventaris (berdampingan dgn op_status), grup fasilitas, kebutuhan pengadaan.

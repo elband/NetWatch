@@ -1,6 +1,9 @@
 import { pool } from '../db/pool.js';
 import { unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
+// Label tujuan pengeluaran barang (khusus mutasi keluar) untuk tampilan/laporan.
+const purposeLabel = (p) => (p === 'maintenance' ? 'Maintenance' : p === 'perbaikan' ? 'Perbaikan' : '');
+
 // Fase 4: sparepart & stok per unit. Stok = kolom stock_qty, diperbarui transaksional
 // bersama pencatatan sparepart_moves (masuk/keluar/adjust).
 
@@ -20,8 +23,9 @@ export async function getSparepart(req, res) {
   const [[sp]] = await pool.query('SELECT * FROM spareparts WHERE id = ?', [id]);
   if (!sp || !rowInUnit(sp, req.unitId)) return res.status(404).json({ error: 'Sparepart tidak ditemukan' });
   const [moves] = await pool.query(
-    `SELECT m.*, u.name AS moved_by_name, d.name AS device_name
+    `SELECT m.*, u.name AS moved_by_name, d.name AS device_name, i.issue AS incident_issue
        FROM sparepart_moves m LEFT JOIN users u ON u.id = m.moved_by LEFT JOIN devices d ON d.id = m.device_id
+       LEFT JOIN incidents i ON i.id = m.incident_id
       WHERE m.sparepart_id = ? ORDER BY m.moved_at DESC LIMIT 100`, [id]
   );
   res.json({ sparepart: sp, moves });
@@ -78,6 +82,7 @@ export async function move(req, res) {
   try {
     const result = await recordMove(sp, {
       type: req.body.type, qty: req.body.qty, deviceId: req.body.device_id,
+      purpose: req.body.purpose, incidentId: req.body.incident_id,
       note: req.body.note, userId: req.user.id,
     });
     res.status(201).json(result);
@@ -88,10 +93,36 @@ export async function move(req, res) {
 
 // Inti pencatatan stok (transaksional). type: masuk|keluar|adjust.
 // - masuk: stock += qty · keluar: stock -= qty (tolak bila kurang) · adjust: stock = qty
-export async function recordMove(sp, { type, qty, deviceId = null, note = null, userId = null }, conn = null) {
+// Khusus keluar, `purpose` menandai tujuan: 'maintenance' (kaitan perangkat opsional)
+// atau 'perbaikan' (wajib kaitan tiket insiden → device diambil otomatis dari tiket).
+export async function recordMove(sp, { type, qty, deviceId = null, incidentId = null, purpose = null, note = null, userId = null }, conn = null) {
   if (!['masuk', 'keluar', 'adjust'].includes(type)) throw new Error('Jenis pergerakan tidak valid.');
   const n = Number(qty);
   if (!Number.isFinite(n) || n < 0) throw new Error('Jumlah harus angka ≥ 0.');
+
+  // Tujuan & tiket hanya berlaku untuk pengeluaran barang; abaikan untuk masuk/adjust.
+  let finalPurpose = null;
+  let finalIncidentId = null;
+  let finalDeviceId = deviceId || null;
+  if (type === 'keluar' && purpose) {
+    if (!['maintenance', 'perbaikan'].includes(purpose)) throw new Error('Tujuan pengeluaran tidak valid.');
+    finalPurpose = purpose;
+    if (purpose === 'perbaikan') {
+      const inc = String(incidentId || '').trim();
+      if (!inc) throw new Error('Pilih tiket insiden untuk pengeluaran barang perbaikan.');
+      const [[incident]] = await (conn || pool).query(
+        'SELECT id, device_id, unit_id FROM incidents WHERE id = ?', [inc]
+      );
+      if (!incident) throw new Error(`Tiket ${inc} tidak ditemukan.`);
+      if (sp.unit_id != null && incident.unit_id != null && incident.unit_id !== sp.unit_id) {
+        throw new Error('Tiket berada di unit berbeda dengan barang.');
+      }
+      finalIncidentId = incident.id;
+      // Perangkat diambil dari tiket bila tiket punya perangkat (biar konsisten & tak salah pilih).
+      if (incident.device_id) finalDeviceId = incident.device_id;
+    }
+  }
+
   const cur = Number(sp.stock_qty);
   let next;
   if (type === 'masuk') next = cur + n;
@@ -103,8 +134,8 @@ export async function recordMove(sp, { type, qty, deviceId = null, note = null, 
     if (own) await c.beginTransaction();
     await c.query('UPDATE spareparts SET stock_qty = ? WHERE id = ?', [next, sp.id]);
     await c.query(
-      'INSERT INTO sparepart_moves (sparepart_id, unit_id, type, qty, device_id, note, moved_by) VALUES (?,?,?,?,?,?,?)',
-      [sp.id, sp.unit_id, type, n, deviceId || null, note?.trim?.() || note || null, userId]
+      'INSERT INTO sparepart_moves (sparepart_id, unit_id, type, purpose, qty, device_id, incident_id, note, moved_by) VALUES (?,?,?,?,?,?,?,?,?)',
+      [sp.id, sp.unit_id, type, finalPurpose, n, finalDeviceId, finalIncidentId, note?.trim?.() || note || null, userId]
     );
     if (own) await c.commit();
   } catch (e) { if (own) await c.rollback(); throw e; }
@@ -117,8 +148,9 @@ export async function listMoves(req, res) {
   const [[sp]] = await pool.query('SELECT id, unit_id FROM spareparts WHERE id = ?', [id]);
   if (!sp || !rowInUnit(sp, req.unitId)) return res.status(404).json({ error: 'Sparepart tidak ditemukan' });
   const [moves] = await pool.query(
-    `SELECT m.*, u.name AS moved_by_name, d.name AS device_name
+    `SELECT m.*, u.name AS moved_by_name, d.name AS device_name, i.issue AS incident_issue
        FROM sparepart_moves m LEFT JOIN users u ON u.id = m.moved_by LEFT JOIN devices d ON d.id = m.device_id
+       LEFT JOIN incidents i ON i.id = m.incident_id
       WHERE m.sparepart_id = ? ORDER BY m.moved_at DESC LIMIT 200`, [id]
   );
   res.json({ moves });
@@ -244,12 +276,13 @@ async function buildReport(unitId, from, to) {
   if (from) { dateClause += ' AND m.moved_at >= ?'; params.push(`${from} 00:00:00`); }
   if (to) { dateClause += ' AND m.moved_at <= ?'; params.push(`${to} 23:59:59`); }
   const [moves] = await pool.query(
-    `SELECT m.moved_at, m.type, m.qty, m.note, s.name AS sparepart_name, s.sku, s.satuan,
-            u.name AS moved_by_name, d.name AS device_name
+    `SELECT m.moved_at, m.type, m.purpose, m.qty, m.note, m.incident_id, s.name AS sparepart_name, s.sku, s.satuan,
+            u.name AS moved_by_name, d.name AS device_name, i.issue AS incident_issue
        FROM sparepart_moves m
        JOIN spareparts s ON s.id = m.sparepart_id
        LEFT JOIN users u ON u.id = m.moved_by
        LEFT JOIN devices d ON d.id = m.device_id
+       LEFT JOIN incidents i ON i.id = m.incident_id
       WHERE 1=1${ufm.clause}${dateClause} ORDER BY m.moved_at DESC LIMIT 2000`,
     [...ufm.params, ...params]
   );
@@ -272,12 +305,12 @@ export async function reportXlsx(req, res) {
   }
   [26, 14, 14, 18, 8, 8, 8, 18, 10].forEach((w, i) => { ws1.getColumn(i + 1).width = w; });
   const ws2 = wb.addWorksheet('Mutasi');
-  ws2.addRow(['Waktu', 'Jenis', 'Barang', 'SKU', 'Jumlah', 'Satuan', 'Perangkat', 'Catatan', 'Oleh']);
+  ws2.addRow(['Waktu', 'Jenis', 'Tujuan', 'Barang', 'SKU', 'Jumlah', 'Satuan', 'Perangkat', 'Tiket', 'Catatan', 'Oleh']);
   for (const m of moves) {
-    ws2.addRow([new Date(m.moved_at).toLocaleString('id-ID'), m.type, m.sparepart_name, m.sku || '',
-      Number(m.qty), m.satuan, m.device_name || '', m.note || '', m.moved_by_name || '']);
+    ws2.addRow([new Date(m.moved_at).toLocaleString('id-ID'), m.type, purposeLabel(m.purpose), m.sparepart_name, m.sku || '',
+      Number(m.qty), m.satuan, m.device_name || '', m.incident_id ? `${m.incident_id}${m.incident_issue ? ` — ${m.incident_issue}` : ''}` : '', m.note || '', m.moved_by_name || '']);
   }
-  [20, 10, 26, 14, 8, 8, 18, 24, 18].forEach((w, i) => { ws2.getColumn(i + 1).width = w; });
+  [20, 10, 12, 26, 14, 8, 8, 18, 24, 24, 18].forEach((w, i) => { ws2.getColumn(i + 1).width = w; });
   const buf = Buffer.from(await wb.xlsx.writeBuffer());
   const period = from || to ? `-${from || '...'}_${to || '...'}` : '';
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

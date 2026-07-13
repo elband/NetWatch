@@ -249,9 +249,12 @@ export interface Sparepart {
 export interface SparepartMove {
   id: number;
   type: 'masuk' | 'keluar' | 'adjust';
+  purpose?: 'maintenance' | 'perbaikan' | null;
   qty: string | number;
   device_id: number | null;
   device_name?: string | null;
+  incident_id?: string | null;
+  incident_issue?: string | null;
   note: string | null;
   moved_by_name?: string | null;
   moved_at: string;
