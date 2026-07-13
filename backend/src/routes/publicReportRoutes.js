@@ -77,7 +77,7 @@ router.post('/', upload.array('foto', 6), async (req, res) => {
     const pelaporHp = b.hp?.trim() || '-';
     await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?,0,?)', [incId, `Laporan fasilitas via QR (${b.room_code || '-'}) oleh ${pelaporNama}${pelaporHp !== '-' ? ` · ${pelaporHp}` : ''}: ${b.detail}`]);
     await conn.query('UPDATE public_reports SET incident_id=? WHERE id=?', [incId, id]);
-    try { await snapshotAndNotifyOnDuty(conn, { id: incId, priority: prio, deviceName, issue, reporter: { nama: pelaporNama, hp: pelaporHp } }); } catch { /* abaikan */ }
+    try { await snapshotAndNotifyOnDuty(conn, { id: incId, priority: prio, deviceName, issue, reporter: { nama: pelaporNama, hp: pelaporHp, nip: b.nip?.trim() || '', unit: b.unit?.trim() || '' } }); } catch { /* abaikan */ }
     try { await notifyRoles(['koordinator', 'admin'], { type: b.urgensi === 'kritis' ? 'public_critical' : 'public_new', title: `Laporan publik${b.urgensi === 'kritis' ? ' KRITIS' : ''}: ${b.judul.trim()}`, message: `${id} · ${ruang || gedung || 'Umum'} — ${b.jenis}`, refId: id, refType: 'public_report', link: `/incidents?focus=${incId}` }, { unitId }); } catch { /* abaikan */ }
     // Notifikasi WA ke pelapor (bila menyertakan nomor HP) — narasi + tautan lacak.
     const reporterPhone = normPhone(b.hp);
@@ -164,7 +164,7 @@ router.post('/:id/assign-incident', requireRole('admin', 'koordinator'), async (
         message: `🚨 ALERT ${priority.toUpperCase()}\n${deviceName}\nMasalah: ${report.judul}`,
       });
     } else {
-      const n = await snapshotAndNotifyOnDuty(conn, { id: incId, priority, deviceName, issue: report.judul, reporter: { nama: report.nama, hp: report.hp } });
+      const n = await snapshotAndNotifyOnDuty(conn, { id: incId, priority, deviceName, issue: report.judul, reporter: { nama: report.nama, hp: report.hp, nip: report.nip || '', unit: report.unit || '' } });
       await conn.query('INSERT INTO incident_notes (incident_id, step, note) VALUES (?, 0, ?)', [
         incId, n ? `Notifikasi dikirim ke ${n} teknisi on-duty.` : 'Tidak ada teknisi on-duty saat ini — insiden menunggu di pool.',
       ]);

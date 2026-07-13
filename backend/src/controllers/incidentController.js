@@ -116,9 +116,13 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
     await conn.query('INSERT IGNORE INTO incident_duty (incident_id, user_id) VALUES (?, ?)', [id, uid]);
   }
   const prio = priority === 'kritis' ? 'kritis' : 'warning';
-  // Laporan publik: cantumkan nama & HP pelapor agar teknisi bisa langsung menghubungi.
+  // Laporan publik: cantumkan identitas pelapor selengkapnya (nama, HP, NIP, unit)
+  // agar teknisi & koordinator bisa langsung menghubungi/menelusuri.
   const reporterLine = reporter?.nama
-    ? `\n👤 Pelapor: ${reporter.nama}${reporter.hp && reporter.hp !== '-' ? ` (${reporter.hp})` : ''}`
+    ? `\n👤 Pelapor: ${reporter.nama}`
+      + (reporter.nip ? ` · NIP ${reporter.nip}` : '')
+      + (reporter.hp && reporter.hp !== '-' ? `\n📞 Kontak: ${reporter.hp}` : '')
+      + (reporter.unit ? `\n🏢 Unit: ${reporter.unit}` : '')
     : '';
   for (const uid of onDutyIds) {
     if (await isNotifyEnabledForUser('insiden_teknisi', uid)) {
@@ -137,7 +141,7 @@ export async function snapshotAndNotifyOnDuty(conn, { id, priority, deviceName, 
   // saat tiket muncul. Kini semua path (auto/manual-pool/lapor publik) yang
   // melewati fungsi ini mengirim WA ke koordinator juga.
   const noTechNote = onDutyIds.length === 0 ? '\n⚠️ Belum ada teknisi yang absen masuk — mohon tindak lanjut.' : '';
-  await notifyCoordinators(conn, { id, coord_id: coordId }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}${noTechNote}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
+  await notifyCoordinators(conn, { id, coord_id: coordId }, `🚨 INSIDEN BARU (${(priority || 'sedang').toUpperCase()})\n${id} | ${deviceName}\nMasalah: ${issue}${reporterLine}${noTechNote}\nIngatkan teknisi: ${remindLink(id)}`, 'alert');
   // Koordinator & admin (se-unit): tiket helpdesk baru masuk.
   await notifyRoles(['koordinator', 'admin'], { type: 'ticket_new', priority: prio, title: `Insiden baru (${(priority || 'sedang').toUpperCase()})`, message: `${id} · ${deviceName} — ${issue}`, refId: id, refType: 'incident', link: `/incidents?focus=${id}` }, { unitId });
   return onDutyIds.length;
