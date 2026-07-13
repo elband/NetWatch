@@ -375,3 +375,96 @@ export async function reportXlsx(req, res) {
   res.setHeader('Content-Disposition', `attachment; filename="suku-cadang${period}.xlsx"`);
   res.send(buf);
 }
+
+// ── Impor massal barang dari Excel ──
+// Urutan kolom template (baris 1 = header): Nama* · Part No · SKU · Kategori · Satuan · Stok Awal · Stok Min · Lokasi · Catatan
+const IMPORT_HEADERS = ['Nama*', 'Part No', 'SKU', 'Kategori', 'Satuan', 'Stok Awal', 'Stok Min', 'Lokasi', 'Catatan'];
+
+export async function templateXlsx(req, res) {
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Barang');
+  ws.addRow(IMPORT_HEADERS);
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0E8' } }; });
+  // Contoh isian (boleh dihapus sebelum impor) agar format jelas.
+  ws.addRow(['Konektor RJ45', 'RJ45-CAT6', '', 'Jaringan', 'pcs', 100, 10, 'Gudang A - Rak 2', 'contoh — hapus baris ini']);
+  ws.addRow(['Kabel UTP Cat6', '', 'SP-UTP6', 'Jaringan', 'meter', 305, 50, 'Gudang A', '']);
+  [26, 16, 14, 18, 10, 12, 10, 22, 28].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+  const ws2 = wb.addWorksheet('Petunjuk');
+  ws2.getColumn(1).width = 90;
+  [
+    'PETUNJUK IMPOR BARANG SUKU CADANG',
+    '',
+    '1. Isi data pada sheet "Barang" mulai baris ke-2. JANGAN ubah baris header (baris 1).',
+    '2. Kolom bertanda * (Nama) WAJIB diisi. Baris tanpa Nama akan dilewati.',
+    '3. SKU: kosongkan untuk dibuat otomatis (SP000123). Jika diisi harus UNIK.',
+    '4. Kategori: cukup ketik nama kategori. Bila sudah ada, otomatis terkait; bila belum, disimpan sebagai teks.',
+    '5. Satuan default "pcs" bila kosong. Stok Awal & Stok Min default 0.',
+    '6. HAPUS baris contoh sebelum mengimpor agar tidak ikut ter-input.',
+    '7. Simpan file (.xlsx), lalu unggah lewat tombol "Impor Excel".',
+  ].forEach((t, i) => { const r = ws2.addRow([t]); if (i === 0) r.font = { bold: true, size: 13 }; });
+
+  const buf = Buffer.from(await wb.xlsx.writeBuffer());
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="template-suku-cadang.xlsx"');
+  res.send(buf);
+}
+
+export async function importXlsx(req, res) {
+  const unitId = insertUnitId(req);
+  if (unitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu sebelum mengimpor.' });
+  if (!req.file?.buffer) return res.status(400).json({ error: 'File Excel tidak ditemukan.' });
+
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  try { await wb.xlsx.load(req.file.buffer); }
+  catch { return res.status(400).json({ error: 'File bukan Excel (.xlsx) yang valid.' }); }
+  const ws = wb.getWorksheet('Barang') || wb.worksheets[0];
+  if (!ws) return res.status(400).json({ error: 'Sheet data tidak ditemukan.' });
+
+  // Kategori unit → peta nama(lowercase) ke id, untuk mengaitkan category_id otomatis.
+  const [cats] = await pool.query('SELECT id, name FROM sparepart_categories WHERE unit_id = ?', [unitId]);
+  const catMap = new Map(cats.map((c) => [String(c.name).trim().toLowerCase(), c.id]));
+
+  const cell = (row, i) => { const v = row.getCell(i).value; return v == null ? '' : (typeof v === 'object' ? (v.text ?? v.result ?? '') : v); };
+  const created = [];
+  const errors = [];
+  let skipped = 0;
+
+  for (let r = 2; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const name = String(cell(row, 1)).trim();
+    if (!name) { skipped += 1; continue; } // baris kosong / contoh terhapus
+    const partNo = String(cell(row, 2)).trim() || null;
+    const skuIn = String(cell(row, 3)).trim();
+    const katName = String(cell(row, 4)).trim();
+    const satuan = String(cell(row, 5)).trim() || 'pcs';
+    const stok = Number(cell(row, 6)) || 0;
+    const min = Number(cell(row, 7)) || 0;
+    const lokasi = String(cell(row, 8)).trim() || null;
+    const catatan = String(cell(row, 9)).trim() || null;
+    const catId = katName ? (catMap.get(katName.toLowerCase()) || null) : null;
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [ins] = await conn.query(
+        `INSERT INTO spareparts (unit_id, name, part_no, category, category_id, satuan, stock_qty, min_qty, location, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [unitId, name, partNo, katName || null, catId, satuan, stok, min, lokasi, catatan]
+      );
+      const finalSku = skuIn || `SP${String(ins.insertId).padStart(6, '0')}`;
+      await conn.query('UPDATE spareparts SET sku = ? WHERE id = ?', [finalSku, ins.insertId]);
+      await conn.commit();
+      created.push({ id: ins.insertId, name, sku: finalSku });
+    } catch (e) {
+      await conn.rollback();
+      const reason = e.code === 'ER_DUP_ENTRY' ? `SKU "${skuIn}" sudah dipakai` : (e.sqlMessage || e.message);
+      errors.push({ row: r, name, reason });
+    } finally { conn.release(); }
+  }
+
+  res.status(created.length ? 201 : 200).json({ created: created.length, skipped, errors, items: created });
+}

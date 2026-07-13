@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import type { BrowserMultiFormatReader } from '@zxing/library'; // tipe saja; runtime di-lazy-load (bundle lebih kecil)
 import QRCode from 'qrcode';
 import JsBarcode from 'jsbarcode';
@@ -109,8 +109,32 @@ export default function Spareparts() {
   const [moveItem, setMoveItem] = useState<Sparepart | null>(null);
   const [labelItem, setLabelItem] = useState<Sparepart | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: { row: number; name?: string; reason: string }[] } | null>(null);
 
   function empty() { return { name: '', part_no: '', sku: '', category_id: '', satuan: 'pcs', stock_qty: '', min_qty: '', location: '', notes: '' }; }
+
+  async function downloadTemplate() {
+    const r = await api.get('/spareparts/template.xlsx', { responseType: 'blob' });
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'template-suku-cadang.xlsx'; a.click(); URL.revokeObjectURL(url);
+  }
+  async function onImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = ''; // izinkan pilih file sama lagi
+    if (!f) return;
+    setImporting(true); setImportResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      const r = await api.post('/spareparts/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setImportResult(r.data); load();
+    } catch (err: any) {
+      setImportResult({ created: 0, skipped: 0, errors: [{ row: 0, reason: err?.response?.data?.error || 'Gagal mengimpor file.' }] });
+    } finally { setImporting(false); }
+  }
 
   const load = useCallback(() => {
     if (needUnit) { setLoading(false); return; }
@@ -150,9 +174,12 @@ export default function Spareparts() {
           <h1 className="text-lg font-bold">🧰 Manajemen Suku Cadang</h1>
           <p className="text-[12px] text-text2">Inventaris suku cadang per unit — stok, kategori, scan QR/barcode & laporan.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {!needUnit && <button onClick={() => setScanOpen(true)} className="bg-accent2 text-bg font-semibold rounded-md px-3 py-2 text-sm">📷 Scan Masuk/Keluar</button>}
+          {canManage && !needUnit && <button onClick={downloadTemplate} className="border border-border text-text2 hover:text-white font-medium rounded-md px-3 py-2 text-sm">⬇️ Template</button>}
+          {canManage && !needUnit && <button onClick={() => fileRef.current?.click()} disabled={importing} className="border border-accent text-accent hover:bg-accent/10 font-semibold rounded-md px-3 py-2 text-sm disabled:opacity-50">{importing ? '⏳ Mengimpor…' : '⬆️ Impor Excel'}</button>}
           {canManage && !needUnit && <button onClick={openCreate} className="bg-accent text-bg font-semibold rounded-md px-3 py-2 text-sm">+ Barang</button>}
+          <input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onImportFile} className="hidden" />
         </div>
       </div>
 
@@ -211,6 +238,29 @@ export default function Spareparts() {
       {moveItem && <MoveModal sp={moveItem} onClose={() => setMoveItem(null)} onSaved={load} />}
       {labelItem && <LabelModal sp={labelItem} onClose={() => setLabelItem(null)} />}
       {scanOpen && <ScanModal onClose={() => { setScanOpen(false); load(); }} />}
+
+      {importResult && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setImportResult(null)}>
+          <div className={`${card} w-full max-w-md max-h-[90vh] overflow-y-auto p-5`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-bold">📥 Hasil Impor</h3><button className="text-text2 hover:text-text text-lg" onClick={() => setImportResult(null)}>×</button></div>
+            <div className="flex gap-2 mb-3">
+              <div className="flex-1 bg-success/10 border border-success/30 rounded-md px-3 py-2 text-center"><div className="text-xl font-bold text-success">{importResult.created}</div><div className="text-[10px] text-text2">ditambahkan</div></div>
+              <div className="flex-1 bg-surface2 border border-border rounded-md px-3 py-2 text-center"><div className="text-xl font-bold text-text2">{importResult.skipped}</div><div className="text-[10px] text-text2">dilewati</div></div>
+              <div className="flex-1 bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-center"><div className="text-xl font-bold text-danger">{importResult.errors.length}</div><div className="text-[10px] text-text2">gagal</div></div>
+            </div>
+            {importResult.errors.length > 0 && (
+              <div className="space-y-1 max-h-52 overflow-y-auto">
+                {importResult.errors.map((er, i) => (
+                  <div key={i} className="text-[11px] bg-danger/5 border border-danger/20 rounded-md px-2.5 py-1.5">
+                    {er.row ? <span className="text-text2">Baris {er.row}{er.name ? ` · ${er.name}` : ''}: </span> : null}<span className="text-danger">{er.reason}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setImportResult(null)} className="mt-4 w-full bg-accent text-bg font-semibold rounded-md px-4 py-2 text-sm">Tutup</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
