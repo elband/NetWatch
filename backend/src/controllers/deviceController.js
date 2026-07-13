@@ -221,7 +221,7 @@ export async function toggleAlwaysOn(req, res) {
   if (!device || !rowInUnit(device, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan' });
   const next = device.always_on ? 0 : 1;
   // Saat ditandai selalu aktif, pastikan monitoring hidup & bersihkan status "dimatikan".
-  if (next) await pool.query("UPDATE devices SET always_on=1, monitor_enabled=1, off_reason = CASE WHEN off_reason='dimatikan' THEN NULL ELSE off_reason END WHERE id=?", [id]);
+  if (next) await pool.query("UPDATE devices SET always_on=1, monitor_enabled=1, off_reason = CASE WHEN off_reason IN ('dimatikan','poweroff') THEN NULL ELSE off_reason END WHERE id=?", [id]);
   else await pool.query('UPDATE devices SET always_on=0 WHERE id=?', [id]);
   const [updated] = await pool.query('SELECT * FROM devices WHERE id = ?', [id]);
   res.json({ device: updated[0] });

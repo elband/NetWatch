@@ -188,11 +188,11 @@ async function powerGateFor(user) {
 }
 
 // Auto-Hidup saat override: membuka/memperbarui izin inspeksi juga MELANJUTKAN monitoring
-// semua peralatan yang sebelumnya "dimatikan" (off_reason='dimatikan') di unit tsb — tanpa
-// alur foto Hidupkan; koordinator sudah menanggung alasannya (tercatat append-only). Hanya
-// perangkat yang benar-benar di-matikan lewat tombol Matikan yang ikut dinyalakan: aset fisik
-// & perangkat standby (monitor_enabled=0 tanpa off_reason='dimatikan') TIDAK terpengaruh, dan
-// perangkat always-on memang tak pernah ber-off_reason 'dimatikan'. Mirror alur Hidupkan satuan.
+// HANYA peralatan yang padam di JAM MALAM (off_reason='dimatikan') di unit tsb — tanpa alur
+// foto Hidupkan; koordinator menanggung alasannya (tercatat append-only). Peralatan yang
+// SENGAJA dimatikan lewat tombol Matikan bertanda off_reason='poweroff' → TIDAK ikut ter-resume
+// (tetap dijeda sampai di-Hidupkan manual), agar tak dideteksi offline & dibuatkan insiden lagi.
+// Aset fisik/standby (monitor_enabled=0 tanpa off_reason='dimatikan') & always-on juga tak tersentuh.
 // Mengembalikan jumlah perangkat yang dilanjutkan + emit device:update utk tampilan real-time.
 async function resumeDimatikanForUnit(req, unitId) {
   const uf = unitFilter(unitId, 'unit_id');
@@ -448,7 +448,7 @@ router.post('/poweron', withInspectionPhoto, async (req, res) => {
     // Menghidupkan peralatan = mulai monitoring: aktifkan pantauan otomatis & bersihkan
     // kategori "dimatikan"/override agar ping berikutnya menentukan status riil.
     await conn.query(
-      "UPDATE devices SET monitor_enabled=1, alarm_override=0, offline_since=NULL, off_reason = CASE WHEN off_reason='dimatikan' THEN NULL ELSE off_reason END WHERE id=?",
+      "UPDATE devices SET monitor_enabled=1, alarm_override=0, offline_since=NULL, off_reason = CASE WHEN off_reason IN ('dimatikan','poweroff') THEN NULL ELSE off_reason END WHERE id=?",
       [deviceId]
     );
     await conn.commit();
@@ -537,8 +537,11 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
       [deviceId, date, note?.trim() || null, photoUrl, hash, verified ? 1 : 0, distance, flagged, req.user.id, req.user.name, rowUnitId]
     );
     insertId = ins.insertId;
+    // off_reason='poweroff' (BUKAN 'dimatikan') menandai peralatan yang SENGAJA dimatikan
+    // lewat tombol Matikan. Kategori ini TIDAK ikut ter-resume oleh Auto-Hidup koordinator
+    // (resumeDimatikanForUnit hanya menyentuh 'dimatikan' jam malam) → tak dideteksi ulang.
     await conn.query(
-      "UPDATE devices SET monitor_enabled=0, off_reason='dimatikan', status='offline', alarm_override=0, offline_since=NULL WHERE id=?",
+      "UPDATE devices SET monitor_enabled=0, off_reason='poweroff', status='offline', alarm_override=0, offline_since=NULL WHERE id=?",
       [deviceId]
     );
     await conn.commit();

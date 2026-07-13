@@ -98,8 +98,13 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'devices', 'merk', 'VARCHAR(80) DEFAULT NULL AFTER type');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'serial', 'VARCHAR(80) DEFAULT NULL AFTER merk');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'tahun', 'VARCHAR(20) DEFAULT NULL AFTER serial');
-  // Kategori offline: 'dimatikan' bila perangkat non-server padam pada jam malam (tidak dialarmkan).
+  // Kategori offline: 'dimatikan' (padam jam malam, tetap dimonitor) vs 'poweroff'
+  // (sengaja dimatikan lewat tombol Matikan → monitoring dijeda, tak dideteksi ulang).
   await addColumnIfMissing(conn, env.db.database, 'devices', 'off_reason', "VARCHAR(20) DEFAULT NULL AFTER status");
+  // Backfill: peralatan yang sudah terlanjur dimatikan manual (monitor dijeda) sebelumnya
+  // ber-off_reason='dimatikan' → pisahkan jadi 'poweroff' agar tak ikut ter-resume Auto-Hidup.
+  // Aman: kategori jam-malam selalu monitor_enabled=1, jadi hanya poweroff manual yang kena.
+  await conn.query("UPDATE devices SET off_reason='poweroff' WHERE monitor_enabled=0 AND off_reason='dimatikan'");
   // Override manual: paksa alarmkan perangkat non-server walau di jam malam (sekali pakai sampai online lagi).
   await addColumnIfMissing(conn, env.db.database, 'devices', 'alarm_override', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER off_reason');
   await addColumnIfMissing(conn, env.db.database, 'devices', 'inspect_required', 'TINYINT(1) NOT NULL DEFAULT 1 AFTER loc');

@@ -16,6 +16,7 @@ function statusColor(d: Device): string {
 function statusLabel(d: Device): string {
   if (d.monitor_enabled === 0) return 'Standby';
   if (d.under_maintenance) return 'Maintenance';
+  if (d.status === 'offline' && d.off_reason === 'poweroff') return 'Dimatikan (peralatan)';
   if (d.status === 'offline' && d.off_reason === 'dimatikan') return 'Dimatikan (jam malam)';
   return d.status.charAt(0).toUpperCase() + d.status.slice(1);
 }

@@ -15,11 +15,12 @@ export function DeviceStatusBadge({ status, offReason, monitorEnabled, underMain
       </span>
     );
   }
-  // Perangkat dimatikan (via tombol Matikan / padam jam malam): monitoring dijeda, tidak dialarmkan.
-  if (offReason === 'dimatikan') {
+  // Perangkat dimatikan (via tombol Matikan = 'poweroff' / padam jam malam = 'dimatikan'):
+  // monitoring dijeda, tidak dialarmkan. 'poweroff' TIDAK ikut ter-resume Auto-Hidup.
+  if (offReason === 'dimatikan' || offReason === 'poweroff') {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-slate-300 bg-slate-500/15"
-        title={monitorEnabled === 0 ? 'Peralatan dimatikan — monitoring dijeda, tidak dialarmkan' : 'Padam pada jam malam — tidak dialarmkan'}>
+        title={offReason === 'poweroff' ? 'Peralatan sengaja dimatikan — monitoring dijeda, tidak dideteksi otomatis' : 'Padam pada jam malam — tidak dialarmkan'}>
         🌙 DIMATIKAN
       </span>
     );

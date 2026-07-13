@@ -329,7 +329,7 @@ export default function Devices() {
                     🔔 Alarmkan
                   </button>
                 )}
-                {canEdit && d.status !== 'online' && d.off_reason !== 'dimatikan' && (
+                {canEdit && d.status !== 'online' && d.off_reason !== 'dimatikan' && d.off_reason !== 'poweroff' && (
                   <button onClick={() => createIncident(d.id)} className="bg-danger/10 text-danger border border-danger/30 rounded px-2 py-0.5 text-[10px]">
                     ⚠️ Insiden
                   </button>
