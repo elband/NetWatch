@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { stampFiles } from '../utils/photoStamp';
 
-const KATEGORI =['Komputer', 'Printer', 'Internet', 'WiFi', 'CCTV', 'Access Control', 'FIDS', 'Telepon', 'Monitor Informasi', 'Server', 'Keamanan', 'Operasional', 'Umum', 'Lainnya'];
+const KATEGORI =['Komputer', 'Printer', 'Internet', 'WiFi', 'FIDS', 'Telepon', 'Monitor Informasi', 'Server', 'Keamanan', 'Operasional', 'Umum', 'Lainnya'];
 const URG: Record<string, string> = { kritis: '🔴 Kritis', tinggi: '🟠 Tinggi', sedang: '🟡 Sedang', rendah: '🟢 Rendah' };
 const MAX_MB = 10;
 const emptyForm = { nama: '', hp: '', jenis: 'Komputer', judul: '', urgensi: 'sedang', detail: '', gedung: '', ruang: '', unit_id: '', merk: '', inv: '' };
@@ -106,6 +106,7 @@ export default function LaporPublik() {
   }
 
   async function submit() {
+    if (!form.nama.trim() || !form.hp.trim()) { setError('Nama & No. HP/WA wajib diisi.'); return; }
     if (!form.judul.trim() || !form.detail.trim()) { setError('Perangkat/judul & deskripsi gangguan wajib diisi.'); return; }
     setBusy(true); setError('');
     try {
@@ -236,13 +237,13 @@ export default function LaporPublik() {
                 {/* Nama */}
                 <div className={fieldBox}>
                   <div className={iconBox}><Icon name="user" /></div>
-                  <div className="min-w-0 flex-1"><div className={label}>Nama (opsional)</div>
+                  <div className="min-w-0 flex-1"><div className={label}>Nama <span className="text-rose-400">*</span></div>
                     <input className={inp} placeholder="Masukkan nama Anda" value={form.nama} onChange={(e) => setForm({ ...form, nama: e.target.value })} /></div>
                 </div>
                 {/* HP */}
                 <div className={fieldBox}>
                   <div className={iconBox}><Icon name="phone" /></div>
-                  <div className="min-w-0 flex-1"><div className={label}>No. HP/WA (opsional)</div>
+                  <div className="min-w-0 flex-1"><div className={label}>No. HP/WA <span className="text-rose-400">*</span></div>
                     <input className={inp} inputMode="tel" placeholder="08xxxxxxxxxxx" value={form.hp} onChange={(e) => setForm({ ...form, hp: e.target.value })} /></div>
                 </div>
                 {/* Kategori */}

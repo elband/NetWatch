@@ -34,6 +34,7 @@ async function nextReportId(conn) {
 router.post('/', upload.array('foto', 6), async (req, res) => {
   const b = req.body;
   if (!b.judul || !b.jenis || !b.detail) return res.status(400).json({ error: 'Kategori, perangkat/judul, dan deskripsi gangguan wajib diisi.' });
+  if (!String(b.nama || '').trim() || !normPhone(b.hp)) return res.status(400).json({ error: 'Nama & No. HP/WA wajib diisi (nomor minimal 8 digit).' });
   const conn = await pool.getConnection();
   try {
     let gedung = b.gedung || null, ruang = b.ruang || null, roomId = null;
