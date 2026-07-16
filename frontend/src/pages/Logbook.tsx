@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import PowerIcon from '../components/PowerIcon';
 
 export interface LogEvent { date: string; time: string; kind: 'inspeksi' | 'power' | 'maintenance' | 'insiden'; label: string; status: string; detail: string; by: string; photo_url: string; verified: boolean }
 export interface LogMetrik { up_pct: number; avg_ping: number; max_ping: number; samples: number }
@@ -16,10 +17,10 @@ const KIND_META: Record<LogEvent['kind'], { icon: string; label: string; cls: st
 };
 // Badge Jenis per-event. Aksi power dipisah jadi Hidupkan/Matikan (bukan satu kategori
 // gabungan "Hidup/Mati") agar tiap kegiatan tampil sebagai jenis tersendiri.
-export function kindBadge(e: LogEvent): { icon: string; label: string; cls: string } {
+export function kindBadge(e: LogEvent): { icon: ReactNode; label: string; cls: string } {
   if (e.kind === 'power') {
     return e.status === 'mati'
-      ? { icon: '⏻', label: 'Matikan', cls: 'text-slate-300 bg-slate-500/15 border-slate-500/30' }
+      ? { icon: <PowerIcon />, label: 'Matikan', cls: 'text-slate-300 bg-slate-500/15 border-slate-500/30' }
       : { icon: '⚡', label: 'Hidupkan', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' };
   }
   return KIND_META[e.kind];

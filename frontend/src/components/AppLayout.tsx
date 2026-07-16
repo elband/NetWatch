@@ -8,6 +8,7 @@ import { NAV_ITEMS, PAGE_TITLES, UNIT_ONLY, type NavEntry } from './NavConfig';
 import NotificationCenter from './NotificationCenter';
 import ThemeToggle from './ThemeToggle';
 import ImageLightbox from './ImageLightbox';
+import PowerIcon from './PowerIcon';
 import type { Role, Unit, User } from '../types';
 
 const ROLE_COLOR: Record<string, string> = {
@@ -283,7 +284,7 @@ function FloatingMenu({ navItems, user, allRoles, notif, onEditProfile, onLogout
               )
             )}
           </nav>
-          <button onClick={() => { setOpen(false); onLogout(); }} className="w-full border-t border-border px-3.5 py-2.5 text-[13px] text-left text-danger hover:bg-danger/10 flex items-center gap-2 shrink-0">⏻ Keluar</button>
+          <button onClick={() => { setOpen(false); onLogout(); }} className="w-full border-t border-border px-3.5 py-2.5 text-[13px] text-left text-danger hover:bg-danger/10 flex items-center gap-2 shrink-0"><PowerIcon /> Keluar</button>
         </div>
       )}
       <button

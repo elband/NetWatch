@@ -7,6 +7,7 @@ import MaintenanceWindows from './MaintenanceWindows';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import { getGeo, stampPhoto, stampFiles, type GeoPoint } from '../utils/photoStamp';
 import { openImage } from '../components/ImageLightbox';
+import PowerIcon from '../components/PowerIcon';
 import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
@@ -305,7 +306,6 @@ const fmtDay = (s?: string | null) => { if (!s) return ''; const d = new Date(St
 // mana → cocok dengan baris di Logbook (yang per-bulan). Tooltip memuat pelaksana & jarak.
 function PowerProof({ rec, kind }: { rec?: PowerOn | null; kind: 'on' | 'off' }) {
   if (!rec?.photo_url) return null;
-  const icon = kind === 'on' ? '⚡' : '⏻';
   const word = kind === 'on' ? 'dihidupkan' : 'dimatikan';
   const when = fmtDay(rec.on_date);
   return (
@@ -314,7 +314,7 @@ function PowerProof({ rec, kind }: { rec?: PowerOn | null; kind: 'on' | 'off' })
       onClick={(e) => { e.stopPropagation(); openImage(rec.photo_url!); }}
       title={`Bukti ${word}${when ? ' ' + when : ''} oleh ${rec.done_by_name || '-'}${rec.verified ? ' · terverifikasi' : ' · belum terverifikasi'}${rec.distance_m != null ? ' · ' + rec.distance_m + ' m' : ''}`}
       className="inline-flex items-center gap-0.5 leading-none whitespace-nowrap"
-    ><span>{icon}</span>{when && <span className="text-text2 text-[9px]">{when}</span>}<span>📷{rec.verified ? '✅' : '⚠️'}</span></button>
+    ><span>{kind === 'on' ? '⚡' : <PowerIcon />}</span>{when && <span className="text-text2 text-[9px]">{when}</span>}<span>📷{rec.verified ? '✅' : '⚠️'}</span></button>
   );
 }
 
@@ -542,7 +542,7 @@ function InspeksiTab({ isManager }: { isManager: boolean }) {
                           ? 'bg-surface2 border-border text-text2 cursor-default'
                           : canMatikan ? 'border-danger/40 text-danger hover:opacity-80' : 'border-border text-text2 opacity-60 cursor-not-allowed'}`}
                       >
-                        ⏻ {isOn ? 'Matikan' : 'Mati'}
+                        <PowerIcon className="mr-1" /> {isOn ? 'Matikan' : 'Mati'}
                       </button>
                     </div>
                   </div>
@@ -843,7 +843,7 @@ function PowerOffModal({ dev, radiusM, existing, onClose, onSaved }: { dev: Equi
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-bold mb-1">⏻ Matikan Peralatan</h3>
+        <h3 className="text-sm font-bold mb-1"><PowerIcon className="mr-1" /> Matikan Peralatan</h3>
         <p className="text-[11px] text-text2 mb-3">{dev.name} · {dev.type} · {dev.ip}</p>
         <div className="bg-warn/10 border border-warn/30 rounded-md px-3 py-2 text-[11px] text-warn mb-3">Perangkat ditandai "dimatikan": status offline tanpa alarm, monitoring otomatis (ping/insiden) dijeda sampai dihidupkan kembali.</div>
         {existing && <div className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px] text-text2 mb-3">Terakhir dimatikan {fmtDay(existing.on_date) || 'sebelumnya'} oleh {existing.done_by_name || '-'}. Menyimpan akan menambah catatan <b>Mati</b> baru (tidak menimpa yang lama).</div>}
@@ -856,7 +856,7 @@ function PowerOffModal({ dev, radiusM, existing, onClose, onSaved }: { dev: Equi
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
-          <button className="bg-danger text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : '⏻ Matikan'}</button>
+          <button className="bg-danger text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : <><PowerIcon className="mr-1" /> Matikan</>}
         </div>
       </div>
     </div>
