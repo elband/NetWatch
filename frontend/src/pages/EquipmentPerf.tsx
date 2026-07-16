@@ -856,7 +856,7 @@ function PowerOffModal({ dev, radiusM, existing, onClose, onSaved }: { dev: Equi
         {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
         <div className="flex gap-2 justify-end">
           <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
-          <button className="bg-danger text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : <><PowerIcon className="mr-1" /> Matikan</>}
+          <button className="bg-danger text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy || cap.processing}>{busy ? 'Menyimpan…' : cap.processing ? 'Memproses foto…' : <><PowerIcon className="mr-1" /> Matikan</>}</button>
         </div>
       </div>
     </div>
