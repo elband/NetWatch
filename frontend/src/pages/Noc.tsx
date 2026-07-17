@@ -54,6 +54,42 @@ const shiftInfo = (s: string | null): { label: string; c: string; on: boolean } 
 };
 const fmtTime = (s: string | null) => (s ? new Date(s).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—');
 const fmtMbps = (bps: number) => { const m = bps / 1e6; return m >= 100 ? String(Math.round(m)) : m >= 10 ? m.toFixed(1) : m.toFixed(2); };
+
+// Grafik garis realtime kecepatan uplink (download hijau + upload biru) dari riwayat rx/tx.
+// SVG murni, tanpa dependensi. Skala dinamis ke puncak jendela; area gradasi di bawah download.
+function NetChart({ hist }: { hist: { rx: number; tx: number }[] }) {
+  const W = 300, H = 60, pad = 3;
+  if (hist.length < 2) {
+    return <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: C.dim, background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 9 }}>Mengumpulkan data grafik…</div>;
+  }
+  const n = hist.length;
+  const max = Math.max(1, ...hist.map((p) => Math.max(p.rx, p.tx)));
+  const x = (i: number) => pad + (i / (n - 1)) * (W - 2 * pad);
+  const y = (v: number) => H - pad - (v / max) * (H - 2 * pad);
+  const path = (k: 'rx' | 'tx') => hist.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ');
+  const area = `${path('rx')} L${x(n - 1).toFixed(1)},${H - pad} L${x(0).toFixed(1)},${H - pad} Z`;
+  const peak = fmtMbps(max);
+  return (
+    <div style={{ position: 'relative', background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 4 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', width: '100%', height: H }}>
+        <defs>
+          <linearGradient id="nocRxFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={C.online} stopOpacity="0.30" />
+            <stop offset="100%" stopColor={C.online} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={0} x2={W} y1={H * g} y2={H * g} stroke={C.border} strokeWidth={0.5} strokeDasharray="2 3" />)}
+        <path d={area} fill="url(#nocRxFill)" />
+        <path d={path('rx')} fill="none" stroke={C.online} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        <path d={path('tx')} fill="none" stroke={C.accent} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        {[{ k: 'rx' as const, c: C.online }, { k: 'tx' as const, c: C.accent }].map((s) => (
+          <circle key={s.k} cx={x(n - 1)} cy={y(hist[n - 1][s.k])} r={2} fill={s.c} vectorEffect="non-scaling-stroke" />
+        ))}
+      </svg>
+      <span className="mono" style={{ position: 'absolute', top: 5, left: 7, fontSize: 8, color: C.dim, pointerEvents: 'none' }}>▲ {peak} Mbps</span>
+    </div>
+  );
+}
 const ago = (s: string | null) => {
   if (!s) return '—';
   const m = Math.max(0, Math.round((Date.now() - new Date(s).getTime()) / 60000));
@@ -109,6 +145,12 @@ export default function Noc() {
   const [toast, setToast] = useState<NDevice | null>(null);
   const [focusIdx, setFocusIdx] = useState(0);
   const [hoverMap, setHoverMap] = useState(false);
+  // Riwayat kecepatan uplink (rx/tx) untuk grafik garis realtime — ring buffer ~60 titik terakhir.
+  // Sumber kebenaran di ref (histRef) agar akumulasi tak bergantung urutan render; state hanya mirror.
+  const [netHist, setNetHist] = useState<{ rx: number; tx: number }[]>([]);
+  const histRef = useRef<{ rx: number; tx: number }[]>([]);
+  const netTsRef = useRef(0);
+  const netUnitRef = useRef(-1);
   // Alarm suara: aktif/mati (disimpan per-browser) + status audio sudah ter-unlock browser.
   const [soundOn, setSoundOn] = useState<boolean>(() => { try { return localStorage.getItem('noc_alarm_sound') !== '0'; } catch { return true; } });
   const [audioOk, setAudioOk] = useState(false);
@@ -144,8 +186,17 @@ export default function Noc() {
         const r = await fetch(`/api/noc/public?${q}`);
         setLatency(Math.round(performance.now() - t0));
         if (!r.ok) { const j = await r.json().catch(() => ({})); if (alive) setErr(j.error || `Gagal memuat (${r.status})`); return; }
-        const j = await r.json();
-        if (alive) { setData(j); setErr(''); }
+        const j: NData = await r.json();
+        if (alive) {
+          setData(j); setErr('');
+          // Akumulasi riwayat kecepatan uplink untuk grafik garis realtime (ring buffer 60 titik).
+          if (j.unit?.id !== netUnitRef.current) { netUnitRef.current = j.unit?.id ?? -1; histRef.current = []; netTsRef.current = 0; }
+          if (j.internet?.rxBps != null && j.ts !== netTsRef.current) {
+            netTsRef.current = j.ts;
+            histRef.current = [...histRef.current, { rx: j.internet.rxBps || 0, tx: j.internet.txBps || 0 }].slice(-60);
+            setNetHist(histRef.current);
+          }
+        }
       } catch { if (alive) setErr('Tidak bisa terhubung ke server.'); }
     };
     load();
@@ -568,6 +619,17 @@ export default function Noc() {
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 1 }}><span className="mono" style={{ fontSize: 22, fontWeight: 900, color: s.c, lineHeight: 1.1 }}>{s.val}</span><span style={{ fontSize: 10, color: C.dim }}>Mbps</span></div>
                     </div>
                   ))}
+                </div>
+              )}
+              {/* Grafik garis realtime download/upload */}
+              {internet.rxBps != null && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 8, fontWeight: 800, letterSpacing: 0.4, color: C.dim }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 2, background: C.online, borderRadius: 2 }} />DOWNLOAD</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 2, background: C.accent, borderRadius: 2 }} />UPLOAD</span>
+                    <span style={{ marginLeft: 'auto', color: C.dim, fontWeight: 700 }}>±{(netHist.length * POLL_MS) / 1000}s</span>
+                  </div>
+                  <NetChart hist={netHist} />
                 </div>
               )}
               {/* Perangkat sumber uplink */}
