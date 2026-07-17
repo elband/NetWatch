@@ -451,7 +451,40 @@ export default function Noc() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
           {/* KPI */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
-            {[{ l: 'ONLINE', v: kpi.online, c: C.online }, { l: 'GANGGUAN', v: kpi.offline, c: C.offline }, { l: 'WARNING', v: kpi.warning, c: C.warning }, { l: 'INSIDEN AKTIF', v: kpi.activeInc, c: C.accent }, { l: 'TEKNISI', v: kpi.teknisiOn, c: C.text }, { l: 'KETERSEDIAAN', v: `${kpi.availability}%`, c: kpi.availability >= 98 ? C.online : C.warning }].map((k) => (
+            {/* STATUS PERANGKAT — gabungan Online/Warning/Gangguan jadi satu segmented bar (span 3 kolom) */}
+            {(() => {
+              const seg = [{ l: 'Online', v: kpi.online, c: C.online }, { l: 'Warning', v: kpi.warning, c: C.warning }, { l: 'Gangguan', v: kpi.offline, c: C.offline }];
+              const sum = kpi.online + kpi.warning + kpi.offline;
+              const tot = kpi.total || sum; // denominator bar (sisa = status tak diketahui → abu-abu)
+              return (
+                <div style={{ ...card, padding: '8px 12px', gridColumn: 'span 3', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 9, color: C.dim, letterSpacing: 0.6, fontWeight: 800 }}>STATUS PERANGKAT</span>
+                    <span style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                      <span className="mono" style={{ fontSize: 26, fontWeight: 900, color: C.text, lineHeight: 1 }}>{tot}</span>
+                      <span style={{ fontSize: 9, color: C.dim, fontWeight: 700 }}>perangkat</span>
+                    </span>
+                  </div>
+                  {/* Segmented bar proporsional; kosong → abu-abu */}
+                  <div style={{ display: 'flex', width: '100%', height: 10, borderRadius: 999, overflow: 'hidden', background: C.panel2, border: `1px solid ${C.border}` }}>
+                    {tot > 0 ? seg.filter((s) => s.v > 0).map((s) => (
+                      <div key={s.l} title={`${s.v} ${s.l}`} style={{ width: `${(s.v / tot) * 100}%`, background: s.c, boxShadow: `0 0 6px ${s.c}66` }} />
+                    )) : null}
+                  </div>
+                  {/* Legenda dengan angka */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 11, fontWeight: 700 }}>
+                    {seg.map((s) => (
+                      <span key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 5, color: C.dim }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 999, background: s.c, boxShadow: `0 0 6px ${s.c}`, flexShrink: 0 }} />
+                        <span className="mono" style={{ color: s.c, fontWeight: 900 }}>{s.v}</span>{s.l}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Metrik operasi — tetap angka besar, 1 kolom masing-masing */}
+            {[{ l: 'INSIDEN AKTIF', v: kpi.activeInc, c: C.accent }, { l: 'TEKNISI', v: kpi.teknisiOn, c: C.text }, { l: 'KETERSEDIAAN', v: `${kpi.availability}%`, c: kpi.availability >= 98 ? C.online : C.warning }].map((k) => (
               <div key={k.l} style={{ ...card, padding: '8px 10px' }}>
                 <div style={{ fontSize: 9, color: C.dim, letterSpacing: 0.6, fontWeight: 800 }}>{k.l}</div>
                 <div className="mono" style={{ fontSize: 28, fontWeight: 900, color: k.c, lineHeight: 1.15 }}>{k.v}</div>
