@@ -1,10 +1,36 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { stampFiles } from '../utils/photoStamp';
 
 const KATEGORI =['Komputer', 'Printer', 'Internet', 'WiFi', 'FIDS', 'Telepon', 'Monitor Informasi', 'Server', 'Keamanan', 'Operasional', 'Umum', 'Lainnya'];
 const URG: Record<string, string> = { kritis: '🔴 Kritis', tinggi: '🟠 Tinggi', sedang: '🟡 Sedang', rendah: '🟢 Rendah' };
 const MAX_MB = 10;
+const SHARP_MIN = 40; // ambang ketajaman minimal — mencegah foto blur (sama seperti kamera inspeksi)
+
+// Ukur ketajaman frame video via variansi Laplacian pada thumbnail 160px (murah, cukup akurat).
+function frameSharpness(video: HTMLVideoElement, canvas: HTMLCanvasElement): number {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return 0;
+  const w = 160, h = Math.max(90, Math.round((vh / vw) * 160));
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return 0;
+  ctx.drawImage(video, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const gray = new Float64Array(w * h);
+  for (let i = 0; i < w * h; i++) gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+  let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const lap = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - w] - gray[i + w];
+      sum += lap; sum2 += lap * lap; n++;
+    }
+  }
+  if (!n) return 0;
+  const mean = sum / n;
+  return sum2 / n - mean * mean;
+}
 const emptyForm = { nama: '', hp: '', jenis: 'Komputer', judul: '', urgensi: 'sedang', detail: '', gedung: '', ruang: '', unit_id: '', merk: '', inv: '' };
 
 interface Room { kode: string; nama: string; gedung: string | null; lantai: string | null; area: string | null }
@@ -28,6 +54,7 @@ function Icon({ name, className = '', size = 18 }: { name: string; className?: s
     case 'lines': return <svg {...c}><path d="M4 6h16M4 12h12M4 18h16" /></svg>;
     case 'image': return <svg {...c}><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>;
     case 'upload': return <svg {...c}><path d="M12 16V4m0 0L8 8m4-4 4 4" /><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>;
+    case 'camera': return <svg {...c}><path d="M4 7h3l2-2h6l2 2h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z" /><circle cx="12" cy="13" r="3.5" /></svg>;
     case 'send': return <svg {...c}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" /></svg>;
     case 'search': return <svg {...c}><circle cx="11" cy="11" r="7" /><path d="m21 21-4-4" /></svg>;
     case 'chevDown': return <svg {...c}><path d="m6 9 6 6 6-6" /></svg>;
@@ -35,6 +62,144 @@ function Icon({ name, className = '', size = 18 }: { name: string; className?: s
     case 'check': return <svg {...c}><path d="M20 6 9 17l-5-5" /></svg>;
     default: return null;
   }
+}
+
+// Kamera in-page untuk laporan publik — meniru "kamera inspeksi" (gerbang ketajaman + zoom)
+// tetapi TIDAK fullscreen: preview live tertanam langsung di halaman form. Bisa ambil beberapa
+// foto berturut-turut; kamera tetap hidup sampai ditutup manual.
+function InlineCamera({ onCapture }: { onCapture: (f: File) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const trackRef = useRef<MediaStreamTrack | null>(null);
+  const sharpCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sharpTimer = useRef<number | null>(null);
+  const [active, setActive] = useState(false);
+  const [err, setErr] = useState('');
+  const [sharp, setSharp] = useState(0);
+  const [flash, setFlash] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [nativeZoom, setNativeZoom] = useState(false);
+  const [zoomRange, setZoomRange] = useState<{ min: number; max: number; step: number }>({ min: 1, max: 4, step: 0.25 });
+
+  function stopWatchers() { if (sharpTimer.current != null) { clearInterval(sharpTimer.current); sharpTimer.current = null; } }
+  function stop() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null; trackRef.current = null;
+    stopWatchers(); setSharp(0); setActive(false); setZoom(1);
+  }
+  function applyZoom(next: number) {
+    const z = Math.min(zoomRange.max, Math.max(zoomRange.min, Math.round(next * 100) / 100));
+    setZoom(z);
+    if (nativeZoom && trackRef.current) {
+      trackRef.current.applyConstraints({ advanced: [{ zoom: z } as unknown as MediaTrackConstraintSet] }).catch(() => {});
+    }
+  }
+  useEffect(() => {
+    if (!active) return;
+    const v = videoRef.current;
+    if (streamRef.current && v) { v.srcObject = streamRef.current; v.play().catch(() => {}); }
+    if (!sharpCanvasRef.current) sharpCanvasRef.current = document.createElement('canvas');
+    sharpTimer.current = window.setInterval(() => {
+      const vid = videoRef.current, cv = sharpCanvasRef.current;
+      if (vid && cv) setSharp(frameSharpness(vid, cv));
+    }, 350);
+    return stopWatchers;
+  }, [active]);
+  useEffect(() => () => stop(), []);
+
+  async function start() {
+    setErr('');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErr('Kamera tidak didukung di browser/perangkat ini. Buka lewat HP dengan kamera (koneksi HTTPS).');
+      return;
+    }
+    try {
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      const track = streamRef.current.getVideoTracks()[0] || null;
+      trackRef.current = track;
+      let nz = false, range = { min: 1, max: 4, step: 0.25 };
+      try {
+        const caps = track?.getCapabilities?.() as (MediaTrackCapabilities & { zoom?: { min: number; max: number; step?: number } }) | undefined;
+        if (caps?.zoom && typeof caps.zoom.max === 'number' && caps.zoom.max > (caps.zoom.min ?? 1)) {
+          nz = true;
+          range = { min: caps.zoom.min ?? 1, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
+        }
+      } catch { /* getCapabilities tak didukung → digital */ }
+      setNativeZoom(nz); setZoomRange(range); setZoom(nz ? range.min : 1);
+      setActive(true);
+    } catch {
+      setErr('Tidak bisa mengakses kamera. Izinkan akses kamera di browser lalu coba lagi.');
+    }
+  }
+
+  function snap() {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth || sharp < SHARP_MIN) return; // hanya boleh saat frame tajam
+    const canvas = document.createElement('canvas');
+    canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    if (!nativeZoom && zoom > 1) {
+      const zw = v.videoWidth / zoom, zh = v.videoHeight / zoom;
+      const sx = (v.videoWidth - zw) / 2, sy = (v.videoHeight - zh) / 2;
+      ctx.drawImage(v, sx, sy, zw, zh, 0, 0, canvas.width, canvas.height);
+    } else {
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    }
+    canvas.toBlob((blob) => {
+      if (blob) onCapture(new File([blob], `laporan-${Date.now()}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }));
+      setFlash(true); window.setTimeout(() => setFlash(false), 180);
+    }, 'image/jpeg', 0.92);
+  }
+
+  const isSharp = sharp >= SHARP_MIN;
+
+  if (!active) {
+    return (
+      <div>
+        <button type="button" onClick={start} className="w-full rounded-2xl border-2 border-dashed border-white/15 bg-white/[0.02] px-5 py-8 text-center transition-colors hover:border-violet-400/60 hover:bg-violet-500/5">
+          <div className="text-violet-300 flex justify-center mb-1.5"><Icon name="camera" size={30} /></div>
+          <div className="text-[14px] font-semibold text-slate-100">Buka Kamera</div>
+          <div className="text-[11px] text-slate-500 mt-1">Ambil foto gangguan langsung dari kamera perangkat Anda</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">Unggah dari galeri dinonaktifkan</div>
+        </button>
+        {err && <div className="mt-2 text-[11px] text-rose-400">⚠️ {err}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+      <div className="relative overflow-hidden rounded-xl border border-white/10 bg-black">
+        <video ref={videoRef} playsInline muted className="w-full bg-black max-h-[52vh] object-contain"
+          style={{ transform: !nativeZoom && zoom > 1 ? `scale(${zoom})` : undefined, transformOrigin: 'center center' }} />
+        {flash && <div className="absolute inset-0 bg-white/80 pointer-events-none" />}
+        <div className={`absolute left-1/2 -translate-x-1/2 bottom-3 px-3 py-1.5 rounded-full text-[11px] font-semibold flex items-center gap-1.5 ${isSharp ? 'bg-emerald-500/90 text-white' : 'bg-black/75 text-white'}`}>
+          {isSharp ? '✅ Foto tajam — siap' : '🔍 Memeriksa ketajaman…'}
+        </div>
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/55 rounded-full px-3 py-1.5 max-w-[85%]">
+          <span className="text-[11px] text-white leading-none">🔍</span>
+          <input type="range" aria-label="Zoom kamera" min={zoomRange.min} max={zoomRange.max} step={zoomRange.step}
+            value={zoom} onChange={(e) => applyZoom(Number(e.target.value))}
+            className="w-28 sm:w-40 cursor-pointer" style={{ accentColor: '#a78bfa' }} />
+          <span className="text-[11px] font-semibold text-white tabular-nums w-9 text-right">{zoom.toFixed(1)}×</span>
+        </div>
+      </div>
+      <div className="mt-1.5 h-1.5 rounded bg-white/10 overflow-hidden" title="Indikator ketajaman">
+        <div className={`h-full transition-all ${isSharp ? 'bg-emerald-400' : 'bg-amber-400'}`} style={{ width: `${Math.min(100, Math.round((sharp / (SHARP_MIN * 2)) * 100))}%` }} />
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button type="button" onClick={snap} disabled={!isSharp}
+          className={`flex-1 rounded-xl py-2.5 text-[13px] font-semibold ${isSharp ? 'text-white' : 'bg-white/5 text-slate-500 cursor-not-allowed'}`}
+          style={isSharp ? { background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' } : undefined}>
+          📸 {isSharp ? 'Ambil Foto' : 'Fokuskan kamera…'}
+        </button>
+        <button type="button" onClick={stop} className="rounded-xl border border-white/15 bg-white/5 py-2.5 px-4 text-[13px] text-slate-200 hover:bg-white/10">Tutup Kamera</button>
+      </div>
+      <div className="text-[10px] text-slate-500 mt-2 leading-relaxed">Arahkan kamera ke perangkat/gangguan hingga tajam, lalu tekan <b>Ambil Foto</b>. Anda bisa mengambil beberapa foto.</div>
+      {err && <div className="mt-1 text-[11px] text-rose-400">⚠️ {err}</div>}
+    </div>
+  );
 }
 
 export default function LaporPublik() {
@@ -49,14 +214,12 @@ export default function LaporPublik() {
   const [editLoc, setEditLoc] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [files, setFiles] = useState<File[]>([]);
-  const [dragOver, setDragOver] = useState(false);
   const [submitted, setSubmitted] = useState<{ id: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [trackId, setTrackId] = useState(trackParam);
   const [track, setTrack] = useState<any>(null);
   const [showTrack, setShowTrack] = useState(!!trackParam);
-  const fileRef = useRef<HTMLInputElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const [units, setUnits] = useState<PublicUnit[]>([]);
 
@@ -101,13 +264,17 @@ export default function LaporPublik() {
     const arr = Array.from(list);
     const tooBig = arr.filter((f) => f.size > MAX_MB * 1024 * 1024);
     const ok = arr.filter((f) => f.size <= MAX_MB * 1024 * 1024);
-    setError(tooBig.length ? `${tooBig.length} file dilewati (maks ${MAX_MB} MB per file).` : '');
+    setError(tooBig.length ? `${tooBig.length} foto dilewati (maks ${MAX_MB} MB per foto).` : '');
     if (ok.length) setFiles((prev) => [...prev, ...ok]);
   }
+  // Object URL untuk pratinjau foto; direvoke saat daftar berubah / unmount (hindari bocor memori).
+  const photoUrls = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
+  useEffect(() => () => photoUrls.forEach((u) => URL.revokeObjectURL(u)), [photoUrls]);
 
   async function submit() {
     if (!form.nama.trim() || !form.hp.trim()) { setError('Nama & No. HP/WA wajib diisi.'); return; }
     if (!form.judul.trim() || !form.detail.trim()) { setError('Perangkat/judul & deskripsi gangguan wajib diisi.'); return; }
+    if (!files.length) { setError('Foto gangguan wajib dilampirkan — buka kamera lalu ambil foto.'); return; }
     setBusy(true); setError('');
     try {
       const fd = new FormData();
@@ -281,33 +448,17 @@ export default function LaporPublik() {
                 </div>
               </div>
 
-              {/* Upload */}
+              {/* Foto bukti — WAJIB, langsung dari kamera (bukan unggah galeri) */}
               <div className="mt-4">
-                <div className="flex items-center gap-2 text-[13px] font-semibold text-violet-300 mb-2"><Icon name="image" size={16} /> Upload Foto/Video <span className="text-slate-500 font-normal">(opsional)</span></div>
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}
-                  className={`rounded-2xl border-2 border-dashed px-5 py-7 text-center transition-colors ${dragOver ? 'border-violet-400 bg-violet-500/10' : 'border-white/15 bg-white/[0.02]'}`}
-                >
-                  <div className="flex items-center justify-center gap-4">
-                    <div className="flex-1">
-                      <div className="text-violet-300 flex justify-center mb-1"><Icon name="upload" size={26} /></div>
-                      <div className="text-[13px] font-semibold text-slate-200">Drag &amp; drop file di sini</div>
-                      <div className="text-[11px] text-slate-500 my-1.5">atau</div>
-                      <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/40 bg-violet-500/10 px-4 py-2 text-[12px] font-semibold text-violet-200 hover:bg-violet-500/20"><Icon name="upload" size={15} /> Pilih File</button>
-                      <div className="text-[11px] text-slate-500 mt-2">Maks. {MAX_MB} MB (JPG, PNG, MP4)</div>
-                    </div>
-                  </div>
-                  <input ref={fileRef} type="file" multiple accept="image/*,video/*" capture="environment" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }} />
-                </div>
+                <div className="flex items-center gap-2 text-[13px] font-semibold text-violet-300 mb-2"><Icon name="camera" size={16} /> Foto Gangguan <span className="text-rose-400 font-normal">* wajib</span></div>
+                <InlineCamera onCapture={(f) => addFiles([f])} />
                 {files.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {files.map((f, i) => (
-                      <span key={i} className="inline-flex items-center gap-1.5 bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-[11px] text-slate-300">
-                        {f.type.startsWith('video') ? '🎬' : '🖼️'} <span className="max-w-[140px] truncate">{f.name}</span>
-                        <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="text-rose-400 hover:text-rose-300">✕</button>
-                      </span>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
+                    {photoUrls.map((url, i) => (
+                      <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-black/30">
+                        <img src={url} alt={`Foto ${i + 1}`} className="w-full h-full object-cover" />
+                        <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-rose-300 hover:text-rose-200 text-sm flex items-center justify-center">✕</button>
+                      </div>
                     ))}
                   </div>
                 )}
