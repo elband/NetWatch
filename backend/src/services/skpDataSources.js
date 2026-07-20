@@ -6,10 +6,11 @@ import { pool } from '../db/pool.js';
 // Struktur snapshot seragam agar halaman publik bisa merendernya generik:
 //   { source, title, period, summary:[{label,value}], columns:[...], rows:[[...]],
 //     rowPhotos:[[url,…]|null,…]  ← sejajar dgn rows; foto bukti tiap baris, generatedAt }
-// Catatan: hanya foto dari folder /uploads yang boleh diakses anonim yang disertakan
-// (inspections, maintenance, maintenance-windows, incidents). Folder pribadi seperti
-// /uploads/activities & /uploads/kegiatan digate login di app.js, jadi tidak dilampirkan
-// agar tidak tampil sebagai gambar rusak di halaman publik.
+// Catatan: rowPhotos menyimpan path apa adanya (/uploads/…). Berkas dari folder yang
+// digate login (mis. /uploads/activities) TIDAK dibuka untuk umum; saat bukti dibuka
+// lewat halaman publik, path-nya ditulis ulang menjadi tautan ber-token
+// (/api/skp/bukti/public/:token/berkas?p=…) yang hanya melayani berkas yang memang
+// tercantum di snapshot bukti tersebut — lihat skpRoutes.js.
 // ============================================================================
 
 const BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -29,6 +30,12 @@ function monthRange(bulan) {
 const HASIL_LABEL = { berhasil: 'Berhasil', sebagian: 'Sebagian', gagal: 'Belum berhasil' };
 const MAINT_STATUS = { rencana: 'Rencana', selesai: 'Selesai', batal: 'Batal' };
 const ACTIVITY_LABEL = { rapat: 'Rapat', lembur: 'Lembur', izin: 'Izin', 'dinas-luar': 'Dinas Luar', lainnya: 'Kegiatan Lain' };
+// doc_urls disimpan sebagai JSON array; mysql2 umumnya sudah mem-parse, jaga-jaga bila string.
+function parseDocUrls(v) {
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'string') { try { const a = JSON.parse(v); return Array.isArray(a) ? a : []; } catch { return []; } }
+  return [];
+}
 
 // Daftar sumber untuk dropdown UI. period: 'month' butuh parameter bulan; 'none' tidak.
 export const DATA_SOURCES = [
@@ -155,9 +162,17 @@ const BUILDERS = {
 
   async kegiatan({ start, end, label }) {
     const [rows] = await pool.query(
-      `SELECT DATE_FORMAT(tanggal_kegiatan,'%d-%m-%Y') tgl, judul, kategori, petugas_nama, status,
+      `SELECT id, DATE_FORMAT(tanggal_kegiatan,'%d-%m-%Y') tgl, judul, kategori, petugas_nama, status,
               COALESCE(durasi_jam,0) jam, COALESCE(poin,0) poin
          FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<? ORDER BY tanggal_kegiatan`, [start, end]);
+    // Berkas/foto dokumentasi kegiatan (folder terproteksi → dilayani lewat proxy bertoken).
+    const fotoMap = new Map();
+    if (rows.length) {
+      const ids = rows.map((r) => r.id);
+      const [fl] = await pool.query(
+        `SELECT kegiatan_id, file_url FROM kegiatan_non_rutin_files WHERE kegiatan_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`, ids);
+      for (const f of fl) fotoMap.set(f.kegiatan_id, [...(fotoMap.get(f.kegiatan_id) || []), f.file_url]);
+    }
     const jam = rows.reduce((a, r) => a + Number(r.jam || 0), 0);
     const poin = rows.reduce((a, r) => a + Number(r.poin || 0), 0);
     return {
@@ -169,6 +184,7 @@ const BUILDERS = {
       ],
       columns: ['Tanggal', 'Judul', 'Kategori', 'Petugas', 'Status'],
       rows: rows.map((r) => [r.tgl, r.judul, r.kategori, r.petugas_nama || '-', r.status]),
+      rowPhotos: rows.map((r) => fotoMap.get(r.id) || null),
     };
   },
 
@@ -178,7 +194,7 @@ const BUILDERS = {
     const [rows] = await pool.query(
       `SELECT DATE_FORMAT(a.activity_date,'%d-%m-%Y') tgl, a.type, a.title, a.detail,
               a.start_time, a.end_time, a.completed_at, COALESCE(u.name,'-') pengaju,
-              COALESCE(a.approver_name,'-') penyetuju,
+              COALESCE(a.approver_name,'-') penyetuju, a.bukti_url, a.doc_urls,
               (CASE WHEN a.doc_urls IS NULL THEN 0 ELSE JSON_LENGTH(a.doc_urls) END) dok
          FROM activities a LEFT JOIN users u ON u.id=a.user_id
         WHERE a.status='disetujui' AND a.activity_date>=? AND a.activity_date<?
@@ -195,9 +211,11 @@ const BUILDERS = {
         { label: 'Lembur', value: cnt('lembur') },
         { label: 'Dokumentasi Foto', value: dok },
       ],
-      columns: ['Tanggal', 'Jam', 'Jenis', 'Kegiatan', 'Pengaju', 'Disetujui Oleh', 'Dok.'],
+      columns: ['Tanggal', 'Jam', 'Jenis', 'Kegiatan', 'Pengaju', 'Disetujui Oleh'],
       rows: rows.map((r) => [r.tgl, jam(r), ACTIVITY_LABEL[r.type] || r.type,
-        r.title + (r.detail ? ` — ${r.detail}` : ''), r.pengaju, r.penyetuju, String(r.dok || 0)]),
+        r.title + (r.detail ? ` — ${r.detail}` : ''), r.pengaju, r.penyetuju]),
+      // Bukti dukung pengajuan + dokumentasi penyelesaian (rapat/dinas luar).
+      rowPhotos: rows.map((r) => [r.bukti_url, ...parseDocUrls(r.doc_urls)].filter(Boolean)),
     };
   },
 
@@ -305,11 +323,10 @@ export async function buildSnapshot(source, params = {}) {
     ctx = { ...r, bulan: params.bulan };
   }
   const out = await builder(ctx);
-  // Foto bukti per baris — hanya berkas dari folder /uploads yang publik (lihat catatan
-  // di kepala berkas). Baris tanpa foto bernilai null; rowPhotos dihilangkan bila kosong.
-  const PUBLIC_DIRS = ['/uploads/inspections/', '/uploads/maintenance/', '/uploads/maintenance-windows/', '/uploads/incidents/', '/uploads/reports/'];
+  // Foto bukti per baris. Hanya path di bawah /uploads yang diterima (bukan URL luar);
+  // baris tanpa foto bernilai null & rowPhotos dihilangkan bila seluruhnya kosong.
   const rowPhotos = (out.rowPhotos || []).map((list) => {
-    const ok = (list || []).filter((u) => typeof u === 'string' && PUBLIC_DIRS.some((d) => u.startsWith(d)));
+    const ok = (list || []).filter((u) => typeof u === 'string' && u.startsWith('/uploads/') && !u.includes('..'));
     return ok.length ? ok : null;
   });
   const anyPhoto = rowPhotos.some(Boolean);

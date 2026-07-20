@@ -130,6 +130,44 @@ router.get('/public/:token', async (req, res) => {
   });
 });
 
+// Berkas /uploads yang WAJIB LOGIN bila diakses langsung (lihat PROTECTED_UPLOADS di
+// app.js). Pada halaman publik bukti, berkas semacam ini tidak ditautkan apa adanya
+// melainkan lewat proxy ber-token di bawah — jadi yang terbuka hanya berkas yang memang
+// tercantum dalam snapshot bukti itu, bukan seluruh isi foldernya.
+const GATED_DIRS = ['/uploads/leave/', '/uploads/diklat/', '/uploads/activities/', '/uploads/kegiatan/'];
+const isGated = (u) => GATED_DIRS.some((d) => String(u).startsWith(d));
+const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads');
+
+// Semua path berkas yang boleh diakses lewat token bukti ini (dari snapshot-nya).
+function allowedFiles(snapshot) {
+  const out = new Set();
+  for (const list of snapshot?.rowPhotos || []) for (const u of list || []) out.add(String(u));
+  return out;
+}
+// Tulis ulang path berkas terproteksi → tautan proxy ber-token.
+function publicPhotoUrls(snapshot, token) {
+  if (!snapshot?.rowPhotos) return snapshot;
+  const rowPhotos = snapshot.rowPhotos.map((list) => (list || []).map((u) => (
+    isGated(u) ? `/api/skp/bukti/public/${token}/berkas?p=${encodeURIComponent(u)}` : u
+  )));
+  return { ...snapshot, rowPhotos };
+}
+
+// Sajikan satu berkas bukti (mis. foto kegiatan) untuk halaman publik. Hanya berkas yang
+// tercantum di snapshot bukti bertoken ini yang dilayani — path lain ditolak.
+router.get('/bukti/public/:token/berkas', async (req, res) => {
+  const [rows] = await pool.query('SELECT snapshot FROM skp_bukti WHERE public_token=? LIMIT 1', [req.params.token]);
+  if (!rows[0]) return res.status(404).json({ error: 'Bukti tidak ditemukan.' });
+  const snap = typeof rows[0].snapshot === 'string' ? JSON.parse(rows[0].snapshot || 'null') : rows[0].snapshot;
+  const p = String(req.query.p || '');
+  if (!allowedFiles(snap).has(p)) return res.status(403).json({ error: 'Berkas tidak termasuk dalam bukti ini.' });
+  // Cegah path traversal: hasil resolve wajib berada di dalam folder uploads.
+  const abs = path.resolve(UPLOAD_ROOT, '.' + p.replace('/uploads', ''));
+  if (!abs.startsWith(path.resolve(UPLOAD_ROOT))) return res.status(400).json({ error: 'Path tidak valid.' });
+  if (!fs.existsSync(abs)) return res.status(404).json({ error: 'Berkas tidak ditemukan.' });
+  res.sendFile(abs);
+});
+
 // Halaman publik satu item bukti dukung.
 router.get('/bukti/public/:token', async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM skp_bukti WHERE public_token=? LIMIT 1', [req.params.token]);
@@ -137,7 +175,10 @@ router.get('/bukti/public/:token', async (req, res) => {
   const b = rows[0];
   const [[ind]] = await pool.query('SELECT aspek, indikator FROM skp_indikator WHERE id=?', [b.indikator_id]);
   const [[skp]] = await pool.query('SELECT periode, tahun, pegawai_nama, pegawai_nip, pegawai_jabatan, unit_id FROM skp WHERE id=?', [b.skp_id]);
-  const snapshot = b.kind === 'data' ? (typeof b.snapshot === 'string' ? JSON.parse(b.snapshot || 'null') : b.snapshot) : null;
+  const raw = b.kind === 'data' ? (typeof b.snapshot === 'string' ? JSON.parse(b.snapshot || 'null') : b.snapshot) : null;
+  // Berkas terproteksi ditautkan lewat proxy ber-token agar tetap tampil di halaman publik
+  // tanpa membuka folder /uploads yang bersifat pribadi.
+  const snapshot = raw ? publicPhotoUrls(raw, req.params.token) : null;
   // Laporan bulanan pendukung mengikuti unit pemilik SKP (bukan lintas unit).
   res.json({ valid: true, bukti: { ...publicBuktiView(b), bulan: b.bulan, snapshot }, indikator: ind || null, skp: skp || null, laporanBulanan: await signedLaporanBulanan(b.bulan, skp?.unit_id ?? null) });
 });
