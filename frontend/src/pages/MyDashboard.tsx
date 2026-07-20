@@ -421,7 +421,8 @@ export default function MyDashboard() {
             <div className="text-[9px] text-text2 mt-2 italic">* Analisis contoh — modul AI belum aktif</div>
           </Panel>
 
-          <Panel title="TUGAS SAYA" right={<Link to="/my-incidents" className="text-[11px] text-accent hover:underline">Lihat Semua →</Link>}>
+          {/* "Lihat Semua" → halaman Kegiatan Saya (insiden + kegiatan lain + non-rutin), bukan hanya insiden. */}
+          <Panel title="TUGAS SAYA" right={<Link to="/kegiatan-saya" className="text-[11px] text-accent hover:underline">Lihat Semua →</Link>}>
             {mineActive.length === 0 ? (
               <div className="text-[11px] text-text2">Tidak ada tugas aktif.</div>
             ) : (

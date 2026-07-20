@@ -49,6 +49,7 @@ import Attendance from './pages/Attendance';
 import Diklat from './pages/Diklat';
 import Dokumen from './pages/Dokumen';
 import KegiatanNonRutin from './pages/KegiatanNonRutin';
+import KegiatanSaya from './pages/KegiatanSaya';
 import PelaporanQR from './pages/PelaporanQR';
 import Notifikasi from './pages/Notifikasi';
 import Skp from './pages/Skp';
@@ -103,6 +104,7 @@ export default function App() {
           <Route path="/peta" element={<DeviceMap />} />
           <Route path="/sla" element={<SlaReport />} />
           <Route path="/my-incidents" element={<MyIncidents />} />
+          <Route path="/kegiatan-saya" element={<KegiatanSaya />} />
           <Route path="/jadwal" element={<Jadwal />} />
           <Route path="/equipment" element={<EquipmentPerf />} />
           <Route path="/logbook" element={<Logbook />} />

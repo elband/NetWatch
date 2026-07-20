@@ -54,15 +54,23 @@ export async function buildLogbook(month, q, unitId = null) {
     `SELECT id, device_id, issue, priority, status, created_at, resolved_at, duration_min FROM incidents WHERE device_id IS NOT NULL AND created_at >= ? AND created_at < ?${du.clause}`,
     [start, end, ...du.params]
   );
-  // Metrik pemantauan bulan tsb per perangkat: uptime%, latency rata-rata & maks
-  // (kecualikan sampel dalam jendela maintenance) — konsisten dgn getDeviceMetrics.
+  // Metrik pemantauan bulan tsb per perangkat: uptime%, latency rata-rata & maks.
+  // Sumber = rollup harian device_uptime_daily (bukan device_metrics mentah yang dipangkas
+  // retensi), dengan rumus ketersediaan yang SAMA dengan Laporan SLA & Laporan Bulanan:
+  // (online + warning) ÷ (sampel − sampel maintenance). Ini menjaga angka uptime di logbook
+  // identik dengan Seksi VII/VIII laporan bulanan, termasuk untuk bulan-bulan lama.
   const [metrics] = await pool.query(
-    `SELECT device_id, COUNT(*) AS samples,
-            ROUND(AVG(status <> 'offline') * 100, 2) AS up_pct,
-            ROUND(AVG(ping_ms)) AS avg_ping, MAX(ping_ms) AS max_ping
-       FROM device_metrics WHERE recorded_at >= ? AND recorded_at < ? AND in_maint = 0${du.clause} GROUP BY device_id`,
+    `SELECT device_id, SUM(samples) AS samples_raw, SUM(maint_samples) AS maint_samples,
+            SUM(up_samples + warn_samples) AS up_ish,
+            ROUND(AVG(avg_ping)) AS avg_ping, MAX(max_ping) AS max_ping
+       FROM device_uptime_daily WHERE day >= ? AND day < ?${du.clause} GROUP BY device_id`,
     [start, end, ...du.params]
   );
+  for (const m of metrics) {
+    const base = Number(m.samples_raw) - Number(m.maint_samples);
+    m.samples = base;
+    m.up_pct = base > 0 ? Math.round((Number(m.up_ish) / base) * 10000) / 100 : null;
+  }
   const metricMap = new Map(metrics.map((m) => [m.device_id, m]));
 
   // Perangkat yang punya aktivitas ATAU metrik pemantauan bulan ini (union) — beserta info dasarnya.
@@ -71,13 +79,17 @@ export async function buildLogbook(month, q, unitId = null) {
   const ufd = unitFilter(unitId, 'unit_id');
   const [devs] = await pool.query(`SELECT id, name, ip, type, loc FROM devices WHERE id IN (${ids.map(() => '?').join(',')})${ufd.clause}`, [...ids, ...ufd.params]);
 
+  // Perangkat tanpa IP tidak benar-benar dipantau ping — sampel "offline"-nya tidak bermakna,
+  // jadi metrik uptime/latensinya tidak ditampilkan (selaras Seksi II & VII laporan bulanan).
+  const hasIp = (d) => !!(d.ip && String(d.ip).trim() && !/^n\/?a/i.test(String(d.ip).trim()));
   const map = new Map(devs.map((d) => {
-    const mt = metricMap.get(d.id);
+    const mt = hasIp(d) ? metricMap.get(d.id) : null;
     return [d.id, {
       ...d,
       recap: {
         inspeksi: { total: 0, baik: 0, perhatian: 0, rusak: 0 }, power: { on: 0, off: 0 }, maintenance: { total: 0, selesai: 0 }, insiden: { total: 0, downtime_min: 0 },
-        metrik: mt ? { up_pct: Number(mt.up_pct) || 0, avg_ping: Number(mt.avg_ping) || 0, max_ping: Number(mt.max_ping) || 0, samples: Number(mt.samples) || 0 } : null,
+        // metrik null bila tak ada sampel efektif (mis. seluruh bulan dalam maintenance) → tampil "–", bukan 0%.
+        metrik: mt && mt.up_pct != null ? { up_pct: Number(mt.up_pct), avg_ping: Number(mt.avg_ping) || 0, max_ping: Number(mt.max_ping) || 0, samples: Number(mt.samples) || 0 } : null,
       },
       events: [],
     }];
@@ -104,7 +116,9 @@ export async function buildLogbook(month, q, unitId = null) {
     d.events.push({ date: dstr(r.created_at), time: tstr(r.created_at), kind: 'insiden', label: `${r.id} · ${r.issue}`, status: r.status, detail: `Prioritas ${r.priority}${r.duration_min ? ` · downtime ${r.duration_min} mnt` : ''}`, by: '', photo_url: '', verified: false });
   }
 
-  let list = [...map.values()];
+  // Buang perangkat yang masuk hanya karena punya baris pemantauan tetapi metriknya
+  // tidak ditampilkan (tanpa IP) dan tidak ada aktivitas apa pun bulan ini.
+  let list = [...map.values()].filter((d) => d.events.length || d.recap.metrik);
   if (q && q.trim()) {
     const k = q.trim().toLowerCase();
     list = list.filter((d) => `${d.name} ${d.ip} ${d.type} ${d.loc || ''}`.toLowerCase().includes(k));
@@ -141,12 +155,13 @@ export async function buildLogbookDevice(month, deviceId, unitId = null) {
   // Tren uptime harian dari device_metrics (kecualikan sampel dalam jendela maintenance).
   const { start, end } = monthRange(month);
   const [drows] = await pool.query(
-    `SELECT DATE(recorded_at) d, ROUND(AVG(status <> 'offline') * 100, 2) up_pct, ROUND(AVG(ping_ms)) avg_ping, COUNT(*) samples
-       FROM device_metrics WHERE device_id = ? AND recorded_at >= ? AND recorded_at < ? AND in_maint = 0
-      GROUP BY DATE(recorded_at) ORDER BY d`,
+    `SELECT day d, samples, maint_samples, (up_samples + warn_samples) up_ish, avg_ping
+       FROM device_uptime_daily WHERE device_id = ? AND day >= ? AND day < ? ORDER BY day`,
     [id, start, end]
   );
-  const daily = drows.map((r) => ({ date: dstr(r.d), up_pct: Number(r.up_pct) || 0, avg_ping: Number(r.avg_ping) || 0, samples: Number(r.samples) || 0 }));
+  const daily = drows
+    .map((r) => { const base = Number(r.samples) - Number(r.maint_samples); return { date: dstr(r.d), up_pct: base > 0 ? Math.round((Number(r.up_ish) / base) * 10000) / 100 : 0, avg_ping: Number(r.avg_ping) || 0, samples: base }; })
+    .filter((r) => r.samples > 0);
   return { month: mm, device: { ...dev, recap: base?.recap || emptyRecap(), events: base?.events || [], daily } };
 }
 

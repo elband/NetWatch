@@ -30,7 +30,7 @@ export const NAV_ITEMS: Record<Role, NavEntry[]> = {
   ],
   teknisi: [
     { section: 'Saya' }, { id: 'my-dashboard', icon: '📊', label: 'Dashboard Saya' }, { id: 'notifikasi', icon: '🔔', label: 'Notifikasi' },
-    { section: 'Pekerjaan' }, { id: 'my-incidents', icon: '🚨', label: 'Insiden Saya' }, { id: 'aset', icon: '🔧', label: 'Peralatan' }, { id: 'sparepart', icon: '🧰', label: 'Manajemen Suku Cadang' }, { id: 'obat-air', icon: '💧', label: 'Obat Air' }, { id: 'peminjaman', icon: '📦', label: 'Peminjaman Peralatan' }, { id: 'equipment', icon: '🛠️', label: 'Performa Peralatan' }, { id: 'logbook', icon: '📒', label: 'Logbook Peralatan' }, { id: 'jadwal', icon: '📅', label: 'Jadwal Dinas' }, { id: 'diklat', icon: '🎓', label: 'Pengajuan Diklat' }, { id: 'kegiatan-nr', icon: '📝', label: 'Kegiatan Non-Rutin' }, { id: 'dokumen', icon: '📚', label: 'Dokumen & SOP' },
+    { section: 'Pekerjaan' }, { id: 'my-incidents', icon: '🚨', label: 'Insiden Saya' }, { id: 'kegiatan-saya', icon: '🗂️', label: 'Kegiatan Saya' }, { id: 'aset', icon: '🔧', label: 'Peralatan' }, { id: 'sparepart', icon: '🧰', label: 'Manajemen Suku Cadang' }, { id: 'obat-air', icon: '💧', label: 'Obat Air' }, { id: 'peminjaman', icon: '📦', label: 'Peminjaman Peralatan' }, { id: 'equipment', icon: '🛠️', label: 'Performa Peralatan' }, { id: 'logbook', icon: '📒', label: 'Logbook Peralatan' }, { id: 'jadwal', icon: '📅', label: 'Jadwal Dinas' }, { id: 'diklat', icon: '🎓', label: 'Pengajuan Diklat' }, { id: 'kegiatan-nr', icon: '📝', label: 'Kegiatan Non-Rutin' }, { id: 'dokumen', icon: '📚', label: 'Dokumen & SOP' },
     { section: 'Monitoring' }, { id: 'devices', icon: '🖥️', label: 'Perangkat' }, { id: 'monitor', icon: '📡', label: 'Live Monitor' }, { id: 'peta', icon: '🗺️', label: 'Peta Perangkat' }, { id: 'sla', icon: '📊', label: 'Laporan SLA' },
   ],
   viewer: [
@@ -59,6 +59,6 @@ export const PAGE_TITLES: Record<string, string> = {
   incidents: 'Manajemen Insiden', reports: 'Laporan Selesai', jadwal: 'Jadwal Dinas',
   users: 'Manajemen User', wa: 'Log WhatsApp', settings: 'Pengaturan', 'notification-settings': 'Pengaturan Notifikasi',
   'publik-reports': 'Laporan Publik (Unit Lain)', master: 'Master Data', perencanaan: 'Perencanaan Unit',
-  'my-dashboard': 'Dashboard Saya', 'coord-dashboard': 'Dashboard Koordinator', 'my-incidents': 'Insiden Saya', performa: 'Performa Teknisi',
+  'my-dashboard': 'Dashboard Saya', 'coord-dashboard': 'Dashboard Koordinator', 'my-incidents': 'Insiden Saya', 'kegiatan-saya': 'Kegiatan Saya', performa: 'Performa Teknisi',
   ssh: 'SSH Terminal', audit: 'Audit Log', equipment: 'Performa Peralatan', logbook: 'Logbook Peralatan', 'api-docs': 'Dokumentasi API', surat: 'Manajemen Surat Keluar', 'laporan-bulanan': 'Susun Laporan Bulanan', attendance: 'Manajemen Absensi', diklat: 'Pengajuan Diklat', dokumen: 'Manajemen Dokumen & Knowledge Base', 'kegiatan-nr': 'Laporan Kegiatan Non-Rutin', 'pelaporan-qr': 'Pelaporan Fasilitas QR', skp: 'SKP / e-Kinerja',
 };

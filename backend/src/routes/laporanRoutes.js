@@ -63,7 +63,9 @@ export async function buildLaporanData(monthIn, unitId = null) {
     p.isKoor = roles.includes('koordinator');
     const s = p.isKoor ? await scoreKoordinator(p.id, start, end, unitId) : await scoreTeknisi(p.id, start, end, unitId);
     p.skor = s.score; p.grade = s.grade;
-    p.komponen = s.components.map((c) => ({ label: c.label, weight: c.weight, value: c.value, note: c.note || null }));
+    // key/num/den ikut dibawa agar lampiran bisa menampilkan BUKTI ANGKA (mis. 8/10 tiket)
+    // dari komponen yang sama persis dengan seksi Rincian Penilaian — satu sumber angka.
+    p.komponen = s.components.map((c) => ({ key: c.key, label: c.label, weight: c.weight, value: c.value, num: c.num ?? null, den: c.den ?? null, note: c.note || null }));
     p.tips = s.tips || [];
   }
   // Rincian penilaian performa (per personil) untuk section terpisah di laporan.
@@ -337,35 +339,31 @@ export async function buildLaporanData(monthIn, unitId = null) {
   const [[doneRow]] = await pool.query(`SELECT COUNT(*) c, AVG(duration_min) mttr FROM incidents WHERE status='selesai' AND resolved_at>=? AND resolved_at<?${uf.clause}`, [start, end, ...uf.params]);
   const [[slaRow]] = await pool.query(`SELECT SUM(TIMESTAMPDIFF(MINUTE,created_at,taken_at)<=?) ot, COUNT(*) tot FROM incidents WHERE taken_at IS NOT NULL AND taken_at>=? AND taken_at<?${uf.clause}`, [SLA_MINUTES, start, end, ...uf.params]);
   const [[esc]] = await pool.query(`SELECT COUNT(*) c FROM incidents WHERE coord_alerted=1 AND created_at>=? AND created_at<?${uf.clause}`, [start, end, ...uf.params]);
-  const recap = { tiketIn: inRow.c, tiketDone: doneRow.c, mttr: Math.round(doneRow.mttr || 0), slaPct: slaRow.tot ? Math.round((Number(slaRow.ot) / slaRow.tot) * 100) : 100, escalations: esc.c, measuredUptimePct };
+  const recap = {
+    tiketIn: inRow.c, tiketDone: doneRow.c, mttr: Math.round(doneRow.mttr || 0),
+    // null bila tak ada insiden yang diambil pada periode → laporan tampilkan "–", bukan 100%.
+    slaPct: slaRow.tot ? Math.round((Number(slaRow.ot) / slaRow.tot) * 100) : null,
+    slaOnTime: Number(slaRow.ot) || 0, slaTaken: Number(slaRow.tot) || 0,
+    escalations: esc.c, measuredUptimePct,
+    // Angka penyilang untuk catatan kaki lampiran agar bisa dicocokkan dengan seksi lain.
+    perbaikanRows: perbaikanRows.length,  // seksi IX (dibuat ATAU selesai pada periode)
+    lkpRows: lkp.length,                  // seksi X (selesai pada periode & ber-LKP)
+    uptimeFasilitas: measuredVals.length, // jumlah fasilitas berdata pantau di seksi VIII
+    evaluasiFasilitas: evaluasi.length,
+  };
 
-  const [techs] = await pool.query(`SELECT id, name, jabatan FROM users WHERE active=1 AND (role='teknisi' OR JSON_CONTAINS(roles,'"teknisi"'))${uf.clause} ORDER BY name`, uf.params);
-  const performaTeknisi = [];
-  for (const t of techs) {
-    // Skor identik dengan dashboard performa (mesin penilaian tunggal: base 30 + bobot baru, penalti VPN −50%).
-    const m = await metricsFor(t.id, start, end, unitId);
-    const [[ins]] = await pool.query(`SELECT COUNT(*) total, COALESCE(SUM(verified),0) v FROM equipment_inspections WHERE inspected_by=? AND inspect_date>=? AND inspect_date<?${uf.clause}`, [t.id, start, end, ...uf.params]);
-    performaTeknisi.push({
-      name: t.name, jabatan: t.jabatan,
-      done: m.done, onTime: m.onTime, taken: m.taken, kritisDone: m.kritisDone,
-      inspeksi: Number(ins.total) || 0, inspeksiV: Number(ins.v) || 0,
-      breaches: m.breaches, score: m.score, grade: m.grade,
-    });
-  }
-  performaTeknisi.sort((a, b) => b.score - a.score);
-
-  const [coords] = await pool.query(`SELECT id, name, jabatan FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'"koordinator"'))${uf.clause} ORDER BY name`, uf.params);
-  const performaKoordinator = [];
-  for (const c of coords) {
-    const [[ap]] = await pool.query(`SELECT COUNT(*) c FROM activities WHERE approved_by=? AND status!='menunggu' AND approved_at>=? AND approved_at<?${uf.clause}`, [c.id, start, end, ...uf.params]);
-    const [[rp]] = await pool.query('SELECT COUNT(*) c FROM incident_reports WHERE signed_by=? AND signed_at>=? AND signed_at<?', [c.id, start, end]);
-    const [[sc]] = await pool.query(`SELECT COUNT(*) c FROM nota_dinas WHERE created_by=? AND created_at>=? AND created_at<?${uf.clause}`, [c.id, start, end, ...uf.params]);
-    const [[ss]] = await pool.query(`SELECT COUNT(*) c FROM nota_dinas WHERE signed_by=? AND signed_at>=? AND signed_at<?${uf.clause}`, [c.id, start, end, ...uf.params]);
-    const approvals = ap.c, reportsSigned = rp.c, suratCreated = sc.c, suratSigned = ss.c;
-    const score = Math.max(0, Math.min(100, 50 + approvals * 2 + reportsSigned * 3 + suratCreated + suratSigned * 2 - recap.escalations * 3));
-    performaKoordinator.push({ name: c.name, jabatan: c.jabatan, approvals, reportsSigned, suratCreated, suratSigned, escalations: recap.escalations, score });
-  }
-  performaKoordinator.sort((a, b) => b.score - a.score);
+  // Performa untuk LAMPIRAN memakai mesin skor yang SAMA dengan seksi I (Data Personil) &
+  // XII (Rincian Penilaian), yaitu perfScore persen — bukan lagi mesin poin lama
+  // (metricsFor) / rumus ad-hoc koordinator, yang membuat orang yang sama tampil dengan
+  // skor berbeda antar halaman pada dokumen yang sama.
+  const perfRow = (p) => ({
+    name: p.name, jabatan: p.jabatan,
+    skor: p.skor ?? null, grade: p.grade || 'Belum dinilai',
+    komponen: p.komponen || [],
+  });
+  const bySkor = (a, b) => (b.skor ?? -1) - (a.skor ?? -1); // "Belum dinilai" di bawah
+  const performaTeknisi = personil.filter((p) => !p.isKoor).map(perfRow).sort(bySkor);
+  const performaKoordinator = personil.filter((p) => p.isKoor).map(perfRow).sort(bySkor);
 
   // Logbook peralatan: rekap bulanan per perangkat (uptime/latency + inspeksi/on-off/maint/insiden).
   const lb = await buildLogbook(month, undefined, unitId);
@@ -384,7 +382,10 @@ export async function buildLaporanData(monthIn, unitId = null) {
     month, monthName, year: y, nextMonthName,
     personil: personil.map((p, i) => ({ no: i + 1, name: p.name, nip: p.nip, jabatan: p.jabatan, pangkat: p.pangkat, ttl: p.ttl, skor: p.skor ?? null, grade: p.grade || 'Belum dinilai' })),
     performaRinci,
-    inventaris: inventaris.map((d, i) => ({ no: i + 1, nama: d.name, merk: d.merk || d.type || '-', serial: d.serial || '-', tahun: d.tahun || '-', lokasi: d.loc || '-', kondisi: devKondisi(d), ket: d.category || '-' })),
+    // Kondisi peralatan memakai penilaian PERIODE (monthlyKet) — sama dengan kolom "Ket"
+    // pada Seksi VII Unjuk Hasil, agar satu perangkat tidak tampil "Baik" di Seksi II
+    // sementara "Rusak" di Seksi VII hanya karena Seksi II dulu memakai status saat ini.
+    inventaris: inventaris.map((d, i) => ({ no: i + 1, nama: d.name, merk: d.merk || d.type || '-', serial: d.serial || '-', tahun: d.tahun || '-', lokasi: d.loc || '-', kondisi: monthlyKet(d), ket: d.category || '-' })),
     jadwalBulanIni, jadwal, kegiatanHarian, dokumentasi, dokumentasiTruncated, unjukHasil, evaluasi, perbaikan: perbaikanRows, lkp, logbook,
     recap, performaTeknisi, performaKoordinator, coordBreachMinutes: COORD_BREACH_MINUTES, opsHoursPerDay: OPS_HOURS_PER_DAY,
   };

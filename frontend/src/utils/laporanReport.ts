@@ -1,6 +1,7 @@
 // Pembangun HTML Laporan Bulanan format resmi (Kemenhub) — dipakai untuk preview & cetak.
-export interface PerfTek { name: string; jabatan: string | null; done: number; onTime: number; taken: number; kritisDone: number; inspeksi: number; inspeksiV: number; breaches: number; score: number; }
-export interface PerfKoord { name: string; jabatan: string | null; approvals: number; reportsSigned: number; suratCreated: number; suratSigned: number; escalations: number; score: number; }
+// Komponen penilaian performa (persen) — sumber tunggal skor personil di seluruh dokumen.
+export interface PerfKomp { key?: string; label: string; weight: number; value: number | null; num?: number | null; den?: number | null; note: string | null }
+export interface PerfRow { name: string; jabatan: string | null; skor: number | null; grade: string; komponen: PerfKomp[] }
 export interface LaporanData {
   month: string; monthName: string; year: number; nextMonthName: string;
   personil: { no: number; name: string; nip: string | null; jabatan: string | null; pangkat: string | null; ttl: string | null; skor: number | null; grade: string }[];
@@ -15,10 +16,13 @@ export interface LaporanData {
   perbaikan: { no: number; tanggal: string; peralatan: string; lokasi: string; kategori: string; bagian: string; kerusakan: string; tindakan: string; tglKerusakan: string; tglSelesai: string; jam: string; ket: string }[];
   lkp: { incidentId: string; tanggal: string; lokasi: string; peralatan: string; bagian: string; kategori: string; uraian: string; tindakan: string; penyebab: string; oleh: string; tglKerusakan: string; tglSelesai: string; sparepart: string; hasil: string }[];
   logbook?: { no: number; peralatan: string; ip: string; uptimePct: number | null; avgPing: number | null; maxPing: number | null; inspeksi: number; baik: number; perhatian: number; rusak: number; hidup: number; mati: number; maintenance: number; maintSelesai: number; insiden: number; downtimeMin: number }[];
-  recap: { tiketIn: number; tiketDone: number; mttr: number; slaPct: number; escalations: number; measuredUptimePct?: number | null };
-  performaTeknisi: PerfTek[];
-  performaKoordinator: PerfKoord[];
-  performaRinci?: { no: number; name: string; jabatan: string | null; role: string; skor: number | null; grade: string; komponen: { label: string; weight: number; value: number | null; note: string | null }[]; tips: string[] }[];
+  recap: {
+    tiketIn: number; tiketDone: number; mttr: number; slaPct: number | null; escalations: number; measuredUptimePct?: number | null;
+    slaOnTime?: number; slaTaken?: number; perbaikanRows?: number; lkpRows?: number; uptimeFasilitas?: number; evaluasiFasilitas?: number;
+  };
+  performaTeknisi: PerfRow[];
+  performaKoordinator: PerfRow[];
+  performaRinci?: { no: number; name: string; jabatan: string | null; role: string; skor: number | null; grade: string; komponen: PerfKomp[]; tips: string[] }[];
   opsHoursPerDay: number;
 }
 
@@ -151,7 +155,8 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
   if (has('inventaris')) {
     const r = data.inventaris.map((d) => `<tr><td style="text-align:center">${d.no}</td><td>${esc(d.nama)}</td><td>${esc(d.merk)}</td><td>${esc(d.serial)}</td><td>${esc(d.lokasi)}</td><td>${esc(d.tahun)}</td><td style="text-align:center">${esc(d.kondisi)}</td><td>${esc(d.ket)}</td></tr>`).join('');
     pages.push(`<div class="page">${sec('Daftar / Inventaris Peralatan Elektronika Bandara')}${head2(`BULAN/TAHUN : ${bln}`)}
-      <table class="data"><thead><tr><th style="width:24px">No</th><th>Nama Peralatan</th><th>Merk/Tipe</th><th>No. Seri</th><th>Lokasi</th><th>Bln/Th</th><th>Kondisi</th><th>Keterangan</th></tr></thead><tbody>${r}</tbody></table>${sign()}</div>`);
+      <table class="data"><thead><tr><th style="width:24px">No</th><th>Nama Peralatan</th><th>Merk/Tipe</th><th>No. Seri</th><th>Lokasi</th><th>Bln/Th</th><th>Kondisi</th><th>Keterangan</th></tr></thead><tbody>${r}</tbody></table>
+      <div style="font-size:9px;margin-top:4px">Kondisi dinilai atas periode laporan (ketersediaan terukur bulan ini): ≥95% Baik · 50–94% Perlu Perhatian · &lt;50% Tidak Aktif/Rusak — sama dengan kolom "Ket" pada Seksi Unjuk Hasil. Peralatan tanpa IP dinilai dari insiden/laporan yang tercatat.</div>${sign()}</div>`);
   }
   const jadwalPage = (j: LaporanData['jadwal']) => {
     const jHead = Array.from({ length: j.days }, (_, i) => `<th style="padding:1px">${i + 1}</th>`).join('');
@@ -257,38 +262,70 @@ export function buildReportHtml(data: LaporanData, cover: CoverInfo, qr: string,
       <div style="font-size:9px;margin-top:6px">Skor = rata-rata pencapaian target tiap komponen (0–100), ditimbang bobotnya. Komponen "–" berarti tidak ada tugasnya bulan itu sehingga tidak dihitung (bobot dibagi ke komponen lain). Skala grade: ≥90 Sangat Baik · 75–89 Baik · 60–74 Cukup · 50–59 Kurang · &lt;50 Perlu Pembinaan.</div>${sign()}</div>`);
   }
   if (has('lampiran')) {
-    const tek = data.performaTeknisi.map((t) => `<tr><td>${esc(t.name)}</td><td style="text-align:center">${t.done}</td><td style="text-align:center">${t.onTime}/${t.taken}</td><td style="text-align:center">${t.kritisDone}</td><td style="text-align:center">${t.inspeksi} (${t.inspeksiV}✓)</td><td style="text-align:center;color:#b91c1c">${t.breaches}</td><td style="text-align:center;font-weight:bold">${t.score}</td></tr>`).join('');
-    const ko = data.performaKoordinator.map((k) => `<tr><td>${esc(k.name)}</td><td style="text-align:center">${k.approvals}</td><td style="text-align:center">${k.reportsSigned}</td><td style="text-align:center">${k.suratCreated}</td><td style="text-align:center">${k.suratSigned}</td><td style="text-align:center;color:#b91c1c">${k.escalations}</td><td style="text-align:center;font-weight:bold">${k.score}</td></tr>`).join('');
-    const scoreCol = (s: number) => (s >= 70 ? '#16a34a' : s >= 40 ? '#ea580c' : '#dc2626');
+    // Skor & komponen di lampiran memakai SUMBER YANG SAMA dengan seksi I dan XII
+    // (perfScore persen). Tabel di sini menampilkan bukti angka (num/den) tiap komponen.
+    const scoreCol = (s: number | null) => (s == null ? '#888' : s >= 90 ? '#16803c' : s >= 75 ? '#16a34a' : s >= 60 ? '#b45309' : s >= 50 ? '#c2410c' : '#b91c1c');
+    const buktiCell = (k: PerfKomp) => {
+      if (k.value == null) return '<td style="text-align:center;color:#999">–</td>';
+      // Komponen ketersediaan berbasis sampel ping — angka mentahnya (puluhan ribu sampel)
+      // tidak informatif sebagai bukti, cukup persentasenya.
+      const showBukti = k.key !== 'uptimeUnit' && k.den != null && k.den > 0;
+      const bukti = showBukti ? `<div style="font-size:8px;color:#555">${k.num ?? 0}/${k.den}</div>` : '';
+      return `<td style="text-align:center">${k.value}%${bukti}</td>`;
+    };
+    const perfTabel = (rows: PerfRow[], kosong: string) => {
+      if (!rows.length) return `<div style="font-size:10px;color:#666">${esc(kosong)}</div>`;
+      const komp = rows.find((r) => r.komponen.length)?.komponen || [];
+      const heads = komp.map((k) => `<th>${esc(k.label)}<br><span style="font-size:8px;font-weight:normal">${k.weight}%</span></th>`).join('');
+      const body = rows.map((r) => `<tr><td>${esc(r.name)}${r.jabatan ? `<div style="font-size:8px;color:#666">${esc(r.jabatan)}</div>` : ''}</td>
+        ${komp.map((h) => buktiCell(r.komponen.find((c) => c.label === h.label) || { label: h.label, weight: h.weight, value: null, note: null })).join('')}
+        <td style="text-align:center;font-weight:bold;color:${scoreCol(r.skor)}">${r.skor == null ? '–' : r.skor}</td>
+        <td style="text-align:center;font-size:9px">${esc(r.grade)}</td></tr>`).join('');
+      return `<table class="data"><thead><tr><th>Nama</th>${heads}<th style="width:38px">Skor</th><th style="width:66px">Grade</th></tr></thead><tbody>${body}</tbody></table>`;
+    };
+    const tek = perfTabel(data.performaTeknisi, 'Tidak ada teknisi aktif pada unit ini.');
+    const ko = perfTabel(data.performaKoordinator, 'Tidak ada koordinator aktif pada unit ini.');
     const chartInsiden = hbar([
       { label: 'Insiden Masuk', value: data.recap.tiketIn, color: '#2563eb' },
       { label: 'Insiden Selesai', value: data.recap.tiketDone, color: '#16a34a' },
       { label: 'Eskalasi Koord.', value: data.recap.escalations, color: '#dc2626' },
     ]);
-    const chartTek = hbar(data.performaTeknisi.map((t) => ({ label: t.name, value: t.score, color: scoreCol(t.score) })), { max: 100 });
+    // Personil "Belum dinilai" (skor null) tidak digambar di grafik agar tidak terbaca 0.
+    const skorChartRows = [...data.performaTeknisi, ...data.performaKoordinator].filter((p) => p.skor != null);
+    const chartTek = skorChartRows.length
+      ? hbar(skorChartRows.map((t) => ({ label: t.name, value: t.skor as number, color: scoreCol(t.skor) })), { max: 100 })
+      : '<div style="font-size:10px;color:#666">Belum ada personil yang dinilai pada periode ini.</div>';
     const chartEval = data.evaluasi.length
       ? hbar(data.evaluasi.map((e) => ({ label: e.fasilitas, value: e.performancePct, color: e.performancePct >= 95 ? '#16a34a' : '#ea580c' })), { max: 100, suffix: '%' })
       : '';
+    const r = data.recap;
     pages.push(`<div class="page">${sec('Ringkasan & Grafik Kinerja')}
       <div class="stats">
         <div class="stat"><b>${data.recap.tiketIn}</b>Insiden Masuk</div>
         <div class="stat"><b>${data.recap.tiketDone}</b>Insiden Selesai</div>
-        <div class="stat"><b>${data.recap.slaPct}%</b>Ketepatan SLA</div>
+        <div class="stat"><b>${data.recap.slaPct == null ? '–' : `${data.recap.slaPct}%`}</b>Ketepatan SLA</div>
         ${data.recap.measuredUptimePct != null ? `<div class="stat"><b>${data.recap.measuredUptimePct}%</b>Uptime Terukur</div>` : ''}
         <div class="stat"><b>${data.recap.mttr}m</b>Rata² Penyelesaian</div>
         <div class="stat"><b>${data.recap.escalations}</b>Eskalasi Koord.</div>
       </div>
       <div style="display:flex;gap:14px;align-items:center;margin:12px 0;flex-wrap:wrap">
-        <div style="text-align:center">${gauge(data.recap.slaPct, 'Ketepatan SLA', '#2563eb')}</div>
+        ${data.recap.slaPct != null ? `<div style="text-align:center">${gauge(data.recap.slaPct, 'Ketepatan SLA', '#2563eb')}</div>` : ''}
         ${data.recap.measuredUptimePct != null ? `<div style="text-align:center">${gauge(data.recap.measuredUptimePct, 'Uptime Terukur')}</div>` : ''}
         <div style="flex:1;min-width:280px"><div class="cap">Volume Insiden</div>${chartInsiden}</div>
       </div>
-      <div class="cap">Skor Performa Teknisi (0–100)</div>${chartTek}
+      <div class="cap">Skor Performa Personil (0–100)</div>${chartTek}
       ${chartEval ? `<div class="cap" style="margin-top:8px">Performance Fasilitas (%)</div>${chartEval}` : ''}
       <div style="font-weight:bold;margin:12px 0 4px">Performa Teknisi</div>
-      <table class="data"><thead><tr><th>Nama</th><th>Selesai</th><th>Tepat SLA</th><th>Kritis</th><th>Inspeksi</th><th>Langgar</th><th>Skor</th></tr></thead><tbody>${tek}</tbody></table>
+      ${tek}
       <div style="font-weight:bold;margin:10px 0 4px">Performa Koordinator</div>
-      <table class="data"><thead><tr><th>Nama</th><th>Setuju Keg.</th><th>Sah LKP</th><th>Surat Dibuat</th><th>Surat di-TTE</th><th>Eskalasi</th><th>Skor</th></tr></thead><tbody>${ko}</tbody></table>${sign()}</div>`);
+      ${ko}
+      <div style="font-size:9px;margin-top:8px;line-height:1.5">
+        <b>Catatan kesesuaian angka:</b> skor &amp; komponen pada tabel di atas memakai perhitungan yang sama dengan
+        <b>Seksi I (Data Personil)</b> dan <b>Seksi XII (Rincian Penilaian Performa)</b> — angka kecil di bawah persentase adalah bukti (tercapai/target).
+        <b>Insiden Masuk</b> (${r.tiketIn}) = insiden yang dibuat pada periode ini; <b>Insiden Selesai</b> (${r.tiketDone}) = insiden yang selesai pada periode ini (bisa berasal dari bulan sebelumnya)${r.perbaikanRows != null ? `, sehingga Seksi IX memuat ${r.perbaikanRows} baris (gabungan keduanya)` : ''}${r.lkpRows != null ? ` dan Seksi X memuat ${r.lkpRows} LKP (insiden selesai yang sudah berlaporan)` : ''}.
+        <b>Ketepatan SLA</b> = ${r.slaTaken ? `${r.slaOnTime ?? 0} dari ${r.slaTaken} insiden diambil tepat waktu (seluruh unit)` : 'belum ada insiden yang diambil pada periode ini'}.
+        ${r.measuredUptimePct != null ? `<b>Uptime Terukur</b> = rata-rata ${r.uptimeFasilitas ?? 0} fasilitas berdata pantau pada Seksi VIII (dari ${r.evaluasiFasilitas ?? 0} fasilitas).` : ''}
+      </div>${sign()}</div>`);
   }
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Laporan Bulanan ${esc(namaBulan)}</title>

@@ -309,7 +309,9 @@ export function kasiNotaDinasPage(s: Surat, lkp: LkpHead, kasiQr: string): strin
     : '<br><br><br>';
   return `<div style="page-break-before:always;font-family:'Times New Roman',serif;color:#000;font-size:13px;line-height:1.6;padding-top:8mm">
       <div style="text-align:center;font-weight:bold;font-size:16px;text-decoration:underline;letter-spacing:1px">NOTA DINAS</div>
-      <div style="text-align:center;margin:2px 0 18px">Nomor: ${esc(s.kasi_nomor || s.nomor)}</div>
+      <!-- Nomor Nota Dinas Kepala Seksi SENGAJA dikosongkan: penomorannya di luar sistem
+           (buku agenda Seksi), diisi tulis tangan setelah dicetak. -->
+      <div style="text-align:center;margin:2px 0 18px">Nomor: <span style="display:inline-block;min-width:170px;border-bottom:1px dotted #333">&nbsp;</span></div>
       <table style="border-collapse:collapse"><tbody>
         <tr><td style="width:74px;padding:1px 6px;vertical-align:top">Yth</td><td>:</td><td>${esc(KEPALA_BANDARA_YTH)}</td></tr>
         <tr><td style="padding:1px 6px;vertical-align:top">Dari</td><td>:</td><td>${esc(kasiJab)}</td></tr>
