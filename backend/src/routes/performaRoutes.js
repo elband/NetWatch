@@ -60,7 +60,13 @@ export async function metricsFor(id, start, end, unitId = null) {
     [id, start, end, ...ufi.params, SLA_MINUTES, SLA_MINUTES]
   );
   const [[es]] = await pool.query(`SELECT COUNT(*) c FROM incident_duty d JOIN incidents i ON i.id=d.incident_id WHERE d.user_id=? AND i.coord_alerted=1 AND i.created_at>=? AND i.created_at<?${ufi.clause}`, [id, start, end, ...ufi.params]);
-  const [[pm]] = await pool.query("SELECT COUNT(*) c FROM equipment_maintenance WHERE done_by=? AND status='selesai' AND done_at>=? AND done_at<?", [id, start, end]);
+  // Pemeliharaan = Maintenance Bulanan + Jendela Maintenance yang diselesaikan teknisi
+  // (selaras dengan komponen PM pada skor persen di services/perfScore.js).
+  const [[pm]] = await pool.query(
+    `SELECT (SELECT COUNT(*) FROM equipment_maintenance WHERE done_by=? AND status='selesai' AND done_at>=? AND done_at<?)
+          + (SELECT COUNT(*) FROM maintenance_windows WHERE done_by=? AND status='selesai' AND done_at>=? AND done_at<?) AS c`,
+    [id, start, end, id, start, end]
+  );
   const [[dk]] = await pool.query('SELECT COUNT(*) c FROM incident_reports WHERE reported_by=? AND created_at>=? AND created_at<?', [id, start, end]);
   const [[ins]] = await pool.query('SELECT COUNT(*) c FROM equipment_inspections WHERE inspected_by=? AND inspect_date>=? AND inspect_date<?', [id, start, end]);
 

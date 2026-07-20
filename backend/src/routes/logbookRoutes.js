@@ -54,6 +54,17 @@ export async function buildLogbook(month, q, unitId = null) {
     `SELECT id, device_id, issue, priority, status, created_at, resolved_at, duration_min FROM incidents WHERE device_id IS NOT NULL AND created_at >= ? AND created_at < ?${du.clause}`,
     [start, end, ...du.params]
   );
+  // Jendela Maintenance (downtime terencana) yang menempel pada perangkat — ikut dihitung
+  // sebagai pemeliharaan, selaras dgn komponen PM penilaian & log kegiatan laporan bulanan.
+  const dumw = devUnit('mw.device_id');
+  const [mwin] = await pool.query(
+    `SELECT mw.device_id, mw.title, mw.reason, mw.starts_at, mw.ends_at, mw.status, mw.done_note, mw.done_at, u.name AS done_by_name,
+            (SELECT COUNT(*) FROM maintenance_window_photos p WHERE p.window_id = mw.id) AS photo_count,
+            (SELECT p.url FROM maintenance_window_photos p WHERE p.window_id = mw.id ORDER BY p.id ASC LIMIT 1) AS first_photo
+       FROM maintenance_windows mw LEFT JOIN users u ON u.id = mw.done_by
+      WHERE mw.device_id IS NOT NULL AND mw.starts_at >= ? AND mw.starts_at < ?${dumw.clause}`,
+    [start, end, ...dumw.params]
+  );
   // Metrik pemantauan bulan tsb per perangkat: uptime%, latency rata-rata & maks.
   // Sumber = rollup harian device_uptime_daily (bukan device_metrics mentah yang dipangkas
   // retensi), dengan rumus ketersediaan yang SAMA dengan Laporan SLA & Laporan Bulanan:
@@ -74,7 +85,7 @@ export async function buildLogbook(month, q, unitId = null) {
   const metricMap = new Map(metrics.map((m) => [m.device_id, m]));
 
   // Perangkat yang punya aktivitas ATAU metrik pemantauan bulan ini (union) — beserta info dasarnya.
-  const ids = [...new Set([...insp, ...pon, ...maint, ...inc, ...metrics].map((r) => r.device_id).filter(Boolean))];
+  const ids = [...new Set([...insp, ...pon, ...maint, ...mwin, ...inc, ...metrics].map((r) => r.device_id).filter(Boolean))];
   if (!ids.length) return { month: mm, devices: [] };
   const ufd = unitFilter(unitId, 'unit_id');
   const [devs] = await pool.query(`SELECT id, name, ip, type, loc FROM devices WHERE id IN (${ids.map(() => '?').join(',')})${ufd.clause}`, [...ids, ...ufd.params]);
@@ -109,6 +120,16 @@ export async function buildLogbook(month, q, unitId = null) {
     const d = map.get(r.device_id); if (!d) continue;
     d.recap.maintenance.total++; if (r.status === 'selesai') d.recap.maintenance.selesai++;
     d.events.push({ date: dstr(r.scheduled_date), time: tstr(r.done_at), kind: 'maintenance', label: r.task, status: r.status, detail: r.note || (r.photo_count ? `${r.photo_count} foto dokumentasi` : ''), by: r.done_by_name || '', photo_url: r.first_photo || '', verified: false });
+  }
+  for (const r of mwin) {
+    const d = map.get(r.device_id); if (!d) continue;
+    d.recap.maintenance.total++; if (r.status === 'selesai') d.recap.maintenance.selesai++;
+    d.events.push({
+      date: dstr(r.starts_at), time: tstr(r.starts_at), kind: 'maintenance', label: `Jendela maintenance: ${r.title}`,
+      status: r.status === 'selesai' ? 'selesai' : 'terjadwal',
+      detail: r.done_note || r.reason || (r.photo_count ? `${r.photo_count} foto dokumentasi` : ''),
+      by: r.done_by_name || '', photo_url: r.first_photo || '', verified: false,
+    });
   }
   for (const r of inc) {
     const d = map.get(r.device_id); if (!d) continue;

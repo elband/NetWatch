@@ -89,7 +89,10 @@ export default function SkpPage() {
           <div className="grid gap-3 sm:grid-cols-2">
             {list.map((s) => (
               <button key={s.id} onClick={() => openDetail(s.id, thisMonth())} className="text-left border border-border rounded-xl p-4 bg-surface hover:border-accent2/50 transition">
-                <div className="font-semibold text-sm">{s.periode} · {s.tahun}</div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-semibold text-sm">{s.periode} · {s.tahun}</div>
+                  {s.can_edit === false && <span className="text-[9px] px-1.5 py-0.5 rounded border border-border text-text2 shrink-0">👁️ Lihat saja</span>}
+                </div>
                 <div className="text-[12px] text-text2 mt-1">{s.pegawai_nama || '-'}{s.pegawai_jabatan ? ` · ${s.pegawai_jabatan}` : ''}</div>
                 <div className="text-[11px] text-text2 mt-2 flex gap-3">
                   <span>🎯 {s.jml_rhk || 0} RHK</span><span>📎 {s.jml_bukti || 0} bukti</span>
@@ -105,6 +108,9 @@ export default function SkpPage() {
 
   // ---------- DETAIL ----------
   const d = detail;
+  // Koordinator membuka SKP anggota unitnya: hanya boleh melihat (tombol ubah disembunyikan;
+  // backend tetap menolak bila dipaksa lewat API).
+  const ro = d.can_edit === false;
   return (
     <div className="max-w-5xl mx-auto pb-10">
       <button onClick={() => setDetail(null)} className="text-[12px] text-text2 hover:text-text mb-3">← Kembali ke daftar SKP</button>
@@ -116,10 +122,14 @@ export default function SkpPage() {
             <h1 className="text-base font-bold">SKP {d.periode} · {d.tahun}</h1>
             <div className="text-[12px] text-text2 mt-0.5">Pendekatan: {d.pendekatan}</div>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <button onClick={() => setHeaderModal('edit')} className="border border-border text-text2 hover:text-text rounded-md px-2.5 py-1 text-[11px]">✏️ Edit Identitas</button>
-            <button onClick={deleteSkp} className="border border-danger/40 text-danger rounded-md px-2.5 py-1 text-[11px]">🗑️ Hapus</button>
-          </div>
+          {ro ? (
+            <span className="text-[10px] px-2 py-1 rounded border border-border text-text2">👁️ Lihat saja — SKP {d.pemilik_nama || d.pegawai_nama || 'personel'}</span>
+          ) : (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => setHeaderModal('edit')} className="border border-border text-text2 hover:text-text rounded-md px-2.5 py-1 text-[11px]">✏️ Edit Identitas</button>
+              <button onClick={deleteSkp} className="border border-danger/40 text-danger rounded-md px-2.5 py-1 text-[11px]">🗑️ Hapus</button>
+            </div>
+          )}
         </div>
         <div className="grid sm:grid-cols-2 gap-3 mt-3">
           <div className="bg-surface2/50 border border-border rounded-lg p-3">
@@ -177,7 +187,7 @@ export default function SkpPage() {
       {/* RHK */}
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-bold">Rencana Hasil Kerja & Indikator <span className="text-[11px] text-text2 font-normal">· realisasi/bukti untuk {monthLabel(bulan)}</span></h2>
-        <button onClick={() => setRhkModal({})} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Tambah RHK</button>
+        {!ro && <button onClick={() => setRhkModal({})} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold">+ Tambah RHK</button>}
       </div>
 
       {(!d.rhk || d.rhk.length === 0) ? (
@@ -192,10 +202,12 @@ export default function SkpPage() {
                   <span className="text-[13px] font-semibold">RHK {ri + 1}.</span>
                   <span className="text-[13px]"> {r.rhk}</span>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => setRhkModal({ rhk: r })} className="text-[11px] text-text2 hover:text-text px-1.5">✏️</button>
-                  <button onClick={() => del(`/skp/rhk/${r.id}`, 'Hapus RHK ini beserta indikator, realisasi & bukti di bawahnya (semua bulan)?')} className="text-[11px] text-danger px-1.5">🗑️</button>
-                </div>
+                {!ro && (
+                  <div className="flex gap-1 shrink-0">
+                    <button onClick={() => setRhkModal({ rhk: r })} className="text-[11px] text-text2 hover:text-text px-1.5">✏️</button>
+                    <button onClick={() => del(`/skp/rhk/${r.id}`, 'Hapus RHK ini beserta indikator, realisasi & bukti di bawahnya (semua bulan)?')} className="text-[11px] text-danger px-1.5">🗑️</button>
+                  </div>
+                )}
               </div>
 
               <div className="p-3 space-y-3">
@@ -208,24 +220,28 @@ export default function SkpPage() {
                         <span className="text-[12.5px] font-medium">{ind.indikator}</span>
                         {ind.target && <div className="text-[11px] text-text2 mt-0.5">🎯 Target: {ind.target}</div>}
                       </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button title="Edit indikator (rencana tahunan)" onClick={() => setIndModal({ rhkId: r.id, ind })} className="text-[11px] text-text2 hover:text-text px-1.5">✏️</button>
-                        <button onClick={() => del(`/skp/indikator/${ind.id}`, 'Hapus indikator ini beserta realisasi & bukti (semua bulan)?')} className="text-[11px] text-danger px-1.5">🗑️</button>
-                      </div>
+                      {!ro && (
+                        <div className="flex gap-1 shrink-0">
+                          <button title="Edit indikator (rencana tahunan)" onClick={() => setIndModal({ rhkId: r.id, ind })} className="text-[11px] text-text2 hover:text-text px-1.5">✏️</button>
+                          <button onClick={() => del(`/skp/indikator/${ind.id}`, 'Hapus indikator ini beserta realisasi & bukti (semua bulan)?')} className="text-[11px] text-danger px-1.5">🗑️</button>
+                        </div>
+                      )}
                     </div>
 
                     {ind.renaksi && <div className="mt-2"><Field label="Rencana Aksi (Renaksi) — tahunan" value={ind.renaksi} /></div>}
 
                     {/* Realisasi (bulan terpilih) */}
                     <div className="mt-2">
-                      <FieldEdit label={`Realisasi · ${monthLabel(bulan)}`} value={ind.realisasi} onEdit={() => setRealModal({ ind })} />
+                      {ro
+                        ? <Field label={`Realisasi · ${monthLabel(bulan)}`} value={ind.realisasi} />
+                        : <FieldEdit label={`Realisasi · ${monthLabel(bulan)}`} value={ind.realisasi} onEdit={() => setRealModal({ ind })} />}
                     </div>
 
                     {/* Bukti dukung (bulan terpilih) */}
                     <div className="mt-2.5 border-t border-border/60 pt-2">
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="text-[11px] font-semibold text-text2">📎 Bukti Data Dukung · {monthLabel(bulan)} ({ind.bukti.length})</span>
-                        <button onClick={() => setBuktiModal({ indId: ind.id })} className="text-[10px] border border-accent/40 text-accent rounded px-2 py-0.5 hover:bg-accent/10">+ Tambah Bukti</button>
+                        {!ro && <button onClick={() => setBuktiModal({ indId: ind.id })} className="text-[10px] border border-accent/40 text-accent rounded px-2 py-0.5 hover:bg-accent/10">+ Tambah Bukti</button>}
                       </div>
                       {ind.bukti.length === 0 ? (
                         <div className="text-[10.5px] text-text2 italic">Belum ada bukti dukung bulan ini.</div>
@@ -251,10 +267,12 @@ export default function SkpPage() {
                                   </div>
                                 )}
                               </div>
-                              <div className="flex gap-1 shrink-0">
-                                <button onClick={() => setBuktiModal({ indId: ind.id, bukti: b })} className="text-text2 hover:text-text">✏️</button>
-                                <button onClick={() => del(`/skp/bukti/${b.id}`, 'Hapus bukti dukung ini?')} className="text-danger">🗑️</button>
-                              </div>
+                              {!ro && (
+                                <div className="flex gap-1 shrink-0">
+                                  <button onClick={() => setBuktiModal({ indId: ind.id, bukti: b })} className="text-text2 hover:text-text">✏️</button>
+                                  <button onClick={() => del(`/skp/bukti/${b.id}`, 'Hapus bukti dukung ini?')} className="text-danger">🗑️</button>
+                                </div>
+                              )}
                             </li>
                           ))}
                         </ol>
@@ -262,7 +280,7 @@ export default function SkpPage() {
                     </div>
                   </div>
                 ))}
-                <button onClick={() => setIndModal({ rhkId: r.id })} className="text-[11px] border border-border text-text2 hover:text-text rounded-md px-3 py-1">+ Tambah Indikator</button>
+                {!ro && <button onClick={() => setIndModal({ rhkId: r.id })} className="text-[11px] border border-border text-text2 hover:text-text rounded-md px-3 py-1">+ Tambah Indikator</button>}
               </div>
             </div>
           ))}

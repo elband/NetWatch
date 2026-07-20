@@ -18,6 +18,7 @@ const KLASIFIKASI = ['utama', 'tambahan'];
 const STATUSES = ['draft', 'diajukan', 'dinilai'];
 const genToken = () => crypto.randomBytes(16).toString('hex');
 const isAdmin = (u) => (u?.roles?.length ? u.roles : [u?.role]).includes('admin');
+const isKoor = (u) => (u?.roles?.length ? u.roles : [u?.role]).includes('koordinator');
 const isMonth = (s) => /^\d{4}-\d{2}$/.test(s || '');
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 // Bulan aktif dari query/body; fallback ke bulan berjalan.
@@ -141,38 +142,57 @@ router.get('/bukti/public/:token', async (req, res) => {
   res.json({ valid: true, bukti: { ...publicBuktiView(b), bulan: b.bulan, snapshot }, indikator: ind || null, skp: skp || null, laporanBulanan: await signedLaporanBulanan(b.bulan, skp?.unit_id ?? null) });
 });
 
-// =================== TERPROTEKSI (admin/koordinator) ===================
+// =================== TERPROTEKSI (admin/koordinator/teknisi) ===================
 router.use(requireAuth);
 router.use(unitScope); // scoping multi-unit — route publik di atas tidak terpengaruh
-router.use(requireRole('admin', 'koordinator'));
+router.use(requireRole('admin', 'koordinator', 'teknisi'));
 
-async function getOwned(skpId, user, unitId) {
+// Aturan akses SKP:
+// • Pemilik (pembuat) & admin  → lihat + ubah.
+// • Koordinator                → LIHAT SKP seluruh personel se-unit (atasan langsung),
+//                                tetapi tidak boleh mengubah milik orang lain.
+// • Teknisi                    → hanya SKP miliknya sendiri; SKP teknisi lain tidak
+//                                terlihat sama sekali (bukan sekadar read-only).
+const canEditSkp = (skp, user) => skp.created_by === user.id || isAdmin(user);
+const canViewSkp = (skp, user) => canEditSkp(skp, user) || isKoor(user);
+
+async function getOwned(skpId, user, unitId, mode = 'edit') {
   const [rows] = await pool.query('SELECT * FROM skp WHERE id=?', [Number(skpId)]);
   const skp = rows[0];
   if (!skp) return { error: 404 };
   if (!rowInUnit(skp, unitId)) return { error: 404 }; // beda unit = seolah tidak ada
-  if (skp.created_by !== user.id && !isAdmin(user)) return { error: 403 };
+  if (mode === 'view') {
+    if (!canViewSkp(skp, user)) return { error: 404 }; // sesama teknisi: seolah tidak ada
+    return { skp };
+  }
+  if (!canEditSkp(skp, user)) return { error: canViewSkp(skp, user) ? 403 : 404 };
   return { skp };
 }
-async function ownedByChild(table, childId, user, unitId) {
+async function ownedByChild(table, childId, user, unitId, mode = 'edit') {
   const [rows] = await pool.query(`SELECT skp_id FROM ${table} WHERE id=?`, [Number(childId)]);
   if (!rows[0]) return { error: 404 };
-  return getOwned(rows[0].skp_id, user, unitId);
+  return getOwned(rows[0].skp_id, user, unitId, mode);
 }
-const reply = async (res, skp, bulan, status = 200) => res.status(status).json({ skp: await fetchFull(skp, bulan) });
+const reply = async (res, req, skp, bulan, status = 200) =>
+  res.status(status).json({ skp: { ...(await fetchFull(skp, bulan)), can_edit: canEditSkp(skp, req.user) } });
 
 router.get('/data-sources', (req, res) => res.json({ sources: DATA_SOURCES }));
 
-// Daftar SKP milik sendiri (admin: semua).
+// Daftar SKP: teknisi hanya miliknya sendiri; koordinator & admin melihat SKP
+// seluruh personel unit (SKP anggota tim tampil read-only, ditandai can_edit=false).
 router.get('/', async (req, res) => {
-  let sql = 'SELECT s.*, (SELECT COUNT(*) FROM skp_rhk r WHERE r.skp_id=s.id) AS jml_rhk, (SELECT COUNT(*) FROM skp_bukti b WHERE b.skp_id=s.id) AS jml_bukti FROM skp s WHERE 1=1';
+  let sql = `SELECT s.*, u.name AS pemilik_nama,
+       (SELECT COUNT(*) FROM skp_rhk r WHERE r.skp_id=s.id) AS jml_rhk,
+       (SELECT COUNT(*) FROM skp_bukti b WHERE b.skp_id=s.id) AS jml_bukti
+     FROM skp s LEFT JOIN users u ON u.id=s.created_by WHERE 1=1`;
   const params = [];
   const uf = unitFilter(req.unitId, 's.unit_id');
   sql += uf.clause; params.push(...uf.params);
-  if (!isAdmin(req.user)) { sql += ' AND s.created_by=?'; params.push(req.user.id); }
-  sql += ' ORDER BY s.tahun DESC, s.id DESC';
+  if (!isAdmin(req.user) && !isKoor(req.user)) { sql += ' AND s.created_by=?'; params.push(req.user.id); }
+  sql += ' ORDER BY (s.created_by=?) DESC, s.tahun DESC, s.id DESC';
+  params.push(req.user.id);
   const [rows] = await pool.query(sql, params);
-  res.json({ skp: rows });
+  res.json({ skp: rows.map((r) => ({ ...r, can_edit: canEditSkp(r, req.user) })) });
 });
 
 // Buat SKP tahunan baru. Otomatis dapat public_token.
@@ -192,14 +212,15 @@ router.post('/', async (req, res) => {
   );
   await audit(req.user, 'skp_create', 'skp', r.insertId, `${b.periode} ${tahun}`);
   const [rows] = await pool.query('SELECT * FROM skp WHERE id=?', [r.insertId]);
-  await reply(res, rows[0], pickBulan(req), 201);
+  await reply(res, req, rows[0], pickBulan(req), 201);
 });
 
-// Detail SKP untuk bulan tertentu (?bulan=YYYY-MM).
+// Detail SKP untuk bulan tertentu (?bulan=YYYY-MM). Mode 'view': koordinator boleh
+// membuka SKP anggota unitnya (read-only); teknisi lain dapat 404.
 router.get('/:id', async (req, res) => {
-  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId, 'view');
   if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
-  await reply(res, skp, req.query.bulan);
+  await reply(res, req, skp, req.query.bulan);
 });
 
 // Ubah identitas header SKP (tahunan).
@@ -215,7 +236,7 @@ router.put('/:id', async (req, res) => {
       b.penilai_nama ?? skp.penilai_nama, b.penilai_nip ?? skp.penilai_nip, b.penilai_jabatan ?? skp.penilai_jabatan, skp.id]
   );
   const [rows] = await pool.query('SELECT * FROM skp WHERE id=?', [skp.id]);
-  await reply(res, rows[0], pickBulan(req));
+  await reply(res, req, rows[0], pickBulan(req));
 });
 
 // Status penilaian PER BULAN (draft → diajukan → dinilai). 'diajukan' isi tanggal bila kosong.
@@ -233,7 +254,7 @@ router.patch('/:id/bulan-status', async (req, res) => {
     await pool.query(`INSERT INTO skp_bulan (skp_id, bulan, status, tanggal_pengajuan) VALUES (?,?,?,${setTgl ? 'CURDATE()' : 'NULL'})`, [skp.id, bulan, next]);
   }
   await audit(req.user, `skp_${next}`, 'skp', skp.id, `${skp.periode} ${skp.tahun} · ${bulan}`);
-  await reply(res, skp, bulan);
+  await reply(res, req, skp, bulan);
 });
 
 router.post('/:id/reshare', async (req, res) => {
@@ -262,7 +283,7 @@ router.post('/:id/rhk', async (req, res) => {
   const klas = KLASIFIKASI.includes(req.body.klasifikasi) ? req.body.klasifikasi : 'utama';
   const [[m]] = await pool.query('SELECT COALESCE(MAX(urutan),0)+1 u FROM skp_rhk WHERE skp_id=?', [skp.id]);
   await pool.query('INSERT INTO skp_rhk (skp_id, urutan, klasifikasi, rhk) VALUES (?,?,?,?)', [skp.id, m.u, klas, req.body.rhk.trim()]);
-  await reply(res, skp, pickBulan(req), 201);
+  await reply(res, req, skp, pickBulan(req), 201);
 });
 router.put('/rhk/:rhkId', async (req, res) => {
   const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user, req.unitId);
@@ -270,13 +291,13 @@ router.put('/rhk/:rhkId', async (req, res) => {
   const b = req.body;
   await pool.query('UPDATE skp_rhk SET rhk=COALESCE(?,rhk), klasifikasi=COALESCE(?,klasifikasi), urutan=COALESCE(?,urutan) WHERE id=?',
     [b.rhk?.trim() || null, KLASIFIKASI.includes(b.klasifikasi) ? b.klasifikasi : null, b.urutan != null ? Number(b.urutan) : null, Number(req.params.rhkId)]);
-  await reply(res, skp, pickBulan(req));
+  await reply(res, req, skp, pickBulan(req));
 });
 router.delete('/rhk/:rhkId', async (req, res) => {
   const { skp, error } = await ownedByChild('skp_rhk', req.params.rhkId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   await pool.query('DELETE FROM skp_rhk WHERE id=?', [Number(req.params.rhkId)]);
-  await reply(res, skp, pickBulan(req));
+  await reply(res, req, skp, pickBulan(req));
 });
 
 // ===== Indikator (rencana tahunan: aspek/indikator/target/renaksi) =====
@@ -290,7 +311,7 @@ router.post('/rhk/:rhkId/indikator', async (req, res) => {
     'INSERT INTO skp_indikator (rhk_id, skp_id, urutan, aspek, indikator, target, renaksi) VALUES (?,?,?,?,?,?,?)',
     [Number(req.params.rhkId), skp.id, m.u, aspek, req.body.indikator.trim(), req.body.target || null, req.body.renaksi || null]
   );
-  await reply(res, skp, pickBulan(req), 201);
+  await reply(res, req, skp, pickBulan(req), 201);
 });
 router.put('/indikator/:indId', async (req, res) => {
   const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
@@ -300,13 +321,13 @@ router.put('/indikator/:indId', async (req, res) => {
     `UPDATE skp_indikator SET aspek=COALESCE(?,aspek), indikator=COALESCE(?,indikator), target=?, renaksi=? WHERE id=?`,
     [ASPEK.includes(b.aspek) ? b.aspek : null, b.indikator?.trim() || null, b.target ?? null, b.renaksi ?? null, Number(req.params.indId)]
   );
-  await reply(res, skp, pickBulan(req));
+  await reply(res, req, skp, pickBulan(req));
 });
 router.delete('/indikator/:indId', async (req, res) => {
   const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
   if (error) return res.status(error).json({ error: 'Tidak ditemukan / tidak punya akses.' });
   await pool.query('DELETE FROM skp_indikator WHERE id=?', [Number(req.params.indId)]);
-  await reply(res, skp, pickBulan(req));
+  await reply(res, req, skp, pickBulan(req));
 });
 
 // ===== Realisasi & feedback PER BULAN (upsert) =====
@@ -320,7 +341,7 @@ router.put('/indikator/:indId/realisasi', async (req, res) => {
      ON DUPLICATE KEY UPDATE realisasi=VALUES(realisasi), feedback=VALUES(feedback)`,
     [Number(req.params.indId), skp.id, bulan, req.body.realisasi ?? null, req.body.feedback ?? null]
   );
-  await reply(res, skp, bulan);
+  await reply(res, req, skp, bulan);
 });
 
 // ===== Bukti Dukung PER BULAN (tautan / berkas) =====
@@ -335,7 +356,7 @@ router.post('/indikator/:indId/bukti', upload.single('file'), async (req, res) =
     'INSERT INTO skp_bukti (indikator_id, skp_id, bulan, urutan, deskripsi, url, file_url, public_token) VALUES (?,?,?,?,?,?,?,?)',
     [Number(req.params.indId), skp.id, bulan, m.u, req.body.deskripsi.trim().slice(0, 255), req.body.url?.trim() || null, fileUrl, genToken()]
   );
-  await reply(res, skp, bulan, 201);
+  await reply(res, req, skp, bulan, 201);
 });
 // Bukti tipe 'data': snapshot beku dari sumber data aplikasi NetWatch. Bulan bukti = periode snapshot.
 router.post('/indikator/:indId/bukti-data', async (req, res) => {
@@ -359,7 +380,7 @@ router.post('/indikator/:indId/bukti-data', async (req, res) => {
     'INSERT INTO skp_bukti (indikator_id, skp_id, bulan, urutan, deskripsi, kind, source, params, snapshot, public_token) VALUES (?,?,?,?,?,?,?,?,?,?)',
     [Number(req.params.indId), skp.id, bulan, m.u, deskripsi, 'data', source, JSON.stringify(params), JSON.stringify(snapshot), genToken()]
   );
-  await reply(res, skp, bulan, 201);
+  await reply(res, req, skp, bulan, 201);
 });
 
 router.put('/bukti/:buktiId', upload.single('file'), async (req, res) => {
@@ -371,7 +392,7 @@ router.put('/bukti/:buktiId', upload.single('file'), async (req, res) => {
   const b = req.body;
   await pool.query('UPDATE skp_bukti SET deskripsi=COALESCE(?,deskripsi), url=?, file_url=? WHERE id=?',
     [b.deskripsi?.trim()?.slice(0, 255) || null, b.url?.trim() || null, fileUrl, Number(req.params.buktiId)]);
-  await reply(res, skp, cur[0]?.bulan);
+  await reply(res, req, skp, cur[0]?.bulan);
 });
 router.delete('/bukti/:buktiId', async (req, res) => {
   const { skp, error } = await ownedByChild('skp_bukti', req.params.buktiId, req.user, req.unitId);
@@ -379,7 +400,7 @@ router.delete('/bukti/:buktiId', async (req, res) => {
   const [cur] = await pool.query('SELECT file_url, bulan FROM skp_bukti WHERE id=?', [Number(req.params.buktiId)]);
   await pool.query('DELETE FROM skp_bukti WHERE id=?', [Number(req.params.buktiId)]);
   if (cur[0]?.file_url) { try { fs.unlinkSync(path.join(DIR, path.basename(cur[0].file_url))); } catch { /* abaikan */ } }
-  await reply(res, skp, cur[0]?.bulan);
+  await reply(res, req, skp, cur[0]?.bulan);
 });
 
 export default router;

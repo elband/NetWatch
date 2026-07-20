@@ -85,7 +85,15 @@ export async function scoreTeknisi(userId, start, end, unitId) {
       WHERE m.done_by=? AND m.status='selesai' AND m.scheduled_date>=? AND m.scheduled_date<?${ufmd.clause}`,
     [userId, start, end, ...ufmd.params]
   );
-  const pmDone = Number(pmDoneRow.c) || 0;
+  // Jendela Maintenance (maintenance_windows) yang diselesaikan teknisi juga terhitung
+  // pemeliharaan — banyak unit hanya memakai jendela ini, tanpa Maintenance Bulanan.
+  const ufmw = unitFilter(unitId);
+  const [[mwDoneRow]] = await pool.query(
+    `SELECT COUNT(*) c FROM maintenance_windows
+      WHERE done_by=? AND status='selesai' AND starts_at>=? AND starts_at<?${ufmw.clause}`,
+    [userId, start, end, ...ufmw.params]
+  );
+  const pmDone = (Number(pmDoneRow.c) || 0) + (Number(mwDoneRow.c) || 0);
   const pmTarget = await pmTargetPerTech(unitId, start, end);
 
   const taken = Number(t.taken) || 0, onTime = Number(t.onTime) || 0, done = Number(d.done) || 0, insC = Number(ins.c) || 0;
@@ -97,13 +105,14 @@ export async function scoreTeknisi(userId, start, end, unitId) {
     { key: 'inspeksi', label: 'Inspeksi', weight: 20, value: pct(insC, hariDinas), num: insC, den: hariDinas,
       note: hariDinas ? `${insC} inspeksi dari ${hariDinas} hari dinas` : 'Tidak ada hari dinas terjadwal' },
     { key: 'pm', label: 'Pemeliharaan (PM)', weight: 20, value: pct(pmDone, pmTarget), num: pmDone, den: pmTarget,
-      note: pmTarget ? `${pmDone} maintenance selesai dari target ${pmTarget}` : 'Tidak ada rencana maintenance bulan ini' },
+      note: pmTarget ? `${pmDone} pemeliharaan selesai (maintenance bulanan + jendela maintenance) dari target ${pmTarget}` : 'Tidak ada rencana pemeliharaan bulan ini' },
   ]);
 }
 
-// Beban PM per teknisi = tugas Maintenance Bulanan unit yang direncanakan pada rentang
-// (status rencana/selesai, bukan batal) ÷ jumlah teknisi aktif unit (≥1). 0 bila unit
-// tak punya tugas maintenance pada rentang → komponen PM diabaikan (bobot dibagi ulang).
+// Beban PM per teknisi = tugas pemeliharaan unit pada rentang ÷ jumlah teknisi aktif unit
+// (≥1). Tugas = Maintenance Bulanan (equipment_maintenance, status rencana/selesai) +
+// Jendela Maintenance (maintenance_windows, terjadwal/selesai). 0 bila unit tak punya
+// tugas pemeliharaan pada rentang → komponen PM diabaikan (bobot dibagi ulang).
 async function pmTargetPerTech(unitId, start, end) {
   const ufd = unitFilter(unitId, 'd.unit_id');
   const [[p]] = await pool.query(
@@ -111,7 +120,12 @@ async function pmTargetPerTech(unitId, start, end) {
       WHERE m.status IN ('rencana','selesai') AND m.scheduled_date>=? AND m.scheduled_date<?${ufd.clause}`,
     [start, end, ...ufd.params]
   );
-  const tasks = Number(p.c) || 0;
+  const ufw = unitFilter(unitId);
+  const [[w]] = await pool.query(
+    `SELECT COUNT(*) c FROM maintenance_windows WHERE starts_at>=? AND starts_at<?${ufw.clause}`,
+    [start, end, ...ufw.params]
+  );
+  const tasks = (Number(p.c) || 0) + (Number(w.c) || 0);
   if (!tasks) return 0;
   const ufU = unitFilter(unitId, 'unit_id');
   const [[u]] = await pool.query(

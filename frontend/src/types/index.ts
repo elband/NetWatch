@@ -908,6 +908,9 @@ export interface Skp {
   updated_at?: string;
   jml_rhk?: number;
   jml_bukti?: number;
+  // false = hanya boleh dilihat (koordinator membuka SKP anggota unitnya).
+  can_edit?: boolean;
+  pemilik_nama?: string | null;
   rhk?: SkpRhk[];
   // Konteks bulanan (saat detail dimuat untuk satu bulan).
   bulan?: string;

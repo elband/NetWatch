@@ -23,6 +23,7 @@ function monthRange(bulan) {
 
 const HASIL_LABEL = { berhasil: 'Berhasil', sebagian: 'Sebagian', gagal: 'Belum berhasil' };
 const MAINT_STATUS = { rencana: 'Rencana', selesai: 'Selesai', batal: 'Batal' };
+const ACTIVITY_LABEL = { rapat: 'Rapat', lembur: 'Lembur', izin: 'Izin', 'dinas-luar': 'Dinas Luar', lainnya: 'Kegiatan Lain' };
 
 // Daftar sumber untuk dropdown UI. period: 'month' butuh parameter bulan; 'none' tidak.
 export const DATA_SOURCES = [
@@ -30,6 +31,7 @@ export const DATA_SOURCES = [
   { key: 'maintenance', label: 'Pemeliharaan & Perawatan Peralatan', period: 'month' },
   { key: 'inspeksi', label: 'Inspeksi/Pemeriksaan Peralatan', period: 'month' },
   { key: 'kegiatan', label: 'Kegiatan Non-Rutin', period: 'month' },
+  { key: 'pengajuan_kegiatan', label: 'Kegiatan Diajukan Teknisi (Rapat/Lembur/Dinas Luar)', period: 'month' },
   { key: 'sla', label: 'Laporan SLA/Uptime Perangkat', period: 'month' },
   { key: 'laporan_bulanan', label: 'Laporan Bulanan (Rekap)', period: 'month' },
   { key: 'inventaris', label: 'Daftar / Inventaris Perangkat', period: 'none' },
@@ -116,6 +118,35 @@ const BUILDERS = {
       ],
       columns: ['Tanggal', 'Judul', 'Kategori', 'Petugas', 'Status'],
       rows: rows.map((r) => [r.tgl, r.judul, r.kategori, r.petugas_nama || '-', r.status]),
+    };
+  },
+
+  // Kegiatan yang DIAJUKAN teknisi & disetujui koordinator (rapat, lembur, izin,
+  // dinas luar, lainnya) — sumber "Kegiatan Lain" pada Dashboard Saya / Kegiatan Saya.
+  async pengajuan_kegiatan({ start, end, label }) {
+    const [rows] = await pool.query(
+      `SELECT DATE_FORMAT(a.activity_date,'%d-%m-%Y') tgl, a.type, a.title, a.detail,
+              a.start_time, a.end_time, a.completed_at, COALESCE(u.name,'-') pengaju,
+              COALESCE(a.approver_name,'-') penyetuju,
+              (CASE WHEN a.doc_urls IS NULL THEN 0 ELSE JSON_LENGTH(a.doc_urls) END) dok
+         FROM activities a LEFT JOIN users u ON u.id=a.user_id
+        WHERE a.status='disetujui' AND a.activity_date>=? AND a.activity_date<?
+        ORDER BY a.activity_date, a.start_time`, [start, end]);
+    const cnt = (t) => rows.filter((r) => r.type === t).length;
+    const dok = rows.reduce((a, r) => a + Number(r.dok || 0), 0);
+    const jam = (r) => (r.start_time ? `${String(r.start_time).slice(0, 5)}${r.end_time ? `–${String(r.end_time).slice(0, 5)}` : ''}` : '-');
+    return {
+      title: `Kegiatan Diajukan Teknisi (Disetujui) — ${label}`,
+      summary: [
+        { label: 'Total Kegiatan', value: rows.length },
+        { label: 'Rapat', value: cnt('rapat') },
+        { label: 'Dinas Luar', value: cnt('dinas-luar') },
+        { label: 'Lembur', value: cnt('lembur') },
+        { label: 'Dokumentasi Foto', value: dok },
+      ],
+      columns: ['Tanggal', 'Jam', 'Jenis', 'Kegiatan', 'Pengaju', 'Disetujui Oleh', 'Dok.'],
+      rows: rows.map((r) => [r.tgl, jam(r), ACTIVITY_LABEL[r.type] || r.type,
+        r.title + (r.detail ? ` — ${r.detail}` : ''), r.pengaju, r.penyetuju, String(r.dok || 0)]),
     };
   },
 

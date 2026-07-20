@@ -29,7 +29,7 @@ export const NAV_ITEMS: Record<Role, NavEntry[]> = {
     { section: 'Log' }, { id: 'pelaporan-qr', icon: '📱', label: 'Pelaporan Fasilitas QR' }, { id: 'wa', icon: '📲', label: 'Log WhatsApp' }, { id: 'publik-reports', icon: '📬', label: 'Laporan Publik' }, { id: 'api-docs', icon: '🔌', label: 'Dokumentasi API' },
   ],
   teknisi: [
-    { section: 'Saya' }, { id: 'my-dashboard', icon: '📊', label: 'Dashboard Saya' }, { id: 'notifikasi', icon: '🔔', label: 'Notifikasi' },
+    { section: 'Saya' }, { id: 'my-dashboard', icon: '📊', label: 'Dashboard Saya' }, { id: 'notifikasi', icon: '🔔', label: 'Notifikasi' }, { id: 'skp', icon: '📋', label: 'SKP / e-Kinerja' },
     { section: 'Pekerjaan' }, { id: 'my-incidents', icon: '🚨', label: 'Insiden Saya' }, { id: 'kegiatan-saya', icon: '🗂️', label: 'Kegiatan Saya' }, { id: 'aset', icon: '🔧', label: 'Peralatan' }, { id: 'sparepart', icon: '🧰', label: 'Manajemen Suku Cadang' }, { id: 'obat-air', icon: '💧', label: 'Obat Air' }, { id: 'peminjaman', icon: '📦', label: 'Peminjaman Peralatan' }, { id: 'equipment', icon: '🛠️', label: 'Performa Peralatan' }, { id: 'logbook', icon: '📒', label: 'Logbook Peralatan' }, { id: 'jadwal', icon: '📅', label: 'Jadwal Dinas' }, { id: 'diklat', icon: '🎓', label: 'Pengajuan Diklat' }, { id: 'kegiatan-nr', icon: '📝', label: 'Kegiatan Non-Rutin' }, { id: 'dokumen', icon: '📚', label: 'Dokumen & SOP' },
     { section: 'Monitoring' }, { id: 'devices', icon: '🖥️', label: 'Perangkat' }, { id: 'monitor', icon: '📡', label: 'Live Monitor' }, { id: 'peta', icon: '🗺️', label: 'Peta Perangkat' }, { id: 'sla', icon: '📊', label: 'Laporan SLA' },
   ],

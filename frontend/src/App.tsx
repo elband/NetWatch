@@ -115,9 +115,12 @@ export default function App() {
           <Route path="/kegiatan-nr" element={<KegiatanNonRutin />} />
           <Route path="/notifikasi" element={<Notifikasi />} />
 
-          {/* SSH: admin/koordinator/teknisi (bukan viewer) */}
+          {/* SSH & SKP: admin/koordinator/teknisi (bukan viewer).
+              SKP — teknisi menyusun SKP-nya sendiri; koordinator melihat SKP anggota unit
+              (read-only, dijaga backend); sesama teknisi tidak saling melihat. */}
           <Route element={<ProtectedRoute roles={['admin', 'koordinator', 'teknisi']} />}>
             <Route path="/ssh" element={<SshTerminal />} />
+            <Route path="/skp" element={<Skp />} />
           </Route>
 
           {/* Manajer: admin & koordinator */}
@@ -136,7 +139,6 @@ export default function App() {
             <Route path="/laporan-kinerja" element={<LaporanKinerja />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/pelaporan-qr" element={<PelaporanQR />} />
-            <Route path="/skp" element={<Skp />} />
             {/* Koordinator = admin unitnya: kelola user & master data (ter-scope unit di backend). */}
             <Route path="/users" element={<Users />} />
             <Route path="/master" element={<MasterData />} />

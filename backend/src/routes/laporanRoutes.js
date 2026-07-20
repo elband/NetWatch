@@ -134,6 +134,16 @@ export async function buildLaporanData(monthIn, unitId = null) {
       WHERE (m.plan_month=? OR (m.done_at>=? AND m.done_at<?))${ufM.clause} ORDER BY m.scheduled_date`,
     [month, start, end, ...ufM.params]
   );
+  // Jendela Maintenance (downtime terencana) — pekerjaan pemeliharaan nyata teknisi yang
+  // juga dinilai pada komponen PM, jadi harus ikut tercatat di log kegiatan bulanan.
+  const ufMw = unitFilter(unitId, 'mw.unit_id');
+  const [mwDay] = await pool.query(
+    `SELECT mw.starts_at, mw.done_at, mw.title, mw.status, mw.done_note, d.name dev, ud.name done_by, uc.name created_by
+       FROM maintenance_windows mw LEFT JOIN devices d ON d.id=mw.device_id
+       LEFT JOIN users ud ON ud.id=mw.done_by LEFT JOIN users uc ON uc.id=mw.created_by
+      WHERE ((mw.starts_at>=? AND mw.starts_at<?) OR (mw.done_at>=? AND mw.done_at<?))${ufMw.clause} ORDER BY mw.starts_at`,
+    [start, end, start, end, ...ufMw.params]
+  );
   // Override koordinator (buka akses inspeksi) — dicatat sebagai kegiatan harian di laporan.
   const [ovrDay] = await pool.query(
     `SELECT work_date, reason, created_by_name, created_at FROM equipment_inspect_overrides
@@ -171,6 +181,16 @@ export async function buildLaporanData(monthIn, unitId = null) {
     if (r.done_by || r.created_by) d.petugas.add(r.done_by || r.created_by);
     d.items.push({ jam: r.done_at ? jam(r.done_at) : '-', peralatan: r.dev || '-', kegiatan: `Maintenance/Pemeliharaan: ${r.task}`, hasil: r.status === 'selesai' ? 'Selesai' : r.status === 'batal' ? 'Batal' : 'Rencana' });
   }
+  for (const r of mwDay) {
+    const ev = r.done_at && r.done_at >= start && r.done_at < end ? r.done_at : r.starts_at;
+    const d = ensureDay(ev);
+    if (r.done_by || r.created_by) d.petugas.add(r.done_by || r.created_by);
+    d.items.push({
+      jam: jam(ev), peralatan: r.dev || '-',
+      kegiatan: `Pemeliharaan terjadwal (jendela maintenance): ${r.title}`,
+      hasil: r.status === 'selesai' ? (r.done_note || 'Selesai') : 'Terjadwal',
+    });
+  }
   for (const r of ovrDay) {
     const d = ensureDay(r.work_date);
     if (r.created_by_name) d.petugas.add(r.created_by_name);
@@ -192,8 +212,17 @@ export async function buildLaporanData(monthIn, unitId = null) {
     `SELECT n.created_at d, n.doc_url url, n.note, i.device_name dev FROM incident_notes n JOIN incidents i ON i.id=n.incident_id WHERE n.doc_url IS NOT NULL AND n.created_at>=? AND n.created_at<?${ufI.clause} ORDER BY n.created_at`,
     [start, end, ...ufI.params]
   );
+  // Foto dokumentasi Jendela Maintenance (bukti pekerjaan pemeliharaan yang dinilai di komponen PM).
+  const [docMw] = await pool.query(
+    `SELECT p.url, p.created_at d, mw.title, dv.name dev, u.name oleh
+       FROM maintenance_window_photos p JOIN maintenance_windows mw ON mw.id=p.window_id
+       LEFT JOIN devices dv ON dv.id=mw.device_id LEFT JOIN users u ON u.id=p.uploaded_by
+      WHERE p.created_at>=? AND p.created_at<?${ufMw.clause} ORDER BY p.created_at`,
+    [start, end, ...ufMw.params]
+  );
   const dokumentasiAll = [
     ...docNote.map((r) => ({ url: r.url, tanggal: dmy(r.d), jenis: 'Tindakan/Perbaikan', peralatan: r.dev, ket: (r.note || '').slice(0, 80), oleh: '' })),
+    ...docMw.map((r) => ({ url: r.url, tanggal: dmy(r.d), jenis: 'Pemeliharaan', peralatan: r.dev || '-', ket: (r.title || '').slice(0, 80), oleh: r.oleh || '' })),
     ...docInsp.map((r) => ({ url: r.url, tanggal: dmy(r.d), jenis: `Inspeksi ${r.slot}:00`, peralatan: r.dev || 'Peralatan', ket: '', oleh: r.oleh || '' })),
   ];
   const dokumentasi = dokumentasiAll.slice(0, DOC_LIMIT);
