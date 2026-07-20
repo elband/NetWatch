@@ -37,6 +37,7 @@ export default function SkpPage() {
   const [indModal, setIndModal] = useState<{ rhkId: number; ind?: SkpIndikator } | null>(null);
   const [realModal, setRealModal] = useState<{ ind: SkpIndikator } | null>(null);
   const [buktiModal, setBuktiModal] = useState<{ indId: number; bukti?: SkpBukti } | null>(null);
+  const [salin, setSalin] = useState(false);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -159,6 +160,7 @@ export default function SkpPage() {
           </select>
         </div>
         <div className="flex items-center gap-2 flex-wrap ml-auto">
+          {!ro && <button onClick={() => setSalin(true)} title="Salin realisasi bulan sebelumnya ke bulan ini" className="border border-accent2/40 text-accent2 rounded-md px-3 py-1 text-[11px] hover:bg-accent2/10">📄 Salin Bulan Lalu</button>}
           {d.public_token && (
             <>
               <a href={skpPublicUrl(d.public_token, bulan)} target="_blank" rel="noreferrer" className="bg-accent/15 text-accent border border-accent/40 rounded-md px-3 py-1 text-[11px] font-semibold">🌐 Halaman Publik</a>
@@ -292,6 +294,7 @@ export default function SkpPage() {
       {indModal && <IndikatorModal rhkId={indModal.rhkId} bulan={bulan} ind={indModal.ind} onClose={() => setIndModal(null)} onSaved={(skp) => { setIndModal(null); refreshDetail(skp); }} />}
       {realModal && <RealisasiModal indId={realModal.ind.id} bulan={bulan} realisasi={realModal.ind.realisasi} onClose={() => setRealModal(null)} onSaved={(skp) => { setRealModal(null); refreshDetail(skp); }} />}
       {buktiModal && <BuktiModal indId={buktiModal.indId} bulan={bulan} bukti={buktiModal.bukti} dataSources={dataSources} onClose={() => setBuktiModal(null)} onSaved={(skp) => { setBuktiModal(null); refreshDetail(skp); }} />}
+      {salin && <SalinRealisasiModal skpId={d.id} bulan={bulan} months={d.months || []} tahun={d.tahun} onClose={() => setSalin(false)} onSaved={(skp) => { setSalin(false); refreshDetail(skp); }} />}
     </div>
   );
 }
@@ -479,6 +482,54 @@ function RealisasiModal({ indId, bulan, realisasi, onClose, onSaved }: { indId: 
       <Label>Realisasi</Label>
       <textarea className={field} rows={5} value={r} onChange={(e) => setR(e.target.value)} placeholder="Apa yang dikerjakan/dicapai pada bulan ini…" />
       <div className="text-[10px] text-text2 mt-2">ℹ️ Feedback penilai diberikan di situs resmi e-Kinerja Kementerian, bukan di sini.</div>
+      <SaveBar saving={saving} error={error} onSave={save} onClose={onClose} />
+    </Modal>
+  );
+}
+
+// ---------- Salin realisasi dari bulan lain ----------
+// Rencana aksi (renaksi) & indikator bersifat tahunan sehingga otomatis terpakai tiap
+// bulan; yang disalin di sini hanya isian realisasi per indikator.
+function SalinRealisasiModal({ skpId, bulan, months, tahun, onClose, onSaved }: { skpId: number; bulan: string; months: string[]; tahun: number; onClose: () => void; onSaved: (s: Skp) => void }) {
+  const prev = (() => { const [y, m] = bulan.split('-').map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
+  // Pilihan bulan sumber: bulan yang sudah berdata + bulan sebelumnya, selain bulan aktif.
+  const opts = [...new Set([prev, ...months, ...monthsOfYear(tahun)])].filter((m) => m !== bulan).sort().reverse();
+  const [dari, setDari] = useState(opts.includes(prev) ? prev : (opts[0] || ''));
+  const [overwrite, setOverwrite] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save() {
+    if (!dari) { setError('Pilih bulan sumber.'); return; }
+    setSaving(true); setError('');
+    try {
+      const r = await api.post(`/skp/${skpId}/salin-realisasi`, { dari, bulan, overwrite });
+      const { disalin, dilewati } = r.data;
+      await alertDialog({
+        variant: disalin ? 'success' : 'info',
+        title: 'Salin realisasi',
+        message: `${disalin} realisasi disalin dari ${monthLabel(dari)} ke ${monthLabel(bulan)}.${dilewati ? ` ${dilewati} indikator dilewati karena sudah terisi.` : ''}`,
+      });
+      onSaved(r.data.skp);
+    } catch (e) { setError(errMsg(e)); setSaving(false); }
+  }
+
+  return (
+    <Modal title="📄 Salin Realisasi dari Bulan Lain" onClose={onClose}>
+      <div className="text-[11px] text-text2 mb-3">
+        Isian <b>realisasi</b> tiap indikator disalin ke <b>{monthLabel(bulan)}</b> supaya tinggal disunting seperlunya.
+        Rencana aksi (renaksi), indikator, dan target bersifat tahunan sehingga sudah otomatis terpakai tiap bulan.
+        Bukti dukung <i>tidak</i> ikut disalin karena melekat pada periodenya masing-masing.
+      </div>
+      <Label req>Bulan sumber</Label>
+      <select className={field} value={dari} onChange={(e) => setDari(e.target.value)}>
+        {opts.map((m) => <option key={m} value={m}>{monthLabel(m)}{months.includes(m) ? ' ●' : ''}</option>)}
+      </select>
+      <label className="flex items-center gap-2 text-[11px] text-text2 mt-3">
+        <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} className="accent-accent" />
+        Timpa realisasi yang sudah terisi di {monthLabel(bulan)}
+      </label>
+      <div className="text-[10px] text-text2 mt-1">Tanpa dicentang, indikator yang realisasinya sudah diisi bulan ini dilewati.</div>
       <SaveBar saving={saving} error={error} onSave={save} onClose={onClose} />
     </Modal>
   );

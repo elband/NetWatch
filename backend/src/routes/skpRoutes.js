@@ -385,6 +385,41 @@ router.put('/indikator/:indId/realisasi', async (req, res) => {
   await reply(res, req, skp, bulan);
 });
 
+// ===== Salin realisasi dari bulan lain =====
+// Rencana aksi (renaksi) & indikator bersifat TAHUNAN sehingga otomatis terbawa tiap
+// bulan; yang perlu disalin hanya isian realisasi per indikator. Baris yang sudah terisi
+// di bulan tujuan dilewati kecuali overwrite=true.
+router.post('/:id/salin-realisasi', async (req, res) => {
+  const { skp, error } = await getOwned(req.params.id, req.user, req.unitId);
+  if (error) return res.status(error).json({ error: error === 404 ? 'SKP tidak ditemukan' : 'Tidak punya akses.' });
+  const dari = isMonth(req.body.dari) ? req.body.dari : null;
+  const ke = pickBulan(req);
+  if (!dari) return res.status(400).json({ error: 'Bulan sumber tidak valid.' });
+  if (dari === ke) return res.status(400).json({ error: 'Bulan sumber dan tujuan sama.' });
+  const overwrite = !!req.body.overwrite;
+
+  const [src] = await pool.query(
+    'SELECT r.indikator_id, r.realisasi, r.feedback FROM skp_realisasi r JOIN skp_indikator i ON i.id=r.indikator_id WHERE r.skp_id=? AND r.bulan=?',
+    [skp.id, dari]
+  );
+  const [tgt] = await pool.query('SELECT indikator_id, realisasi FROM skp_realisasi WHERE skp_id=? AND bulan=?', [skp.id, ke]);
+  const terisi = new Set(tgt.filter((t) => String(t.realisasi || '').trim()).map((t) => t.indikator_id));
+
+  let disalin = 0, dilewati = 0;
+  for (const r of src) {
+    if (!String(r.realisasi || '').trim()) continue;
+    if (terisi.has(r.indikator_id) && !overwrite) { dilewati++; continue; }
+    await pool.query(
+      `INSERT INTO skp_realisasi (indikator_id, skp_id, bulan, realisasi, feedback) VALUES (?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE realisasi=VALUES(realisasi), feedback=VALUES(feedback)`,
+      [r.indikator_id, skp.id, ke, r.realisasi, r.feedback]
+    );
+    disalin++;
+  }
+  if (!disalin && !dilewati) return res.status(400).json({ error: `Tidak ada realisasi yang bisa disalin dari ${dari}.` });
+  res.json({ skp: { ...(await fetchFull(skp, ke)), can_edit: canEditSkp(skp, req.user) }, disalin, dilewati });
+});
+
 // ===== Bukti Dukung PER BULAN (tautan / berkas) =====
 router.post('/indikator/:indId/bukti', upload.single('file'), async (req, res) => {
   const { skp, error } = await ownedByChild('skp_indikator', req.params.indId, req.user, req.unitId);
