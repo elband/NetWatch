@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 
-interface Snapshot { source: string; sourceLabel: string; title: string; period: string | null; summary: { label: string; value: string | number }[]; columns: string[]; rows: (string | number)[][]; generatedAt: string }
+// rowPhotos sejajar dengan rows: daftar URL foto bukti tiap baris (null bila tak ada).
+interface Snapshot { source: string; sourceLabel: string; title: string; period: string | null; summary: { label: string; value: string | number }[]; columns: string[]; rows: (string | number)[][]; rowPhotos?: (string[] | null)[]; generatedAt: string }
 interface Bukti { id: number; deskripsi: string; kind: string; url: string | null; file_url: string | null; snapshot?: Snapshot | null; created_at?: string }
 interface Ind { aspek: string; indikator: string }
 interface SkpInfo { periode: string; tahun: number; pegawai_nama: string | null; pegawai_nip: string | null; pegawai_jabatan: string | null }
@@ -73,26 +74,36 @@ export default function SkpBuktiPublic() {
                     </div>
                   )}
 
-                  {snap.columns.length > 0 && (
-                    <div className="rounded-xl border border-white/10 overflow-hidden overflow-x-auto">
-                      <table className="w-full text-[11px] border-collapse">
-                        <thead>
-                          <tr className="bg-white/[.05] text-slate-300">
-                            {snap.columns.map((c, i) => <th key={i} className="text-left px-3 py-2 font-semibold whitespace-nowrap">{c}</th>)}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {snap.rows.length === 0 ? (
-                            <tr><td colSpan={snap.columns.length} className="px-3 py-4 text-center text-slate-500">Tidak ada data pada periode ini.</td></tr>
-                          ) : snap.rows.map((row, ri) => (
-                            <tr key={ri} className="border-t border-white/[.06] text-slate-200">
-                              {row.map((cell, ci) => <td key={ci} className="px-3 py-1.5 align-top">{cell}</td>)}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {snap.columns.length > 0 && (() => {
+                    // Kolom foto muncul hanya bila snapshot memuat bukti foto.
+                    const hasPhoto = (snap.rowPhotos || []).some((p) => p && p.length);
+                    const totalPhoto = (snap.rowPhotos || []).reduce((a, p) => a + (p?.length || 0), 0);
+                    return (
+                      <>
+                        <div className="rounded-xl border border-white/10 overflow-hidden overflow-x-auto">
+                          <table className="w-full text-[11px] border-collapse">
+                            <thead>
+                              <tr className="bg-white/[.05] text-slate-300">
+                                {snap.columns.map((c, i) => <th key={i} className="text-left px-3 py-2 font-semibold whitespace-nowrap">{c}</th>)}
+                                {hasPhoto && <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">Foto Bukti</th>}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {snap.rows.length === 0 ? (
+                                <tr><td colSpan={snap.columns.length + (hasPhoto ? 1 : 0)} className="px-3 py-4 text-center text-slate-500">Tidak ada data pada periode ini.</td></tr>
+                              ) : snap.rows.map((row, ri) => (
+                                <tr key={ri} className="border-t border-white/[.06] text-slate-200">
+                                  {row.map((cell, ci) => <td key={ci} className="px-3 py-1.5 align-top">{cell}</td>)}
+                                  {hasPhoto && <td className="px-3 py-1.5 align-top"><PhotoCell urls={snap.rowPhotos?.[ri] || null} /></td>}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {hasPhoto && <div className="mt-2 text-[10px] text-slate-400">📷 {totalPhoto} foto bukti terlampir — klik untuk membuka ukuran penuh.</div>}
+                      </>
+                    );
+                  })()}
                   <div className="mt-3 text-center text-[10px] text-slate-500">📸 Snapshot data dibekukan pada {fmtGen(snap.generatedAt)} · sumber: {snap.sourceLabel}</div>
                 </>
               ) : (
@@ -151,6 +162,23 @@ export default function SkpBuktiPublic() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Thumbnail foto bukti pada baris tabel snapshot; PDF ditampilkan sebagai tautan berkas.
+function PhotoCell({ urls }: { urls: string[] | null }) {
+  if (!urls || !urls.length) return <span className="text-slate-600">—</span>;
+  return (
+    <div className="flex gap-1 flex-wrap">
+      {urls.map((u, i) => (u.toLowerCase().endsWith('.pdf') ? (
+        <a key={i} href={u} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline text-[10px] whitespace-nowrap">📄 Berkas {i + 1}</a>
+      ) : (
+        <a key={i} href={u} target="_blank" rel="noreferrer" title="Buka foto ukuran penuh">
+          <img src={u} alt={`Foto bukti ${i + 1}`} loading="lazy"
+            className="w-10 h-10 object-cover rounded border border-white/15 hover:border-sky-400 transition" />
+        </a>
+      )))}
     </div>
   );
 }

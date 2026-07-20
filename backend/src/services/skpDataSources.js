@@ -4,7 +4,12 @@ import { pool } from '../db/pool.js';
 // Registry sumber data aplikasi NetWatch yang dapat dijadikan "Bukti Dukung" SKP.
 // Setiap bukti tipe 'data' membekukan (snapshot) hasil query saat dibuat.
 // Struktur snapshot seragam agar halaman publik bisa merendernya generik:
-//   { source, title, period, summary:[{label,value}], columns:[...], rows:[[...]], generatedAt }
+//   { source, title, period, summary:[{label,value}], columns:[...], rows:[[...]],
+//     rowPhotos:[[url,…]|null,…]  ← sejajar dgn rows; foto bukti tiap baris, generatedAt }
+// Catatan: hanya foto dari folder /uploads yang boleh diakses anonim yang disertakan
+// (inspections, maintenance, maintenance-windows, incidents). Folder pribadi seperti
+// /uploads/activities & /uploads/kegiatan digate login di app.js, jadi tidak dilampirkan
+// agar tidak tampil sebagai gambar rusak di halaman publik.
 // ============================================================================
 
 const BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -43,10 +48,19 @@ const SOURCE_LABEL = Object.fromEntries(DATA_SOURCES.map((s) => [s.key, s.label]
 const BUILDERS = {
   async perbaikan({ start, end, label }) {
     const [rows] = await pool.query(
-      `SELECT DATE_FORMAT(i.resolved_at,'%d-%m-%Y') tgl, i.device_name, i.issue,
+      `SELECT i.id, DATE_FORMAT(i.resolved_at,'%d-%m-%Y') tgl, i.device_name, i.issue,
               COALESCE(r.hasil,'') hasil, COALESCE(i.resolved_by,'-') teknisi, COALESCE(i.duration_min,0) dur
          FROM incidents i LEFT JOIN incident_reports r ON r.incident_id=i.id
         WHERE i.status='selesai' AND i.resolved_at>=? AND i.resolved_at<? ORDER BY i.resolved_at`, [start, end]);
+    // Foto/dokumen bukti penanganan dari kronologi insiden (incident_notes.doc_url).
+    const fotoMap = new Map();
+    if (rows.length) {
+      const ids = rows.map((r) => r.id);
+      const [ph] = await pool.query(
+        `SELECT incident_id, doc_url FROM incident_notes
+          WHERE doc_url IS NOT NULL AND incident_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`, ids);
+      for (const p of ph) fotoMap.set(p.incident_id, [...(fotoMap.get(p.incident_id) || []), p.doc_url]);
+    }
     const totalDur = rows.reduce((a, r) => a + Number(r.dur || 0), 0);
     const avg = rows.length ? Math.round(totalDur / rows.length) : 0;
     return {
@@ -57,6 +71,7 @@ const BUILDERS = {
       ],
       columns: ['Tanggal', 'Perangkat', 'Masalah', 'Hasil', 'Teknisi'],
       rows: rows.map((r) => [r.tgl, r.device_name, r.issue, HASIL_LABEL[r.hasil] || '-', r.teknisi]),
+      rowPhotos: rows.map((r) => fotoMap.get(r.id) || null),
     };
   },
 
@@ -65,14 +80,14 @@ const BUILDERS = {
   // digabung — selaras dengan komponen PM pada penilaian & Logbook Peralatan.
   async maintenance({ bulan, start, end, label }) {
     const [bulanan] = await pool.query(
-      `SELECT m.scheduled_date tgl, d.name perangkat, m.task, m.status,
+      `SELECT m.id, m.scheduled_date tgl, d.name perangkat, m.task, m.status,
               COALESCE(u.name,'-') oleh,
               (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id=m.id) foto
          FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id
          LEFT JOIN users u ON u.id=m.done_by
         WHERE m.plan_month=?`, [bulan]);
     const [jendela] = await pool.query(
-      `SELECT mw.starts_at tgl, COALESCE(d.name, l.name, '-') perangkat, mw.title task,
+      `SELECT mw.id, mw.starts_at tgl, COALESCE(d.name, l.name, '-') perangkat, mw.title task,
               CASE WHEN mw.status='selesai' THEN 'selesai' ELSE 'rencana' END status,
               COALESCE(u.name,'-') oleh,
               (SELECT COUNT(*) FROM maintenance_window_photos p WHERE p.window_id=mw.id) foto
@@ -81,9 +96,23 @@ const BUILDERS = {
          LEFT JOIN locations l ON l.id=mw.location_id
          LEFT JOIN users u ON u.id=mw.done_by
         WHERE mw.starts_at>=? AND mw.starts_at<?`, [start, end]);
+    // Foto dokumentasi tiap pekerjaan (dua tabel foto terpisah) → dilampirkan per baris.
+    const fotoOf = async (sql, ids) => {
+      const map = new Map();
+      if (!ids.length) return map;
+      const [ph] = await pool.query(sql.replace('__IN__', ids.map(() => '?').join(',')), ids);
+      for (const p of ph) map.set(p.ref, [...(map.get(p.ref) || []), p.url]);
+      return map;
+    };
+    const fotoBulanan = await fotoOf(
+      'SELECT maintenance_id ref, url FROM equipment_maintenance_photos WHERE maintenance_id IN (__IN__) ORDER BY id',
+      bulanan.map((r) => r.id));
+    const fotoJendela = await fotoOf(
+      'SELECT window_id ref, url FROM maintenance_window_photos WHERE window_id IN (__IN__) ORDER BY id',
+      jendela.map((r) => r.id));
     const rows = [
-      ...bulanan.map((r) => ({ ...r, jenis: 'Maintenance Bulanan' })),
-      ...jendela.map((r) => ({ ...r, jenis: 'Jendela Maintenance' })),
+      ...bulanan.map((r) => ({ ...r, jenis: 'Maintenance Bulanan', fotos: fotoBulanan.get(r.id) || null })),
+      ...jendela.map((r) => ({ ...r, jenis: 'Jendela Maintenance', fotos: fotoJendela.get(r.id) || null })),
     ].sort((a, b) => String(a.tgl).localeCompare(String(b.tgl)));
     const selesai = rows.filter((r) => r.status === 'selesai').length;
     const foto = rows.reduce((a, r) => a + Number(r.foto || 0), 0);
@@ -96,15 +125,16 @@ const BUILDERS = {
         { label: 'Jendela Maintenance', value: jendela.length },
         { label: 'Dokumentasi Foto', value: foto },
       ],
-      columns: ['Tgl Jadwal', 'Jenis', 'Perangkat/Lokasi', 'Tugas', 'Status', 'Dikerjakan Oleh', 'Foto'],
-      rows: rows.map((r) => [tgl(r.tgl), r.jenis, r.perangkat, r.task, MAINT_STATUS[r.status] || r.status, r.oleh, String(r.foto)]),
+      columns: ['Tgl Jadwal', 'Jenis', 'Perangkat/Lokasi', 'Tugas', 'Status', 'Dikerjakan Oleh'],
+      rows: rows.map((r) => [tgl(r.tgl), r.jenis, r.perangkat, r.task, MAINT_STATUS[r.status] || r.status, r.oleh]),
+      rowPhotos: rows.map((r) => r.fotos),
     };
   },
 
   async inspeksi({ start, end, label }) {
     const [rows] = await pool.query(
       `SELECT DATE_FORMAT(ei.inspect_date,'%d-%m-%Y') tgl, d.name perangkat, ei.slot, ei.status,
-              COALESCE(ei.note,'-') catatan, COALESCE(ei.inspector_name,'-') pemeriksa
+              COALESCE(ei.note,'-') catatan, COALESCE(ei.inspector_name,'-') pemeriksa, ei.photo_url
          FROM equipment_inspections ei JOIN devices d ON d.id=ei.device_id
         WHERE ei.inspect_date>=? AND ei.inspect_date<? ORDER BY ei.inspect_date, ei.slot`, [start, end]);
     const cnt = (s) => rows.filter((r) => r.status === s).length;
@@ -115,9 +145,11 @@ const BUILDERS = {
         { label: 'Baik', value: cnt('baik') },
         { label: 'Perhatian', value: cnt('perhatian') },
         { label: 'Rusak', value: cnt('rusak') },
+        { label: 'Foto Bukti', value: rows.filter((r) => r.photo_url).length },
       ],
       columns: ['Tanggal', 'Perangkat', 'Slot', 'Kondisi', 'Catatan', 'Pemeriksa'],
       rows: rows.map((r) => [r.tgl, r.perangkat, `${r.slot}.00`, r.status, r.catatan, r.pemeriksa]),
+      rowPhotos: rows.map((r) => (r.photo_url ? [r.photo_url] : null)),
     };
   },
 
@@ -273,6 +305,14 @@ export async function buildSnapshot(source, params = {}) {
     ctx = { ...r, bulan: params.bulan };
   }
   const out = await builder(ctx);
+  // Foto bukti per baris — hanya berkas dari folder /uploads yang publik (lihat catatan
+  // di kepala berkas). Baris tanpa foto bernilai null; rowPhotos dihilangkan bila kosong.
+  const PUBLIC_DIRS = ['/uploads/inspections/', '/uploads/maintenance/', '/uploads/maintenance-windows/', '/uploads/incidents/', '/uploads/reports/'];
+  const rowPhotos = (out.rowPhotos || []).map((list) => {
+    const ok = (list || []).filter((u) => typeof u === 'string' && PUBLIC_DIRS.some((d) => u.startsWith(d)));
+    return ok.length ? ok : null;
+  });
+  const anyPhoto = rowPhotos.some(Boolean);
   return {
     source,
     sourceLabel: SOURCE_LABEL[source] || source,
@@ -281,6 +321,7 @@ export async function buildSnapshot(source, params = {}) {
     summary: out.summary || [],
     columns: out.columns || [],
     rows: out.rows || [],
+    ...(anyPhoto ? { rowPhotos } : {}),
     generatedAt: new Date().toISOString(),
   };
 }
