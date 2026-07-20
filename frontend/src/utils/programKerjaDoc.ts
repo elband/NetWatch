@@ -337,3 +337,128 @@ function buildKpiPage(d: PkData): string {
     <table class="data"><thead><tr><th style="width:26px">No</th><th>Indikator (KPI)</th><th>Target</th><th>Realisasi</th><th>Arah</th><th>Capaian</th></tr></thead><tbody>${rows}</tbody></table>
   </div>`;
 }
+
+// ===================== LAPORAN AKHIR SATU PROGRAM =====================
+// Dokumen ringkas untuk dicetak & diarsipkan: identitas program, kronologi pelaksanaan,
+// monitoring (kendala & tindak lanjut), evaluasi (target vs hasil), dan bukti dukung.
+export interface LaporanProgramData {
+  plan: UnitPlan;
+  logs: { tanggal: string; catatan: string; progres: number | null; creator_name: string | null }[];
+  files: { jenis: string; url: string; filename: string | null; keterangan: string | null; created_at: string }[];
+  lkp: PkLkp;
+}
+
+const TAHAP_LABEL: Record<string, string> = {
+  pelaksanaan: 'Pelaksanaan', monitoring: 'Monitoring', evaluasi: 'Evaluasi',
+  penyelesaian: 'Penyelesaian', arsip: 'Arsip',
+};
+const NILAI_LABEL: Record<string, string> = {
+  berhasil: 'Berhasil (target tercapai)', sebagian: 'Tercapai sebagian', tidak_tercapai: 'Tidak tercapai',
+};
+const dmyLap = (v?: string | null) => (v ? new Date(String(v).replace(' ', 'T')).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '-');
+const rpLap = (n: unknown) => 'Rp ' + new Intl.NumberFormat('id-ID').format(Math.round(Number(n) || 0));
+
+export function buildLaporanProgramHtml(d: LaporanProgramData, origin: string): string {
+  const p = d.plan;
+  const lkp = d.lkp;
+  const kopUrl = lkp.kop_url ? (lkp.kop_url.startsWith('http') ? lkp.kop_url : origin + lkp.kop_url) : '';
+  const kop = kopUrl ? `<img class="kopimg" src="${esc(kopUrl)}" alt="Kop">` : '';
+  const row = (k: string, v: unknown) => `<tr><td class="k">${esc(k)}</td><td>:</td><td>${esc(v ?? '-') || '-'}</td></tr>`;
+  const nl = (t: unknown) => esc(t ?? '').replace(/\n/g, '<br>');
+  const blok = (judul: string, isi: string) => `<div class="small" style="margin:6px 0 3px"><b>${esc(judul)}</b></div><div class="box">${isi || '<i>Belum diisi</i>'}</div>`;
+
+  const logRows = d.logs.length
+    ? d.logs.slice().reverse().map((l, i) => `<tr><td class="c">${i + 1}</td><td class="c">${esc(dmyLap(l.tanggal))}</td><td>${nl(l.catatan)}</td><td class="c">${l.progres != null ? l.progres + '%' : '-'}</td><td>${esc(l.creator_name || '-')}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="c"><i>Belum ada catatan aktivitas.</i></td></tr>';
+
+  const fileRows = (jenisList: string[]) => {
+    const list = d.files.filter((f) => jenisList.includes(f.jenis));
+    if (!list.length) return '<tr><td colspan="3" class="c"><i>Tidak ada berkas.</i></td></tr>';
+    return list.map((f, i) => `<tr><td class="c">${i + 1}</td><td>${esc(f.filename || f.url.split('/').pop())}${f.keterangan ? `<div class="small">${esc(f.keterangan)}</div>` : ''}</td><td class="c">${esc(dmyLap(f.created_at))}</td></tr>`).join('');
+  };
+  // Galeri foto agar laporan cetak memuat bukti dokumentasinya (maks. 12 foto).
+  const fotos = d.files.filter((f) => /\.(jpe?g|png|webp|gif)$/i.test(f.url)).slice(0, 12);
+  const galeri = fotos.length
+    ? `<div class="galeri">${fotos.map((f) => `<div class="gitem"><img src="${esc(origin + f.url)}"><div class="gcap">${esc(f.keterangan || f.filename || '')}</div></div>`).join('')}</div>`
+    : '<div class="small"><i>Tidak ada foto dokumentasi.</i></div>';
+
+  const tglCetak = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  const periode = Number(p.kuartal) ? `Triwulan ${['I', 'II', 'III', 'IV'][Number(p.kuartal) - 1]}` : 'Tahunan';
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Laporan Program — ${esc(p.judul)}</title>
+  <style>*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}
+  body{font-family:'Times New Roman',serif;color:#111;background:#fff;font-size:11.5px;line-height:1.45;margin:0}
+  .page{width:190mm;margin:0 auto;padding:14mm 12mm;background:#fff}
+  @media screen{.page{box-shadow:0 1px 8px rgba(0,0,0,.25);margin-bottom:8px}}
+  .kopimg{display:block;width:100%;margin-bottom:6px}
+  h1{text-align:center;font-size:15px;margin:6px 0 2px;text-transform:uppercase;text-decoration:underline}
+  .subjudul{text-align:center;font-size:11px;margin-bottom:10px}
+  .sec{font-weight:bold;font-size:12px;margin:12px 0 4px;border-bottom:2px solid #1d4ed8;color:#0f3d91;padding-bottom:2px;text-transform:uppercase}
+  table.id{width:100%;border-collapse:collapse}table.id td{padding:1px 4px;vertical-align:top}table.id td.k{width:150px}
+  table.data{width:100%;border-collapse:collapse;font-size:10.5px}
+  table.data th,table.data td{border:1px solid #99a;padding:3px 5px;text-align:left;vertical-align:top}
+  table.data th{background:#dbeafe;color:#0f3d91;text-align:center}
+  table.data td.c{text-align:center}
+  .box{border:1px solid #99a;padding:6px 8px;min-height:26px}
+  .small{font-size:9.5px;color:#555}
+  .galeri{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .gitem{border:1px solid #99a;overflow:hidden;break-inside:avoid}
+  .gitem img{width:100%;height:110px;object-fit:cover;display:block}
+  .gcap{font-size:8.5px;padding:2px 4px}
+  .ttdlap{width:100%;margin-top:24px;font-size:11px}.ttdlap td{width:50%;text-align:center;vertical-align:top}
+  .ttdlap .sp{height:52px}.ttdlap .nm{font-weight:bold;text-decoration:underline}
+  @media print{.page{box-shadow:none;margin:0}}</style></head><body>
+  <div class="page">
+    ${kop}
+    <h1>Laporan Pelaksanaan Program Kerja</h1>
+    <div class="subjudul">${esc(lkp.unit)} · ${esc(lkp.kantor)}</div>
+
+    <div class="sec">I. Identitas Program</div>
+    <table class="id">
+      ${row('Nama Program', p.judul)}
+      ${row('Kategori', p.kategori)}
+      ${row('Tahun / Periode', `${p.tahun} · ${periode}`)}
+      ${row('Tujuan', p.tujuan)}
+      ${row('Keluaran / Output', `${p.keluaran || '-'}${p.volume ? ` (${p.volume})` : ''}`)}
+      ${row('Indikator Keberhasilan', p.indikator)}
+      ${row('Jadwal', `${p.start_date ? dmyLap(p.start_date) : '-'} s.d. ${p.target_date ? dmyLap(p.target_date) : '-'}`)}
+      ${row('Penanggung Jawab', p.pic_nama)}
+      ${row('Sumber Dana / Metode', `${p.sumber_dana || '-'}${p.metode ? ` · ${p.metode}` : ''}`)}
+      ${row('Anggaran', `${rpLap(p.estimasi_biaya)}${p.realisasi_biaya != null ? ` · realisasi ${rpLap(p.realisasi_biaya)}` : ''}`)}
+      ${row('Tahap / Status', `${TAHAP_LABEL[p.tahap] || p.tahap} · ${p.status} · progres ${p.progres}%`)}
+    </table>
+
+    <div class="sec">II. Pelaksanaan — Catatan Aktivitas</div>
+    <table class="data"><thead><tr><th style="width:24px">No</th><th style="width:92px">Tanggal</th><th>Aktivitas / Progres</th><th style="width:52px">Progres</th><th style="width:110px">Dicatat Oleh</th></tr></thead>
+      <tbody>${logRows}</tbody></table>
+
+    <div class="sec">III. Monitoring</div>
+    <table class="id">${row('Persentase Progres', `${p.progres}%`)}</table>
+    ${blok('Kendala yang Dihadapi', nl(p.kendala))}
+    ${blok('Solusi / Tindak Lanjut', nl(p.tindak_lanjut))}
+
+    <div class="sec">IV. Evaluasi</div>
+    <table class="data"><thead><tr><th style="width:50%">Target / Indikator</th><th>Hasil yang Dicapai</th></tr></thead>
+      <tbody><tr><td>${nl(p.indikator || p.keluaran)}</td><td>${nl(p.hasil)}</td></tr></tbody></table>
+    <table class="id" style="margin-top:4px">${row('Penilaian Keberhasilan', NILAI_LABEL[p.nilai_keberhasilan || ''] || '-')}</table>
+    ${blok('Catatan Evaluasi', nl(p.evaluasi_catatan))}
+
+    <div class="sec">V. Penyelesaian &amp; Bukti Dukung</div>
+    <div class="small" style="margin-bottom:3px"><b>Laporan Akhir</b></div>
+    <table class="data"><thead><tr><th style="width:24px">No</th><th>Berkas</th><th style="width:110px">Diunggah</th></tr></thead><tbody>${fileRows(['laporan'])}</tbody></table>
+    <div class="small" style="margin:6px 0 3px"><b>Bukti / Dokumentasi</b></div>
+    <table class="data"><thead><tr><th style="width:24px">No</th><th>Berkas</th><th style="width:110px">Diunggah</th></tr></thead><tbody>${fileRows(['bukti', 'dokumentasi'])}</tbody></table>
+    <div class="small" style="margin:8px 0 3px"><b>Dokumentasi Foto</b></div>
+    ${galeri}
+    <table class="id" style="margin-top:8px">
+      ${row('Tanggal Selesai', p.selesai_at ? dmyLap(p.selesai_at) : '-')}
+      ${row('Tanggal Arsip', p.arsip_at ? dmyLap(p.arsip_at) : '-')}
+    </table>
+
+    <table class="ttdlap"><tr>
+      <td>Mengetahui,<br>${esc(lkp.kepala_jabatan)}<div class="sp"></div><div class="nm">${esc(lkp.kepala_nama)}</div>NIP. ${esc(lkp.kepala_nip)}</td>
+      <td>${esc(lkp.kota)}, ${esc(tglCetak)}<br>${esc(lkp.koord_jabatan)}<div class="sp"></div><div class="nm">${esc(lkp.koord_nama)}</div>NIP. ${esc(lkp.koord_nip)}</td>
+    </tr></table>
+  </div>
+  </body></html>`;
+}

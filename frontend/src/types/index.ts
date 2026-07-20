@@ -720,6 +720,21 @@ export interface Activity {
   created_at: string;
 }
 
+export type UnitPlanTahap = 'pelaksanaan' | 'monitoring' | 'evaluasi' | 'penyelesaian' | 'arsip';
+
+// Catatan aktivitas/progres pelaksanaan program.
+export interface UnitPlanLog {
+  id: number; plan_id: number; tanggal: string; catatan: string; progres: number | null;
+  created_by: number | null; creator_name: string | null; created_at: string;
+}
+// Berkas program: dokumentasi pelaksanaan, laporan akhir, bukti penyelesaian.
+export interface UnitPlanFile {
+  id: number; plan_id: number; log_id: number | null; jenis: 'dokumentasi' | 'laporan' | 'bukti';
+  url: string; filename: string | null; keterangan: string | null;
+  uploaded_by: number | null; uploader_name: string | null; created_at: string;
+}
+export interface UnitPlanDetail { plan: UnitPlan; logs: UnitPlanLog[]; files: UnitPlanFile[] }
+
 export interface UnitPlan {
   id: number;
   unit_id: number | null;
@@ -734,6 +749,15 @@ export interface UnitPlan {
   indikator: string | null;
   prioritas: 'tinggi' | 'sedang' | 'rendah';
   status: 'rencana' | 'berjalan' | 'selesai' | 'tertunda' | 'batal';
+  // Siklus program: pelaksanaan → monitoring → evaluasi → penyelesaian → arsip.
+  tahap: UnitPlanTahap;
+  kendala: string | null;
+  tindak_lanjut: string | null;
+  hasil: string | null;
+  evaluasi_catatan: string | null;
+  nilai_keberhasilan: 'berhasil' | 'sebagian' | 'tidak_tercapai' | null;
+  selesai_at: string | null;
+  arsip_at: string | null;
   progres: number;
   estimasi_biaya: number;
   realisasi_biaya: number | null;

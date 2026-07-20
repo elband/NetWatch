@@ -1,5 +1,10 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
+import { randName } from '../middleware/upload.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { unitScope, unitFilter, rowInUnit, insertUnitId } from '../middleware/unitScope.js';
 
@@ -13,6 +18,38 @@ router.use(requireRole('admin', 'koordinator'));
 const KATEGORI = ['pemeliharaan', 'pengadaan', 'sdm', 'pengembangan', 'administrasi', 'lainnya'];
 const PRIORITAS = ['tinggi', 'sedang', 'rendah'];
 const STATUS = ['rencana', 'berjalan', 'selesai', 'tertunda', 'batal'];
+// Siklus program: begitu dimasukkan, program DIANGGAP DISETUJUI dan langsung berjalan
+// pada tahap Pelaksanaan. Tidak ada lagi tahap pengajuan/persetujuan.
+const TAHAP = ['pelaksanaan', 'monitoring', 'evaluasi', 'penyelesaian', 'arsip'];
+const NILAI = ['berhasil', 'sebagian', 'tidak_tercapai'];
+const JENIS_FILE = ['dokumentasi', 'laporan', 'bukti'];
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLAN_DIR = path.join(__dirname, '..', '..', 'uploads', 'perencanaan');
+fs.mkdirSync(PLAN_DIR, { recursive: true });
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (q, f, cb) => cb(null, PLAN_DIR),
+    filename: (q, f, cb) => cb(null, randName('P', f.originalname)),
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+// Ambil program + pastikan berada di unit efektif requester.
+async function getPlan(id, unitId) {
+  const [rows] = await pool.query('SELECT * FROM unit_plans WHERE id=?', [Number(id)]);
+  const p = rows[0];
+  if (!p || !rowInUnit(p, unitId)) return null;
+  return p;
+}
+async function planWithDetail(id) {
+  const [[plan]] = await pool.query('SELECT * FROM unit_plans WHERE id=?', [Number(id)]);
+  const [logs] = await pool.query('SELECT * FROM unit_plan_logs WHERE plan_id=? ORDER BY tanggal DESC, id DESC', [Number(id)]);
+  const [files] = await pool.query('SELECT * FROM unit_plan_files WHERE plan_id=? ORDER BY id', [Number(id)]);
+  return { plan, logs, files };
+}
+// Naikkan tahap hanya bila maju (tidak pernah memundurkan tahap secara otomatis).
+const majuTahap = (kini, target) => (TAHAP.indexOf(target) > TAHAP.indexOf(kini) ? target : kini);
 const clamp = (v, a, b) => Math.min(Math.max(a, Number.isFinite(v) ? v : a), b);
 const rupiah = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
 const numOrNull = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -20,7 +57,8 @@ const numOrNull = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ?
 // Susun nilai kolom dari body request. `prev` = baris lama (dipakai saat update
 // agar field yang tidak dikirim tetap memakai nilai sebelumnya).
 function fields(b, prev = {}) {
-  const status = STATUS.includes(b.status) ? b.status : (prev.status || 'rencana');
+  // Default status program baru = 'berjalan' (dianggap disetujui saat dimasukkan).
+  const status = STATUS.includes(b.status) ? b.status : (prev.status || 'berjalan');
   let progres = b.progres != null && b.progres !== '' ? clamp(Number(b.progres), 0, 100) : (prev.progres ?? 0);
   if (status === 'selesai' && (b.progres == null || b.progres === '')) progres = 100; // selesai → 100%
   const raw = b.realisasi_biaya;
@@ -68,6 +106,9 @@ router.get('/', async (req, res) => {
   if (STATUS.includes(req.query.status)) { sql += ' AND status=?'; params.push(req.query.status); }
   if (PRIORITAS.includes(req.query.prioritas)) { sql += ' AND prioritas=?'; params.push(req.query.prioritas); }
   if (['0', '1', '2', '3', '4'].includes(String(req.query.kuartal))) { sql += ' AND kuartal=?'; params.push(Number(req.query.kuartal)); }
+  if (TAHAP.includes(req.query.tahap)) { sql += ' AND tahap=?'; params.push(req.query.tahap); }
+  // Program terarsip disembunyikan dari daftar aktif kecuali diminta (?arsip=1 / ?tahap=arsip).
+  else if (req.query.arsip !== '1') sql += " AND tahap<>'arsip'";
   if (req.query.q) { const k = `%${req.query.q}%`; sql += ' AND (judul LIKE ? OR deskripsi LIKE ? OR pic_nama LIKE ?)'; params.push(k, k, k); }
   sql += ' ORDER BY kuartal, FIELD(prioritas,"tinggi","sedang","rendah"), FIELD(status,"berjalan","rencana","tertunda","selesai","batal"), id DESC';
   const [rows] = await pool.query(sql, params);
@@ -249,6 +290,139 @@ router.get('/program-kerja-data', async (req, res) => {
     });
 
   res.json({ personil, equipment, maintenance });
+});
+
+// ===================== SIKLUS PROGRAM =====================
+// Pelaksanaan → Monitoring → Evaluasi → Penyelesaian → Arsip.
+// Diletakkan setelah rute spesifik (/peremajaan, /kpi, …) agar '/:id' tidak menangkapnya.
+
+// Detail satu program + kronologi aktivitas + berkas.
+router.get('/:id', async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  res.json(await planWithDetail(p.id));
+});
+
+// --- Pelaksanaan: catat aktivitas/progres (+ unggah dokumentasi sekaligus) ---
+router.post('/:id/log', upload.array('files', 10), async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  if (p.tahap === 'arsip') return res.status(400).json({ error: 'Program sudah diarsipkan.' });
+  const catatan = String(req.body.catatan || '').trim();
+  if (!catatan) return res.status(400).json({ error: 'Catatan aktivitas wajib diisi.' });
+  const tanggal = /^\d{4}-\d{2}-\d{2}$/.test(req.body.tanggal || '') ? req.body.tanggal : new Date().toISOString().slice(0, 10);
+  const progres = req.body.progres != null && req.body.progres !== '' ? clamp(Number(req.body.progres), 0, 100) : null;
+
+  const [r] = await pool.query(
+    'INSERT INTO unit_plan_logs (plan_id, tanggal, catatan, progres, created_by, creator_name) VALUES (?,?,?,?,?,?)',
+    [p.id, tanggal, catatan, progres, req.user.id, req.user.name]
+  );
+  for (const f of req.files || []) {
+    await pool.query(
+      'INSERT INTO unit_plan_files (plan_id, log_id, jenis, url, filename, uploaded_by, uploader_name) VALUES (?,?,?,?,?,?,?)',
+      [p.id, r.insertId, 'dokumentasi', `/uploads/perencanaan/${f.filename}`, f.originalname?.slice(0, 200) || null, req.user.id, req.user.name]
+    );
+  }
+  // Progres terbaru ikut memperbarui program; status tetap berjalan selama belum selesai.
+  if (progres != null) {
+    await pool.query("UPDATE unit_plans SET progres=?, status=IF(status IN ('selesai','batal'), status, 'berjalan') WHERE id=?", [progres, p.id]);
+  }
+  res.status(201).json(await planWithDetail(p.id));
+});
+
+router.delete('/log/:logId', async (req, res) => {
+  const [[log]] = await pool.query('SELECT * FROM unit_plan_logs WHERE id=?', [Number(req.params.logId)]);
+  if (!log) return res.status(404).json({ error: 'Catatan tidak ditemukan' });
+  const p = await getPlan(log.plan_id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  const [files] = await pool.query('SELECT url FROM unit_plan_files WHERE log_id=?', [log.id]);
+  await pool.query('DELETE FROM unit_plan_files WHERE log_id=?', [log.id]);
+  await pool.query('DELETE FROM unit_plan_logs WHERE id=?', [log.id]);
+  for (const f of files) { try { fs.unlinkSync(path.join(PLAN_DIR, path.basename(f.url))); } catch { /* abaikan */ } }
+  res.json(await planWithDetail(p.id));
+});
+
+// --- Berkas lepas: dokumentasi / laporan akhir / bukti penyelesaian ---
+router.post('/:id/files', upload.array('files', 10), async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  const jenis = JENIS_FILE.includes(req.body.jenis) ? req.body.jenis : 'dokumentasi';
+  if (!(req.files || []).length) return res.status(400).json({ error: 'Tidak ada berkas yang diunggah.' });
+  const ket = String(req.body.keterangan || '').trim().slice(0, 255) || null;
+  for (const f of req.files) {
+    await pool.query(
+      'INSERT INTO unit_plan_files (plan_id, jenis, url, filename, keterangan, uploaded_by, uploader_name) VALUES (?,?,?,?,?,?,?)',
+      [p.id, jenis, `/uploads/perencanaan/${f.filename}`, f.originalname?.slice(0, 200) || null, ket, req.user.id, req.user.name]
+    );
+  }
+  res.status(201).json(await planWithDetail(p.id));
+});
+
+router.delete('/files/:fileId', async (req, res) => {
+  const [[file]] = await pool.query('SELECT * FROM unit_plan_files WHERE id=?', [Number(req.params.fileId)]);
+  if (!file) return res.status(404).json({ error: 'Berkas tidak ditemukan' });
+  const p = await getPlan(file.plan_id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  await pool.query('DELETE FROM unit_plan_files WHERE id=?', [file.id]);
+  try { fs.unlinkSync(path.join(PLAN_DIR, path.basename(file.url))); } catch { /* abaikan */ }
+  res.json(await planWithDetail(p.id));
+});
+
+// --- Monitoring: persentase progres, kendala, solusi/tindak lanjut ---
+router.put('/:id/monitoring', async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  const progres = req.body.progres != null && req.body.progres !== '' ? clamp(Number(req.body.progres), 0, 100) : p.progres;
+  const txt = (v, prev) => (v != null ? (String(v).trim() || null) : (prev ?? null));
+  await pool.query(
+    'UPDATE unit_plans SET progres=?, kendala=?, tindak_lanjut=?, tahap=? WHERE id=?',
+    [progres, txt(req.body.kendala, p.kendala), txt(req.body.tindak_lanjut, p.tindak_lanjut), majuTahap(p.tahap, 'monitoring'), p.id]
+  );
+  res.json(await planWithDetail(p.id));
+});
+
+// --- Evaluasi: target vs hasil, penilaian keberhasilan, catatan evaluasi ---
+router.put('/:id/evaluasi', async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  const txt = (v, prev) => (v != null ? (String(v).trim() || null) : (prev ?? null));
+  const nilai = NILAI.includes(req.body.nilai_keberhasilan) ? req.body.nilai_keberhasilan : (req.body.nilai_keberhasilan === '' ? null : p.nilai_keberhasilan);
+  await pool.query(
+    'UPDATE unit_plans SET hasil=?, nilai_keberhasilan=?, evaluasi_catatan=?, tahap=? WHERE id=?',
+    [txt(req.body.hasil, p.hasil), nilai, txt(req.body.evaluasi_catatan, p.evaluasi_catatan), majuTahap(p.tahap, 'evaluasi'), p.id]
+  );
+  res.json(await planWithDetail(p.id));
+});
+
+// --- Penyelesaian: wajib ada laporan akhir → status Selesai ---
+router.post('/:id/selesai', async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  const [[c]] = await pool.query("SELECT COUNT(*) c FROM unit_plan_files WHERE plan_id=? AND jenis='laporan'", [p.id]);
+  if (!Number(c.c)) return res.status(400).json({ error: 'Unggah laporan akhir terlebih dahulu sebelum menandai program selesai.' });
+  const realisasi = req.body.realisasi_biaya != null && req.body.realisasi_biaya !== '' ? rupiah(req.body.realisasi_biaya) : p.realisasi_biaya;
+  await pool.query(
+    "UPDATE unit_plans SET status='selesai', progres=100, tahap='penyelesaian', realisasi_biaya=?, selesai_at=COALESCE(selesai_at, NOW()) WHERE id=?",
+    [realisasi, p.id]
+  );
+  res.json(await planWithDetail(p.id));
+});
+
+// --- Arsip: hanya program yang sudah Selesai; tetap bisa dilihat & dicetak ---
+router.post('/:id/arsip', async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  if (p.status !== 'selesai') return res.status(400).json({ error: 'Program harus berstatus Selesai sebelum diarsipkan.' });
+  await pool.query("UPDATE unit_plans SET tahap='arsip', arsip_at=COALESCE(arsip_at, NOW()) WHERE id=?", [p.id]);
+  res.json(await planWithDetail(p.id));
+});
+
+// Keluarkan dari arsip (koreksi) — kembali ke tahap penyelesaian.
+router.post('/:id/buka-arsip', async (req, res) => {
+  const p = await getPlan(req.params.id, req.unitId);
+  if (!p) return res.status(404).json({ error: 'Program tidak ditemukan' });
+  await pool.query("UPDATE unit_plans SET tahap='penyelesaian', arsip_at=NULL WHERE id=?", [p.id]);
+  res.json(await planWithDetail(p.id));
 });
 
 export default router;

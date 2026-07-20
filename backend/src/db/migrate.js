@@ -223,6 +223,24 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'sumber_dana', 'VARCHAR(40) DEFAULT NULL AFTER realisasi_biaya');
   await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'start_date', 'DATE DEFAULT NULL AFTER sumber_dana');
   await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'metode', 'VARCHAR(40) DEFAULT NULL AFTER pic_nama');
+  // Siklus program: pelaksanaan → monitoring → evaluasi → penyelesaian → arsip
+  // (program dianggap disetujui sejak dimasukkan, tidak ada tahap persetujuan lagi).
+  const tahapBaru = !(await hasColumn(conn, env.db.database, 'unit_plans', 'tahap'));
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'tahap', "VARCHAR(16) NOT NULL DEFAULT 'pelaksanaan' AFTER status");
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'kendala', 'TEXT DEFAULT NULL AFTER tahap');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'tindak_lanjut', 'TEXT DEFAULT NULL AFTER kendala');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'hasil', 'TEXT DEFAULT NULL AFTER tindak_lanjut');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'evaluasi_catatan', 'TEXT DEFAULT NULL AFTER hasil');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'nilai_keberhasilan', 'VARCHAR(16) DEFAULT NULL AFTER evaluasi_catatan');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'selesai_at', 'DATETIME DEFAULT NULL AFTER nilai_keberhasilan');
+  await addColumnIfMissing(conn, env.db.database, 'unit_plans', 'arsip_at', 'DATETIME DEFAULT NULL AFTER selesai_at');
+  // SEKALI saja (saat kolom tahap pertama kali dibuat): program lama berstatus 'rencana'
+  // ikut alur baru — dianggap disetujui & berjalan di tahap pelaksanaan. Program yang sudah
+  // 'selesai' langsung ditempatkan pada tahap penyelesaian.
+  if (tahapBaru) {
+    await conn.query("UPDATE unit_plans SET status='berjalan' WHERE status='rencana'");
+    await conn.query("UPDATE unit_plans SET tahap='penyelesaian' WHERE status='selesai'");
+  }
 
   // Wallboard NOC: tandai satu perangkat sebagai sumber internet/uplink (Mikrotik) per unit.
   await addColumnIfMissing(conn, env.db.database, 'devices', 'is_uplink', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER inspect_required');
@@ -757,6 +775,15 @@ async function dropColumnIfExists(conn, dbName, table, column) {
     await conn.query(`ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``);
     console.log(`  - dropped ${table}.${column}`);
   }
+}
+
+async function hasColumn(conn, dbName, table, column) {
+  const [rows] = await conn.query(
+    `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [dbName, table, column]
+  );
+  return rows.length > 0;
 }
 
 async function addColumnIfMissing(conn, dbName, table, column, definition) {

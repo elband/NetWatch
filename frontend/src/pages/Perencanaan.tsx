@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { confirmDialog } from '../components/dialog';
-import type { UnitPlan, UnitKpi } from '../types';
-import { buildProgramKerjaHtml, type PkLkp, type ProgramKerjaCfg } from '../utils/programKerjaDoc';
+import { openImage } from '../components/ImageLightbox';
+import type { UnitPlan, UnitKpi, UnitPlanDetail, UnitPlanFile } from '../types';
+import { buildProgramKerjaHtml, buildLaporanProgramHtml, type PkLkp, type ProgramKerjaCfg } from '../utils/programKerjaDoc';
 
 // ===== Konstanta tampilan =====
 const KATEGORI = [
@@ -20,6 +21,22 @@ const STATUS = [
   { id: 'tertunda', label: 'Tertunda', cls: 'text-warn bg-warn/10 border-warn/40' },
   { id: 'batal', label: 'Batal', cls: 'text-danger bg-danger/10 border-danger/40' },
 ];
+// Siklus program: program dianggap DISETUJUI begitu dimasukkan, lalu berjalan melalui
+// tahap-tahap berikut sampai diarsipkan.
+const TAHAP = [
+  { id: 'pelaksanaan', label: 'Pelaksanaan', icon: '🚀', cls: 'text-accent2 bg-accent2/10 border-accent2/40', desc: 'Program berjalan — catat aktivitas/progres & unggah dokumentasi.' },
+  { id: 'monitoring', label: 'Monitoring', icon: '📈', cls: 'text-accent bg-accent/10 border-accent/40', desc: 'Pantau persentase progres, kendala yang dihadapi & tindak lanjutnya.' },
+  { id: 'evaluasi', label: 'Evaluasi', icon: '🧭', cls: 'text-warn bg-warn/10 border-warn/40', desc: 'Bandingkan target dengan hasil, nilai keberhasilan & beri catatan evaluasi.' },
+  { id: 'penyelesaian', label: 'Penyelesaian', icon: '✅', cls: 'text-success bg-success/10 border-success/40', desc: 'Unggah laporan akhir & bukti dokumentasi, lalu tandai program Selesai.' },
+  { id: 'arsip', label: 'Arsip', icon: '📦', cls: 'text-text2 bg-surface2 border-border', desc: 'Program tersimpan sebagai arsip — tetap bisa dilihat & dicetak laporannya.' },
+];
+const tahapOf = (id: string) => TAHAP.find((t) => t.id === id) || TAHAP[0];
+const NILAI_KEBERHASILAN = [
+  { id: 'berhasil', label: 'Berhasil (target tercapai)', cls: 'text-success' },
+  { id: 'sebagian', label: 'Tercapai sebagian', cls: 'text-warn' },
+  { id: 'tidak_tercapai', label: 'Tidak tercapai', cls: 'text-danger' },
+];
+
 const PRIO: Record<string, { label: string; cls: string }> = {
   tinggi: { label: 'Tinggi', cls: 'text-danger bg-danger/10 border-danger/40' },
   sedang: { label: 'Sedang', cls: 'text-warn bg-warn/10 border-warn/40' },
@@ -59,14 +76,16 @@ export default function Perencanaan() {
   const [lkp, setLkp] = useState<PkLkp>(PK_LKP_DEFAULT);
   const [pk, setPk] = useState<ProgramKerjaCfg>({});
   const [printing, setPrinting] = useState(false);
+  const [arsip, setArsip] = useState(false);
 
+  // arsip=1 → tampilkan program yang sudah diarsipkan (default: disembunyikan).
   function load() {
     setLoading(true);
-    api.get(`/perencanaan?tahun=${tahun}`)
+    api.get(`/perencanaan?tahun=${tahun}${arsip ? '&arsip=1' : ''}`)
       .then((r) => { setPlans(r.data.plans); setYears(r.data.years || []); })
       .finally(() => setLoading(false));
   }
-  useEffect(load, [tahun]);
+  useEffect(load, [tahun, arsip]);
   useEffect(() => { api.get('/settings').then((r) => {
     if (r.data.settings?.lkp) setLkp((l) => ({ ...l, ...r.data.settings.lkp }));
     if (r.data.settings?.program_kerja) setPk(r.data.settings.program_kerja);
@@ -122,7 +141,7 @@ export default function Perencanaan() {
           <button onClick={generatePdf} disabled={printing || loading} title="Cetak seluruh rencana kerja tahun ini ke PDF" className="border border-accent2/40 text-accent2 hover:bg-accent2/10 rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50 whitespace-nowrap">🖨️ {printing ? 'Menyiapkan…' : 'Generate PDF'}</button>
         </div>
       </div>
-      {tab === 'program' && <ProgramTab plans={plans} tahun={tahun} loading={loading} onChange={load} />}
+      {tab === 'program' && <ProgramTab plans={plans} tahun={tahun} loading={loading} onChange={load} arsip={arsip} onToggleArsip={() => setArsip((v) => !v)} lkp={lkp} />}
       {tab === 'anggaran' && <AnggaranTab plans={plans} />}
       {tab === 'pengadaan' && <PengadaanTab tahun={tahun} onPlanCreated={load} />}
       {tab === 'kpi' && <KpiTab tahun={tahun} />}
@@ -131,17 +150,20 @@ export default function Perencanaan() {
 }
 
 // ===================== TAB PROGRAM KERJA =====================
-function ProgramTab({ plans, tahun, loading, onChange }: { plans: UnitPlan[]; tahun: number; loading: boolean; onChange: () => void }) {
+function ProgramTab({ plans, tahun, loading, onChange, arsip, onToggleArsip, lkp }: { plans: UnitPlan[]; tahun: number; loading: boolean; onChange: () => void; arsip: boolean; onToggleArsip: () => void; lkp: PkLkp }) {
   const [q, setQ] = useState('');
   const [fKat, setFKat] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fPrio, setFPrio] = useState('');
+  const [fTahap, setFTahap] = useState('');
   const [groupBy, setGroupBy] = useState<'kuartal' | 'kategori'>('kuartal');
   const [edit, setEdit] = useState<UnitPlan | 'new' | null>(null);
+  const [kelola, setKelola] = useState<UnitPlan | null>(null);
 
   const filtered = plans.filter((p) => {
     if (fKat && p.kategori !== fKat) return false;
     if (fStatus && p.status !== fStatus) return false;
+    if (fTahap && p.tahap !== fTahap) return false;
     if (fPrio && p.prioritas !== fPrio) return false;
     if (q.trim()) { const h = `${p.judul} ${p.deskripsi || ''} ${p.pic_nama || ''}`.toLowerCase(); if (!h.includes(q.trim().toLowerCase())) return false; }
     return true;
@@ -195,7 +217,9 @@ function ProgramTab({ plans, tahun, loading, onChange }: { plans: UnitPlan[]; ta
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Cari rencana / PIC…" className="flex-1 min-w-[180px] bg-surface2 border border-border rounded-md px-3 py-1.5 text-xs" />
         <select value={fKat} onChange={(e) => setFKat(e.target.value)} className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-xs"><option value="">Semua Kategori</option>{KATEGORI.map((k) => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}</select>
         <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-xs"><option value="">Semua Status</option>{STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>
+        <select value={fTahap} onChange={(e) => setFTahap(e.target.value)} className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-xs"><option value="">Semua Tahap</option>{TAHAP.map((t) => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}</select>
         <select value={fPrio} onChange={(e) => setFPrio(e.target.value)} className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-xs"><option value="">Semua Prioritas</option><option value="tinggi">Tinggi</option><option value="sedang">Sedang</option><option value="rendah">Rendah</option></select>
+        <button onClick={onToggleArsip} title="Tampilkan/sembunyikan program yang sudah diarsipkan" className={`rounded-md px-2.5 py-1.5 text-[11px] border ${arsip ? 'border-accent2/50 text-accent2 bg-accent2/10 font-semibold' : 'border-border text-text2 hover:text-text'}`}>📦 {arsip ? 'Arsip tampil' : 'Lihat arsip'}</button>
         <div className="flex bg-surface2 border border-border rounded-lg p-0.5">
           {(['kuartal', 'kategori'] as const).map((g) => <button key={g} onClick={() => setGroupBy(g)} className={`px-2.5 py-1 text-[11px] rounded capitalize ${groupBy === g ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}>{g}</button>)}
         </div>
@@ -215,7 +239,7 @@ function ProgramTab({ plans, tahun, loading, onChange }: { plans: UnitPlan[]; ta
             <div key={g.key}>
               <div className="text-xs font-semibold text-text2 mb-2 flex items-center gap-2"><span>{g.label}</span><span className="text-[10px] font-normal">· {g.items.length} rencana</span></div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                {g.items.map((p) => <PlanCard key={p.id} p={p} onEdit={() => setEdit(p)} onDelete={() => del(p)} onQuick={quick} />)}
+                {g.items.map((p) => <PlanCard key={p.id} p={p} onEdit={() => setEdit(p)} onDelete={() => del(p)} onQuick={quick} onKelola={() => setKelola(p)} />)}
               </div>
             </div>
           ))}
@@ -223,6 +247,7 @@ function ProgramTab({ plans, tahun, loading, onChange }: { plans: UnitPlan[]; ta
       )}
 
       {edit && <PlanModal plan={edit === 'new' ? null : edit} tahun={tahun} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onChange(); }} />}
+      {kelola && <SiklusModal planId={kelola.id} lkp={lkp} onClose={() => setKelola(null)} onChanged={onChange} />}
     </div>
   );
 }
@@ -247,9 +272,10 @@ function Empty({ tahun, onAdd }: { tahun: number; onAdd: () => void }) {
   );
 }
 
-function PlanCard({ p, onEdit, onDelete, onQuick }: { p: UnitPlan; onEdit: () => void; onDelete: () => void; onQuick: (p: UnitPlan, s: string) => void }) {
+function PlanCard({ p, onEdit, onDelete, onQuick, onKelola }: { p: UnitPlan; onEdit: () => void; onDelete: () => void; onQuick: (p: UnitPlan, s: string) => void; onKelola: () => void }) {
   const kat = katOf(p.kategori);
   const st = stOf(p.status);
+  const th = tahapOf(p.tahap);
   const prio = PRIO[p.prioritas] || PRIO.sedang;
   const comp = completeness(p);
   const jadwal = p.start_date || p.target_date ? `📅 ${p.start_date ? p.start_date + '→' : ''}${p.target_date || ''}` : '';
@@ -261,6 +287,7 @@ function PlanCard({ p, onEdit, onDelete, onQuick }: { p: UnitPlan; onEdit: () =>
           <div className="text-[10px] text-text2 mt-0.5">{kat.icon} {kat.label}{jadwal ? ` · ${jadwal}` : ''}</div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${th.cls}`} title={th.desc}>{th.icon} {th.label}</span>
           {comp === 100
             ? <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border text-success bg-success/10 border-success/40" title="Data lengkap">✓ Lengkap</span>
             : <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border text-warn bg-warn/10 border-warn/40" title="Kelengkapan data rencana">{comp}%</span>}
@@ -281,11 +308,13 @@ function PlanCard({ p, onEdit, onDelete, onQuick }: { p: UnitPlan; onEdit: () =>
       </div>
 
       <div className="flex items-center gap-1.5 mt-1 pt-2 border-t border-border/50">
+        {/* 'Rencana' hanya tersisa untuk data lama — program baru langsung berjalan. */}
         <select value={p.status} onChange={(e) => onQuick(p, e.target.value)} title="Ubah status" className={`text-[10px] font-semibold border rounded px-1.5 py-1 ${st.cls}`}>
-          {STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          {STATUS.filter((s) => s.id !== 'rencana' || p.status === 'rencana').map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
         <div className="ml-auto flex gap-1.5">
-          <button onClick={onEdit} className="border border-border text-text2 rounded px-2 py-1 text-[11px] hover:text-text">✏️ Edit</button>
+          <button onClick={onKelola} title="Kelola siklus: pelaksanaan → monitoring → evaluasi → penyelesaian → arsip" className="border border-accent/40 text-accent rounded px-2 py-1 text-[11px] hover:bg-accent/10 font-semibold">📋 Kelola</button>
+          <button onClick={onEdit} className="border border-border text-text2 rounded px-2 py-1 text-[11px] hover:text-text">✏️</button>
           <button onClick={onDelete} className="border border-danger/40 text-danger rounded px-2 py-1 text-[11px]">🗑️</button>
         </div>
       </div>
@@ -313,7 +342,8 @@ function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | n
     volume: plan?.volume ?? '',
     indikator: plan?.indikator ?? '',
     prioritas: plan?.prioritas ?? 'sedang',
-    status: plan?.status ?? 'rencana',
+    // Program baru langsung dianggap disetujui → berstatus berjalan (tahap Pelaksanaan).
+    status: plan?.status ?? 'berjalan',
     progres: plan?.progres ?? 0,
     estimasi_biaya: plan?.estimasi_biaya ?? 0,
     realisasi_biaya: plan?.realisasi_biaya ?? '',
@@ -379,8 +409,13 @@ function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | n
           <div><label className={lbl}>Prioritas</label>
             <select className={inp} value={f.prioritas} onChange={(e) => set('prioritas', e.target.value)}><option value="tinggi">Tinggi</option><option value="sedang">Sedang</option><option value="rendah">Rendah</option></select></div>
           <div><label className={lbl}>Status</label>
-            <select className={inp} value={f.status} onChange={(e) => set('status', e.target.value)}>{STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
+            <select className={inp} value={f.status} onChange={(e) => set('status', e.target.value)}>{STATUS.filter((s) => s.id !== 'rencana' || f.status === 'rencana').map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
         </div>
+        {!plan && (
+          <div className="mb-3 text-[10.5px] text-text2 bg-surface2/50 border border-border rounded-md px-3 py-2">
+            ℹ️ Program yang dimasukkan <b>langsung dianggap disetujui</b> dan berjalan di tahap <b>Pelaksanaan</b>. Lanjutan siklusnya (monitoring → evaluasi → penyelesaian → arsip) dikelola lewat tombol <b>📋 Kelola</b> pada kartu program.
+          </div>
+        )}
 
         {/* Jadwal — rentang mulai→selesai mengisi matriks jadwal tahunan di PDF */}
         <div className="grid grid-cols-3 gap-3 mb-3">
@@ -421,6 +456,275 @@ function PlanModal({ plan, tahun, seed, onClose, onSaved }: { plan: UnitPlan | n
           <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan'}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===================== SIKLUS PROGRAM =====================
+// Pelaksanaan → Monitoring → Evaluasi → Penyelesaian → Arsip.
+// Program dianggap disetujui sejak dimasukkan, jadi modal ini langsung membuka tahap kerja.
+function SiklusModal({ planId, lkp, onClose, onChanged }: { planId: number; lkp: PkLkp; onClose: () => void; onChanged: () => void }) {
+  const [d, setD] = useState<UnitPlanDetail | null>(null);
+  const [step, setStep] = useState<string>('pelaksanaan');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Form tahap Pelaksanaan
+  const [logTgl, setLogTgl] = useState(new Date().toISOString().slice(0, 10));
+  const [logCatatan, setLogCatatan] = useState('');
+  const [logProgres, setLogProgres] = useState<string>('');
+  const [logFiles, setLogFiles] = useState<File[]>([]);
+  // Form tahap Monitoring & Evaluasi
+  const [mon, setMon] = useState({ progres: 0, kendala: '', tindak_lanjut: '' });
+  const [evl, setEvl] = useState({ hasil: '', nilai_keberhasilan: '', evaluasi_catatan: '' });
+  const [realisasi, setRealisasi] = useState<string>('');
+
+  function apply(data: UnitPlanDetail) {
+    setD(data);
+    const p = data.plan;
+    setStep(p.tahap);
+    setMon({ progres: p.progres, kendala: p.kendala || '', tindak_lanjut: p.tindak_lanjut || '' });
+    setEvl({ hasil: p.hasil || '', nilai_keberhasilan: p.nilai_keberhasilan || '', evaluasi_catatan: p.evaluasi_catatan || '' });
+    setRealisasi(p.realisasi_biaya != null ? String(p.realisasi_biaya) : '');
+  }
+  useEffect(() => { api.get(`/perencanaan/${planId}`).then((r) => apply(r.data)).catch(() => setErr('Gagal memuat program.')); }, [planId]);
+
+  async function call(fn: () => Promise<{ data: UnitPlanDetail }>) {
+    setBusy(true); setErr('');
+    try { const r = await fn(); apply(r.data); onChanged(); }
+    catch (e: any) { setErr(e?.response?.data?.error || 'Gagal menyimpan.'); }
+    finally { setBusy(false); }
+  }
+
+  async function simpanLog() {
+    if (!logCatatan.trim()) { setErr('Catatan aktivitas wajib diisi.'); return; }
+    const fd = new FormData();
+    fd.append('tanggal', logTgl); fd.append('catatan', logCatatan);
+    if (logProgres !== '') fd.append('progres', logProgres);
+    logFiles.forEach((f) => fd.append('files', f));
+    await call(() => api.post(`/perencanaan/${planId}/log`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }));
+    setLogCatatan(''); setLogProgres(''); setLogFiles([]);
+  }
+  async function unggah(jenis: 'laporan' | 'bukti' | 'dokumentasi', files: File[], keterangan = '') {
+    if (!files.length) return;
+    const fd = new FormData();
+    fd.append('jenis', jenis);
+    if (keterangan) fd.append('keterangan', keterangan);
+    files.forEach((f) => fd.append('files', f));
+    await call(() => api.post(`/perencanaan/${planId}/files`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }));
+  }
+  async function hapusFile(id: number) {
+    if (!(await confirmDialog({ title: 'Hapus berkas', message: 'Berkas akan dihapus permanen.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    await call(() => api.delete(`/perencanaan/files/${id}`));
+  }
+  async function hapusLog(id: number) {
+    if (!(await confirmDialog({ title: 'Hapus catatan', message: 'Catatan aktivitas beserta dokumentasinya akan dihapus.', confirmText: '🗑️ Hapus', variant: 'danger' }))) return;
+    await call(() => api.delete(`/perencanaan/log/${id}`));
+  }
+
+  function cetak() {
+    if (!d) return;
+    const html = buildLaporanProgramHtml({ plan: d.plan, logs: d.logs, files: d.files, lkp }, window.location.origin);
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(html); w.document.close();
+    setTimeout(() => { try { w.focus(); w.print(); } catch { /* diabaikan */ } }, 500);
+  }
+
+  const p = d?.plan;
+  const laporanFiles = (d?.files || []).filter((f) => f.jenis === 'laporan');
+  const buktiFiles = (d?.files || []).filter((f) => f.jenis === 'bukti');
+  const stepIdx = TAHAP.findIndex((t) => t.id === step);
+  const curIdx = p ? TAHAP.findIndex((t) => t.id === p.tahap) : 0;
+  const inp = 'w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs';
+
+  return (
+    <div className="fixed inset-0 z-[300] bg-black/60 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-3xl my-6" onClick={(e) => e.stopPropagation()}>
+        {/* Header + stepper */}
+        <div className="p-4 border-b border-border">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-bold truncate">{p?.judul || 'Memuat…'}</div>
+              <div className="text-[11px] text-text2">{p ? `${katOf(p.kategori).icon} ${katOf(p.kategori).label} · ${KUARTAL[Number(p.kuartal) || 0]} ${p.tahun} · progres ${p.progres}%` : ''}</div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={cetak} disabled={!d} className="border border-accent2/40 text-accent2 rounded-md px-2.5 py-1 text-[11px] hover:bg-accent2/10 disabled:opacity-50">🖨️ Cetak Laporan</button>
+              <button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 mt-3 flex-wrap">
+            {TAHAP.map((t, i) => (
+              <button key={t.id} onClick={() => setStep(t.id)}
+                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10.5px] border ${step === t.id ? t.cls + ' font-semibold' : i <= curIdx ? 'border-border text-text' : 'border-border/60 text-text2'}`}>
+                <span>{i < curIdx ? '✓' : t.icon}</span>{t.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10.5px] text-text2 mt-2">{TAHAP[Math.max(0, stepIdx)].desc}</div>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger">⚠️ {err}</div>}
+          {!p ? <div className="text-center text-text2 text-sm py-8">Memuat…</div> : (<>
+
+            {/* ---------- PELAKSANAAN ---------- */}
+            {step === 'pelaksanaan' && (
+              <>
+                <div className="border border-border rounded-lg p-3 bg-surface2/40">
+                  <div className="text-[11px] font-semibold mb-2">➕ Catat Aktivitas / Progres</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+                    <div><label className="text-[10px] text-text2">Tanggal</label><input type="date" className={inp} value={logTgl} onChange={(e) => setLogTgl(e.target.value)} /></div>
+                    <div><label className="text-[10px] text-text2">Progres (%) — opsional</label><input type="number" min={0} max={100} className={inp} value={logProgres} onChange={(e) => setLogProgres(e.target.value)} placeholder={String(p.progres)} /></div>
+                    <div><label className="text-[10px] text-text2">📷 Dokumentasi (foto/PDF)</label>
+                      <input type="file" multiple accept="image/*,application/pdf" onChange={(e) => setLogFiles([...(e.target.files || [])])}
+                        className="w-full text-[10px] text-text2 file:mr-2 file:py-1.5 file:px-2 file:rounded file:border-0 file:bg-surface2 file:text-text" />
+                    </div>
+                  </div>
+                  <textarea className={inp} rows={2} placeholder="Aktivitas yang dikerjakan / capaian hari ini…" value={logCatatan} onChange={(e) => setLogCatatan(e.target.value)} />
+                  <div className="flex justify-end mt-2">
+                    <button onClick={simpanLog} disabled={busy} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50">{busy ? 'Menyimpan…' : 'Simpan Catatan'}</button>
+                  </div>
+                </div>
+
+                <div className="text-[11px] font-semibold">🗓️ Kronologi Pelaksanaan ({d!.logs.length})</div>
+                {d!.logs.length === 0 ? (
+                  <div className="text-[11px] text-text2 border border-dashed border-border rounded-lg p-4 text-center">Belum ada catatan aktivitas.</div>
+                ) : d!.logs.map((l) => {
+                  const foto = d!.files.filter((f) => f.log_id === l.id);
+                  return (
+                    <div key={l.id} className="border border-border rounded-lg p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-semibold">{l.tanggal}{l.progres != null ? ` · progres ${l.progres}%` : ''}</div>
+                          <div className="text-[11px] whitespace-pre-wrap mt-0.5">{l.catatan}</div>
+                          <div className="text-[9.5px] text-text2 mt-1">✍️ {l.creator_name || '-'}</div>
+                        </div>
+                        <button onClick={() => hapusLog(l.id)} className="text-danger text-[11px] shrink-0">🗑️</button>
+                      </div>
+                      {foto.length > 0 && <FileStrip files={foto} onDelete={hapusFile} />}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {/* ---------- MONITORING ---------- */}
+            {step === 'monitoring' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] text-text2">Persentase Progres: <b className="text-text">{mon.progres}%</b></label>
+                  <input type="range" min={0} max={100} value={mon.progres} onChange={(e) => setMon({ ...mon, progres: Number(e.target.value) })} className="w-full accent-accent" />
+                </div>
+                <div><label className="text-[11px] text-text2">Kendala yang dihadapi</label>
+                  <textarea className={inp} rows={3} value={mon.kendala} onChange={(e) => setMon({ ...mon, kendala: e.target.value })} placeholder="mis. keterlambatan pengiriman suku cadang…" /></div>
+                <div><label className="text-[11px] text-text2">Solusi / tindak lanjut</label>
+                  <textarea className={inp} rows={3} value={mon.tindak_lanjut} onChange={(e) => setMon({ ...mon, tindak_lanjut: e.target.value })} placeholder="mis. mengajukan vendor alternatif…" /></div>
+                <div className="flex justify-end">
+                  <button onClick={() => call(() => api.put(`/perencanaan/${planId}/monitoring`, mon))} disabled={busy} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50">💾 Simpan Monitoring</button>
+                </div>
+              </div>
+            )}
+
+            {/* ---------- EVALUASI ---------- */}
+            {step === 'evaluasi' && (
+              <div className="space-y-3">
+                <div className="border border-border rounded-lg p-3 bg-surface2/40">
+                  <div className="text-[10px] text-text2 uppercase tracking-wide">Target / Indikator (dari rencana)</div>
+                  <div className="text-[11.5px] whitespace-pre-wrap">{p.indikator || p.keluaran || <span className="text-text2 italic">belum diisi di rencana</span>}</div>
+                </div>
+                <div><label className="text-[11px] text-text2">Hasil yang dicapai</label>
+                  <textarea className={inp} rows={3} value={evl.hasil} onChange={(e) => setEvl({ ...evl, hasil: e.target.value })} placeholder="Realisasi nyata dibanding target…" /></div>
+                <div><label className="text-[11px] text-text2">Penilaian keberhasilan</label>
+                  <select className={inp} value={evl.nilai_keberhasilan} onChange={(e) => setEvl({ ...evl, nilai_keberhasilan: e.target.value })}>
+                    <option value="">— pilih —</option>
+                    {NILAI_KEBERHASILAN.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+                  </select></div>
+                <div><label className="text-[11px] text-text2">Catatan evaluasi</label>
+                  <textarea className={inp} rows={3} value={evl.evaluasi_catatan} onChange={(e) => setEvl({ ...evl, evaluasi_catatan: e.target.value })} placeholder="Pembelajaran, rekomendasi untuk program berikutnya…" /></div>
+                <div className="flex justify-end">
+                  <button onClick={() => call(() => api.put(`/perencanaan/${planId}/evaluasi`, evl))} disabled={busy} className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50">💾 Simpan Evaluasi</button>
+                </div>
+              </div>
+            )}
+
+            {/* ---------- PENYELESAIAN ---------- */}
+            {step === 'penyelesaian' && (
+              <div className="space-y-3">
+                <UploadBox label="📄 Laporan Akhir (wajib)" hint="PDF/DOC hasil akhir program." busy={busy} onPick={(fs) => unggah('laporan', fs)} />
+                <FileList title={`Laporan akhir (${laporanFiles.length})`} files={laporanFiles} onDelete={hapusFile} />
+                <UploadBox label="📎 Bukti / Dokumentasi Pendukung" hint="Foto, berita acara, kuitansi, dsb." busy={busy} onPick={(fs) => unggah('bukti', fs)} />
+                <FileList title={`Bukti pendukung (${buktiFiles.length})`} files={buktiFiles} onDelete={hapusFile} />
+                <div><label className="text-[11px] text-text2">Realisasi anggaran (Rp) — opsional</label>
+                  <input type="number" className={inp} value={realisasi} onChange={(e) => setRealisasi(e.target.value)} placeholder={String(p.estimasi_biaya || 0)} /></div>
+                {p.status === 'selesai' ? (
+                  <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success">✅ Program sudah ditandai <b>Selesai</b>{p.selesai_at ? ` pada ${String(p.selesai_at).slice(0, 10)}` : ''}. Lanjutkan ke tahap Arsip.</div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[10.5px] text-text2">{laporanFiles.length ? 'Laporan akhir sudah diunggah.' : '⚠️ Unggah laporan akhir dulu untuk bisa menandai selesai.'}</span>
+                    <button onClick={() => call(() => api.post(`/perencanaan/${planId}/selesai`, { realisasi_biaya: realisasi }))} disabled={busy || !laporanFiles.length}
+                      className="bg-success text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-40">✅ Tandai Selesai</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ---------- ARSIP ---------- */}
+            {step === 'arsip' && (
+              <div className="space-y-3">
+                <div className="text-[11.5px] text-text2">Program yang diarsipkan disembunyikan dari daftar aktif, namun tetap dapat dibuka dan dicetak laporannya kapan saja (tombol <b>Lihat arsip</b> pada toolbar).</div>
+                {p.tahap === 'arsip' ? (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="bg-surface2 border border-border rounded-md px-3 py-2 text-[11px]">📦 Diarsipkan{p.arsip_at ? ` pada ${String(p.arsip_at).slice(0, 10)}` : ''}.</span>
+                    <button onClick={() => call(() => api.post(`/perencanaan/${planId}/buka-arsip`))} disabled={busy} className="border border-border text-text2 hover:text-text rounded-md px-3 py-1.5 text-xs">↩️ Keluarkan dari Arsip</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[10.5px] text-text2">{p.status === 'selesai' ? 'Program siap diarsipkan.' : '⚠️ Program harus berstatus Selesai dulu (tahap Penyelesaian).'}</span>
+                    <button onClick={() => call(() => api.post(`/perencanaan/${planId}/arsip`))} disabled={busy || p.status !== 'selesai'} className="bg-accent2 text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-40">📦 Arsipkan Program</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UploadBox({ label, hint, busy, onPick }: { label: string; hint: string; busy: boolean; onPick: (files: File[]) => void }) {
+  return (
+    <div className="border border-dashed border-border rounded-lg p-3">
+      <div className="text-[11px] font-semibold">{label}</div>
+      <div className="text-[10px] text-text2 mb-1.5">{hint}</div>
+      <input type="file" multiple disabled={busy} onChange={(e) => { const fs = [...(e.target.files || [])]; e.target.value = ''; onPick(fs); }}
+        className="w-full text-[10px] text-text2 file:mr-2 file:py-1.5 file:px-2 file:rounded file:border-0 file:bg-surface2 file:text-text" />
+    </div>
+  );
+}
+function FileList({ title, files, onDelete }: { title: string; files: UnitPlanFile[]; onDelete: (id: number) => void }) {
+  if (!files.length) return <div className="text-[10.5px] text-text2">{title} — belum ada berkas.</div>;
+  return (
+    <div>
+      <div className="text-[10.5px] text-text2 mb-1">{title}</div>
+      <FileStrip files={files} onDelete={onDelete} />
+    </div>
+  );
+}
+function FileStrip({ files, onDelete }: { files: UnitPlanFile[]; onDelete: (id: number) => void }) {
+  const isImg = (u: string) => /\.(jpe?g|png|webp|gif)$/i.test(u);
+  return (
+    <div className="flex flex-wrap gap-2 mt-1.5">
+      {files.map((f) => (
+        <div key={f.id} className="relative group">
+          {isImg(f.url)
+            ? <button type="button" onClick={() => openImage(f.url)} title={f.filename || ''}><img src={f.url} alt={f.filename || 'dokumentasi'} className="w-14 h-14 object-cover rounded border border-border" /></button>
+            : <a href={f.url} target="_blank" rel="noreferrer" title={f.filename || ''} className="w-14 h-14 rounded border border-border flex items-center justify-center text-[10px] text-accent2 bg-surface2 text-center px-1">📄 {(f.filename || 'berkas').slice(0, 12)}</a>}
+          <button onClick={() => onDelete(f.id)} title="Hapus berkas"
+            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-danger text-bg text-[9px] leading-none opacity-0 group-hover:opacity-100 transition">×</button>
+        </div>
+      ))}
     </div>
   );
 }

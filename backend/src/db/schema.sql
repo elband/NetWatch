@@ -524,6 +524,16 @@ CREATE TABLE IF NOT EXISTS unit_plans (
   indikator VARCHAR(500) DEFAULT NULL,               -- indikator keberhasilan
   prioritas VARCHAR(8) NOT NULL DEFAULT 'sedang',     -- tinggi|sedang|rendah
   status VARCHAR(12) NOT NULL DEFAULT 'rencana',      -- rencana|berjalan|selesai|tertunda|batal
+  -- Tahapan siklus program (program dianggap disetujui begitu dimasukkan):
+  -- pelaksanaan → monitoring → evaluasi → penyelesaian → arsip
+  tahap VARCHAR(16) NOT NULL DEFAULT 'pelaksanaan',
+  kendala TEXT DEFAULT NULL,                          -- monitoring: kendala yang dihadapi
+  tindak_lanjut TEXT DEFAULT NULL,                    -- monitoring: solusi / tindak lanjut
+  hasil TEXT DEFAULT NULL,                            -- evaluasi: hasil aktual vs target
+  evaluasi_catatan TEXT DEFAULT NULL,                 -- evaluasi: catatan penilai
+  nilai_keberhasilan VARCHAR(16) DEFAULT NULL,        -- berhasil|sebagian|tidak_tercapai
+  selesai_at DATETIME DEFAULT NULL,
+  arsip_at DATETIME DEFAULT NULL,
   progres TINYINT NOT NULL DEFAULT 0,                 -- 0..100
   estimasi_biaya BIGINT NOT NULL DEFAULT 0,           -- rupiah
   realisasi_biaya BIGINT DEFAULT NULL,                -- rupiah (kosong = belum terealisasi)
@@ -540,6 +550,36 @@ CREATE TABLE IF NOT EXISTS unit_plans (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_unit_plans_unit (unit_id),
   INDEX idx_unit_plans_tahun (tahun)
+) ENGINE=InnoDB;
+
+-- Catatan aktivitas/progres pelaksanaan program (kronologi tahap Pelaksanaan).
+CREATE TABLE IF NOT EXISTS unit_plan_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  plan_id INT NOT NULL,
+  tanggal DATE NOT NULL,
+  catatan TEXT NOT NULL,
+  progres TINYINT DEFAULT NULL,                       -- progres yang dilaporkan saat itu (opsional)
+  created_by INT DEFAULT NULL,
+  creator_name VARCHAR(120) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_upl_plan (plan_id),
+  FOREIGN KEY (plan_id) REFERENCES unit_plans(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Berkas program: dokumentasi pelaksanaan, laporan akhir, bukti penyelesaian.
+CREATE TABLE IF NOT EXISTS unit_plan_files (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  plan_id INT NOT NULL,
+  log_id INT DEFAULT NULL,                            -- melekat pada catatan aktivitas tertentu
+  jenis VARCHAR(16) NOT NULL DEFAULT 'dokumentasi',   -- dokumentasi|laporan|bukti
+  url VARCHAR(255) NOT NULL,
+  filename VARCHAR(200) DEFAULT NULL,
+  keterangan VARCHAR(255) DEFAULT NULL,
+  uploaded_by INT DEFAULT NULL,
+  uploader_name VARCHAR(120) DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_upf_plan (plan_id),
+  FOREIGN KEY (plan_id) REFERENCES unit_plans(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- Target & KPI unit (Tahap 2 Perencanaan): target + realisasi per tahun.
