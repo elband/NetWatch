@@ -60,25 +60,44 @@ const BUILDERS = {
     };
   },
 
-  async maintenance({ bulan, label }) {
-    const [rows] = await pool.query(
-      `SELECT DATE_FORMAT(m.scheduled_date,'%d-%m-%Y') tgl, d.name perangkat, m.task, m.status,
+  // Pemeliharaan = Maintenance Bulanan (equipment_maintenance) + Jendela Maintenance
+  // (maintenance_windows). Banyak unit hanya memakai jendela maintenance, jadi keduanya
+  // digabung — selaras dengan komponen PM pada penilaian & Logbook Peralatan.
+  async maintenance({ bulan, start, end, label }) {
+    const [bulanan] = await pool.query(
+      `SELECT m.scheduled_date tgl, d.name perangkat, m.task, m.status,
               COALESCE(u.name,'-') oleh,
               (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id=m.id) foto
          FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id
          LEFT JOIN users u ON u.id=m.done_by
-        WHERE m.plan_month=? ORDER BY m.scheduled_date`, [bulan]);
+        WHERE m.plan_month=?`, [bulan]);
+    const [jendela] = await pool.query(
+      `SELECT mw.starts_at tgl, COALESCE(d.name, l.name, '-') perangkat, mw.title task,
+              CASE WHEN mw.status='selesai' THEN 'selesai' ELSE 'rencana' END status,
+              COALESCE(u.name,'-') oleh,
+              (SELECT COUNT(*) FROM maintenance_window_photos p WHERE p.window_id=mw.id) foto
+         FROM maintenance_windows mw
+         LEFT JOIN devices d ON d.id=mw.device_id
+         LEFT JOIN locations l ON l.id=mw.location_id
+         LEFT JOIN users u ON u.id=mw.done_by
+        WHERE mw.starts_at>=? AND mw.starts_at<?`, [start, end]);
+    const rows = [
+      ...bulanan.map((r) => ({ ...r, jenis: 'Maintenance Bulanan' })),
+      ...jendela.map((r) => ({ ...r, jenis: 'Jendela Maintenance' })),
+    ].sort((a, b) => String(a.tgl).localeCompare(String(b.tgl)));
     const selesai = rows.filter((r) => r.status === 'selesai').length;
     const foto = rows.reduce((a, r) => a + Number(r.foto || 0), 0);
+    const tgl = (v) => (v ? new Date(v).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : '-');
     return {
       title: `Pemeliharaan & Perawatan Peralatan — ${label}`,
       summary: [
         { label: 'Total Kegiatan', value: rows.length },
         { label: 'Selesai', value: selesai },
+        { label: 'Jendela Maintenance', value: jendela.length },
         { label: 'Dokumentasi Foto', value: foto },
       ],
-      columns: ['Tgl Jadwal', 'Perangkat', 'Tugas', 'Status', 'Dikerjakan Oleh', 'Foto'],
-      rows: rows.map((r) => [r.tgl, r.perangkat, r.task, MAINT_STATUS[r.status] || r.status, r.oleh, String(r.foto)]),
+      columns: ['Tgl Jadwal', 'Jenis', 'Perangkat/Lokasi', 'Tugas', 'Status', 'Dikerjakan Oleh', 'Foto'],
+      rows: rows.map((r) => [tgl(r.tgl), r.jenis, r.perangkat, r.task, MAINT_STATUS[r.status] || r.status, r.oleh, String(r.foto)]),
     };
   },
 
@@ -211,7 +230,11 @@ const BUILDERS = {
   async laporan_bulanan(ctx) {
     const { start, end, bulan, label } = ctx;
     const [[inc]] = await pool.query("SELECT COUNT(*) c FROM incidents WHERE status='selesai' AND resolved_at>=? AND resolved_at<?", [start, end]);
-    const [[mnt]] = await pool.query("SELECT COUNT(*) c FROM equipment_maintenance WHERE plan_month=? AND status='selesai'", [bulan]);
+    // Pemeliharaan selesai = Maintenance Bulanan + Jendela Maintenance (lihat builder maintenance).
+    const [[mnt]] = await pool.query(
+      `SELECT (SELECT COUNT(*) FROM equipment_maintenance WHERE plan_month=? AND status='selesai')
+            + (SELECT COUNT(*) FROM maintenance_windows WHERE status='selesai' AND starts_at>=? AND starts_at<?) AS c`,
+      [bulan, start, end]);
     const [[insp]] = await pool.query('SELECT COUNT(*) c FROM equipment_inspections WHERE inspect_date>=? AND inspect_date<?', [start, end]);
     const [[knr]] = await pool.query('SELECT COUNT(*) c FROM kegiatan_non_rutin WHERE tanggal_kegiatan>=? AND tanggal_kegiatan<?', [start, end]);
     const [[qr]] = await pool.query('SELECT COUNT(*) c FROM public_reports WHERE created_at>=? AND created_at<?', [start, end]);
