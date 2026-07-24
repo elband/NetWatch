@@ -108,7 +108,9 @@ export default function Performa() {
           <div className="text-[18px] font-bold tracking-tight">📊 Performa Teknisi · NOC Dashboard</div>
           <div className="text-[11px] text-slate-400 mt-0.5">Penilaian skor 0–100 · target SLA {data?.slaMinutes ?? 30} menit{s ? ` · Peringkat #${data?.rankPos}/${data?.totalTechs}` : ''}</div>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Nama & periode ditumpuk: periode turun ke bawah nama, keduanya
+            selebar kolom yang sama supaya rapi sejajar. */}
+        <div className="flex flex-col items-stretch gap-2 w-full sm:w-auto sm:min-w-[200px]">
           {canPick && data && (
             <select className="bg-[#0f1729] border border-slate-700 rounded-md px-3 py-2 text-xs" value={techId ?? ''} onChange={(e) => setTechId(e.target.value ? Number(e.target.value) : undefined)}>
               {data.ranking.map((r) => <option key={r.techId} value={r.techId}>{r.name}</option>)}

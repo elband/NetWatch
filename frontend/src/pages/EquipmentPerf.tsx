@@ -8,7 +8,7 @@ import { confirmDialog, alertDialog } from '../components/dialog';
 import { getGeo, stampPhoto, stampFiles, type GeoPoint } from '../utils/photoStamp';
 import { openImage } from '../components/ImageLightbox';
 import PowerIcon from '../components/PowerIcon';
-import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn } from '../types';
+import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn, User } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
 const SLOT_LABEL: Record<string, string> = { '09': '09:00', '12': '12:00', '15': '15:00' };
@@ -870,6 +870,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [photoModalFor, setPhotoModalFor] = useState<MaintenanceRow | null>(null);
+  const [membersFor, setMembersFor] = useState<MaintenanceRow | null>(null);
   const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -957,10 +958,30 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
                 <button onClick={() => setPhotoModalFor(m)} className="block text-accent2 text-[10px] hover:underline mt-1">📷 {m.photo_count || 0} foto dokumentasi{m.doc_url ? ' + lampiran' : ''}</button>
               </div>
 
-              {/* Pelaksana */}
+              {/* Pelaksana & peserta — semua yang tercantum di sini mendapat
+                  kredit PM di skor performa, jadi daftarnya ditampilkan penuh
+                  (bukan hanya penekan tombol Selesai). */}
               <div className="text-text2 text-[10px] pt-2 border-t border-border/50">
-                Pelaksana: <span className="text-text">{m.done_by_name || '-'}</span>
-                {m.done_at && <span className="font-mono"> · {m.done_at}</span>}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    Pelaksana: <span className="text-text">{m.done_by_name || '-'}</span>
+                    {m.done_at && <span className="font-mono"> · {m.done_at}</span>}
+                  </div>
+                  {isManager && (
+                    <button onClick={() => setMembersFor(m)} className="shrink-0 text-accent2 hover:underline">
+                      👥 Atur peserta
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {m.members && m.members.length > 0 ? (
+                    m.members.map((p) => (
+                      <span key={p.id} className="px-1.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/25">{p.name}</span>
+                    ))
+                  ) : (
+                    <span className="text-text2/80">Belum ada peserta — nilai PM belum masuk ke siapa pun.</span>
+                  )}
+                </div>
               </div>
 
               {/* Aksi */}
@@ -974,8 +995,91 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
         </div>
       )}
 
+      {membersFor && <MaintenanceMembersModal item={membersFor} onClose={() => setMembersFor(null)} onSaved={() => { setMembersFor(null); load(); }} />}
       {showAdd && <AddMaintenanceModal devices={devices} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {photoModalFor && <MaintenancePhotosModal item={photoModalFor} onClose={() => { setPhotoModalFor(null); load(); }} onCompleted={(n) => { setPhotoModalFor(null); setMsg(`✅ Maintenance selesai. Notifikasi terkirim ke ${n} koordinator.`); setTimeout(() => setMsg(''), 6000); load(); }} />}
+    </div>
+  );
+}
+
+/**
+ * Pilih siapa saja yang ikut mengerjakan satu tugas maintenance.
+ *
+ * Daftar ini menentukan siapa yang mendapat kredit PM (bobot 20%) di skor
+ * performa — karena itu jumlah terpilih ditampilkan terang-terangan, agar
+ * koordinator sadar sedang memberi nilai, bukan sekadar mencatat kehadiran.
+ * Backend hanya menerima user aktif di unit yang sama.
+ */
+function MaintenanceMembersModal({ item, onClose, onSaved }: { item: MaintenanceRow; onClose: () => void; onSaved: () => void }) {
+  const [users, setUsers] = useState<User[]>([]);
+  const [picked, setPicked] = useState<number[]>(() => (item.members || []).map((m) => m.id));
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    api.get('/users')
+      .then((r) => setUsers((r.data.users || []).filter((u: User) => u.active !== false && hasRole(u, 'teknisi', 'koordinator'))))
+      .catch(() => setErr('Gagal memuat daftar user.'));
+  }, []);
+
+  const shown = users.filter((u) => u.name.toLowerCase().includes(q.toLowerCase()));
+  const toggle = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  async function save() {
+    setBusy(true); setErr('');
+    try {
+      const r = await api.put(`/equipment/maintenance/${item.id}/members`, { userIds: picked });
+      if (r.data.skipped > 0) setErr(`${r.data.skipped} user dilewati (tidak aktif atau beda unit).`);
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Gagal menyimpan peserta.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <h3 className="text-sm font-bold">👥 Peserta Maintenance</h3>
+          <button onClick={onClose} className="text-text2 hover:text-text text-lg leading-none">×</button>
+        </div>
+        <div className="text-[11px] text-text2 mb-3">
+          {item.device_name} · {item.task}
+          <div className="mt-1 text-accent2">Yang dicentang mendapat nilai Pemeliharaan (PM) bulan ini.</div>
+        </div>
+
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 Cari nama…"
+          className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-2 outline-none focus:border-accent"
+        />
+
+        <div className="flex-1 min-h-0 overflow-y-auto border border-border rounded-md divide-y divide-border">
+          {shown.length === 0 && <div className="text-[11px] text-text2 text-center py-6">Tidak ada user.</div>}
+          {shown.map((u) => (
+            <label key={u.id} className="flex items-center gap-2.5 px-3 py-2 text-xs cursor-pointer hover:bg-surface2">
+              <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} className="accent-[var(--color-accent)]" />
+              <span className="flex-1 min-w-0 truncate">{u.name}</span>
+              <span className="text-[10px] text-text2 shrink-0">{u.jabatan || u.role}</span>
+            </label>
+          ))}
+        </div>
+
+        {err && <div className="bg-warn/10 border border-warn/30 rounded-md px-3 py-2 text-[11px] text-warn mt-3">⚠️ {err}</div>}
+
+        <div className="flex items-center justify-between gap-2 mt-4">
+          <span className="text-[11px] text-text2">{picked.length} terpilih</span>
+          <div className="flex gap-2">
+            <button className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs" onClick={onClose} disabled={busy}>Batal</button>
+            <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={save} disabled={busy}>
+              {busy ? 'Menyimpan…' : 'Simpan'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

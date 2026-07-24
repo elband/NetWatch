@@ -397,6 +397,8 @@ export interface MaintenanceRow {
   done_by_name: string | null;
   done_at: string | null;
   photo_count?: number;
+  /** Semua yang ikut mengerjakan — dasar kredit PM di skor performa. */
+  members?: { id: number; name: string }[];
 }
 
 export interface IncidentReport {

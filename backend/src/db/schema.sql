@@ -775,6 +775,24 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance (
   FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- Peserta maintenance: SIAPA SAJA yang ikut mengerjakan satu tugas maintenance.
+-- `equipment_maintenance.done_by` hanya menyimpan satu orang (yang menekan tombol
+-- Selesai), padahal pemeliharaan lapangan lazim dikerjakan beberapa teknisi —
+-- akibatnya hanya satu yang dapat nilai PM. Tabel ini ditetapkan koordinator dan
+-- menjadi dasar kredit PM di perfScore.js (done_by ikut dihitung sebagai peserta).
+CREATE TABLE IF NOT EXISTS equipment_maintenance_members (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  maintenance_id INT NOT NULL,
+  user_id INT NOT NULL,
+  assigned_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_maint_member (maintenance_id, user_id),
+  INDEX idx_mmember_user (user_id),
+  FOREIGN KEY (maintenance_id) REFERENCES equipment_maintenance(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 -- Dokumentasi foto maintenance (banyak foto per rencana maintenance).
 CREATE TABLE IF NOT EXISTS equipment_maintenance_photos (
   id INT AUTO_INCREMENT PRIMARY KEY,

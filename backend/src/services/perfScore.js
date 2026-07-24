@@ -79,11 +79,27 @@ export async function scoreTeknisi(userId, start, end, unitId) {
   // PM: dinilai dari Maintenance Bulanan (equipment_maintenance) yang dikelola di tab
   // Maintenance. Target per teknisi = tugas maintenance unit yang direncanakan pada rentang
   // ÷ jumlah teknisi aktif; nilai = tugas yang sudah diselesaikan (done_by) teknisi ini.
+  // Kredit tiap tugas DIBAGI RATA antar peserta: satu tugas = total nilai 1,0
+  // yang dipecah ke semua peserta (berdua → ½ masing-masing). Dengan begitu total
+  // kredit seluruh teknisi = jumlah tugas selesai, persis sama dengan pembagi
+  // target — kolaborasi tidak menggelembungkan skor.
+  //
+  // Peserta = baris equipment_maintenance_members; bila tugas lama belum punya
+  // peserta sama sekali, `done_by` dihitung sebagai peserta tunggal (bagian 1,0)
+  // agar data lama tidak kehilangan nilai. GREATEST(pc,1) menjaga pembagi ≥ 1.
   const ufmd = unitFilter(unitId, 'd.unit_id');
   const [[pmDoneRow]] = await pool.query(
-    `SELECT COUNT(*) c FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id
-      WHERE m.done_by=? AND m.status='selesai' AND m.scheduled_date>=? AND m.scheduled_date<?${ufmd.clause}`,
-    [userId, start, end, ...ufmd.params]
+    `SELECT COALESCE(SUM(1.0 / GREATEST(t.pc, 1)), 0) c FROM (
+        SELECT m.id,
+               (SELECT COUNT(*) FROM equipment_maintenance_members mm WHERE mm.maintenance_id=m.id) AS pc
+          FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id
+         WHERE m.status='selesai' AND m.scheduled_date>=? AND m.scheduled_date<?${ufmd.clause}
+           AND (EXISTS (SELECT 1 FROM equipment_maintenance_members mm
+                         WHERE mm.maintenance_id=m.id AND mm.user_id=?)
+                OR (m.done_by=? AND NOT EXISTS (
+                     SELECT 1 FROM equipment_maintenance_members mm WHERE mm.maintenance_id=m.id)))
+      ) t`,
+    [start, end, ...ufmd.params, userId, userId]
   );
   // Jendela Maintenance (maintenance_windows) yang diselesaikan teknisi juga terhitung
   // pemeliharaan — banyak unit hanya memakai jendela ini, tanpa Maintenance Bulanan.
@@ -93,7 +109,10 @@ export async function scoreTeknisi(userId, start, end, unitId) {
       WHERE done_by=? AND status='selesai' AND starts_at>=? AND starts_at<?${ufmw.clause}`,
     [userId, start, end, ...ufmw.params]
   );
+  // Kredit bisa pecahan (½ per peserta). value dihitung dari nilai presisi;
+  // pmDoneDisp hanya untuk teks (mis. "1,5") agar angka di UI tetap rapi.
   const pmDone = (Number(pmDoneRow.c) || 0) + (Number(mwDoneRow.c) || 0);
+  const pmDoneDisp = Math.round(pmDone * 10) / 10;
   const pmTarget = await pmTargetPerTech(unitId, start, end);
 
   const taken = Number(t.taken) || 0, onTime = Number(t.onTime) || 0, done = Number(d.done) || 0, insC = Number(ins.c) || 0;
@@ -104,8 +123,8 @@ export async function scoreTeknisi(userId, start, end, unitId) {
       note: taken ? `${done} dari ${taken} tiket yang diambil sudah selesai` : 'Belum ambil tiket bulan ini' },
     { key: 'inspeksi', label: 'Inspeksi', weight: 20, value: pct(insC, hariDinas), num: insC, den: hariDinas,
       note: hariDinas ? `${insC} inspeksi dari ${hariDinas} hari dinas` : 'Tidak ada hari dinas terjadwal' },
-    { key: 'pm', label: 'Pemeliharaan (PM)', weight: 20, value: pct(pmDone, pmTarget), num: pmDone, den: pmTarget,
-      note: pmTarget ? `${pmDone} pemeliharaan selesai (maintenance bulanan + jendela maintenance) dari target ${pmTarget}` : 'Tidak ada rencana pemeliharaan bulan ini' },
+    { key: 'pm', label: 'Pemeliharaan (PM)', weight: 20, value: pct(pmDone, pmTarget), num: pmDoneDisp, den: pmTarget,
+      note: pmTarget ? `${pmDoneDisp} pemeliharaan selesai (kredit dibagi rata antar peserta) dari target ${pmTarget}` : 'Tidak ada rencana pemeliharaan bulan ini' },
   ]);
 }
 

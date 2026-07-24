@@ -590,7 +590,72 @@ router.get('/maintenance', async (req, res) => {
       ORDER BY m.scheduled_date ASC, d.name ASC`,
     [month, ...uf.params]
   );
+  // Peserta diambil sekali untuk semua baris (bukan per baris) supaya tidak jadi
+  // N+1 query saat rencana sebulan berisi puluhan tugas.
+  if (rows.length) {
+    const ids = rows.map((r) => r.id);
+    const [mem] = await pool.query(
+      `SELECT mm.maintenance_id, u.id, u.name
+         FROM equipment_maintenance_members mm JOIN users u ON u.id = mm.user_id
+        WHERE mm.maintenance_id IN (?) ORDER BY u.name`,
+      [ids]
+    );
+    const byId = new Map(ids.map((id) => [id, []]));
+    for (const m of mem) byId.get(m.maintenance_id)?.push({ id: m.id, name: m.name });
+    for (const r of rows) r.members = byId.get(r.id) || [];
+  }
   res.json({ month, maintenance: rows });
+});
+
+// Tetapkan peserta maintenance (koordinator/admin). Menggantikan seluruh daftar,
+// bukan menambah — UI mengirim keadaan akhir centangan.
+router.put('/maintenance/:id/members', requireRole('admin', 'koordinator'), async (req, res) => {
+  const [[m]] = await pool.query(
+    'SELECT m.id, m.unit_id, d.unit_id AS device_unit_id FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id = ?',
+    [req.params.id]
+  );
+  if (!m || !rowInUnit({ unit_id: m.unit_id ?? m.device_unit_id }, req.unitId)) {
+    return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
+  }
+  const raw = Array.isArray(req.body.userIds) ? req.body.userIds : [];
+  const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+
+  // Hanya user aktif di unit yang sama yang boleh jadi peserta — tanpa ini
+  // koordinator bisa mengkreditkan PM ke teknisi unit lain.
+  let valid = [];
+  if (ids.length) {
+    const unitId = m.unit_id ?? m.device_unit_id ?? null;
+    const [ok] = await pool.query(
+      'SELECT id FROM users WHERE active=1 AND id IN (?) AND (unit_id IS NULL OR unit_id = ?)',
+      [ids, unitId]
+    );
+    valid = ok.map((u) => u.id);
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM equipment_maintenance_members WHERE maintenance_id = ?', [m.id]);
+    if (valid.length) {
+      await conn.query(
+        'INSERT INTO equipment_maintenance_members (maintenance_id, user_id, assigned_by) VALUES ?',
+        [valid.map((uid) => [m.id, uid, req.user.id])]
+      );
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+
+  const [members] = await pool.query(
+    `SELECT u.id, u.name FROM equipment_maintenance_members mm JOIN users u ON u.id = mm.user_id
+      WHERE mm.maintenance_id = ? ORDER BY u.name`,
+    [m.id]
+  );
+  res.json({ ok: true, members, skipped: ids.length - valid.length });
 });
 
 router.post('/maintenance', requireRole('admin', 'koordinator'), maintUpload.single('doc'), async (req, res) => {
@@ -634,6 +699,12 @@ router.put('/maintenance/:id', requireRole('admin', 'koordinator', 'teknisi'), m
     await pool.query(
       'UPDATE equipment_maintenance SET status=?, note=COALESCE(?, note), doc_url=COALESCE(?, doc_url), done_by=?, done_at=NOW() WHERE id=?',
       [status, note?.trim() || null, docUrl, req.user.id, req.params.id]
+    );
+    // Penekan tombol Selesai otomatis tercatat sebagai peserta. IGNORE karena
+    // koordinator mungkin sudah mendaftarkannya lebih dulu (UNIQUE per pasangan).
+    await pool.query(
+      'INSERT IGNORE INTO equipment_maintenance_members (maintenance_id, user_id, assigned_by) VALUES (?, ?, ?)',
+      [req.params.id, req.user.id, req.user.id]
     );
     // Notifikasi ke koordinator unit perangkat (+ super admin), bukan lintas unit.
     const [coords] = await pool.query("SELECT id FROM users WHERE active=1 AND (role='koordinator' OR JSON_CONTAINS(roles,'\"koordinator\"')) AND (unit_id IS NULL OR unit_id = ?)", [m.unit_id ?? m.device_unit_id ?? null]);
