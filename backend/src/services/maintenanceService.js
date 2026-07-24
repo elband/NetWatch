@@ -16,8 +16,9 @@ export async function loadActiveMaintenance() {
   //     yang tak bisa dipindah ke equipment_maintenance (butuh device_id).
   const [rows] = await pool.query(
     `SELECT device_id, location_id, loc_name FROM (
-        SELECT em.device_id, NULL AS location_id, NULL AS loc_name
+        SELECT em.device_id, em.location_id, el.name AS loc_name
           FROM equipment_maintenance em
+          LEFT JOIN locations el ON el.id = em.location_id
          WHERE em.starts_at IS NOT NULL AND em.ends_at IS NOT NULL
            AND em.status <> 'batal'
            AND NOW() BETWEEN em.starts_at AND em.ends_at

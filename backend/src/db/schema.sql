@@ -759,7 +759,8 @@ CREATE TABLE IF NOT EXISTS equipment_inspections (
 -- Direncanakan koordinator/admin (bisa via impor Excel), dieksekusi teknisi.
 CREATE TABLE IF NOT EXISTS equipment_maintenance (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  device_id INT NOT NULL,
+  device_id INT DEFAULT NULL,             -- target = perangkat ATAU lokasi (salah satu)
+  location_id INT DEFAULT NULL,           -- maintenance/jendela untuk seluruh lokasi
   plan_month VARCHAR(7) NOT NULL,
   scheduled_date DATE NOT NULL,
   starts_at DATETIME DEFAULT NULL,        -- opsional: jendela downtime (tekan alarm/SLA)

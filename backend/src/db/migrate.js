@@ -161,6 +161,33 @@ async function migrate() {
     }
     if (wins.length) console.log(`  ~ ${wins.length} jendela maintenance per-perangkat digabung ke equipment_maintenance`);
   }
+  // Maintenance boleh menargetkan LOKASI (semua perangkat di situ), bukan hanya
+  // satu perangkat: device_id jadi nullable + kolom location_id. Salah satu diisi.
+  await conn.query('ALTER TABLE equipment_maintenance MODIFY device_id INT NULL');
+  await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'location_id', 'INT DEFAULT NULL AFTER device_id');
+  {
+    // Pindahkan jendela maintenance ber-LOKASI lama → equipment_maintenance juga.
+    const [wins] = await conn.query(
+      `SELECT mw.* FROM maintenance_windows mw
+        WHERE mw.device_id IS NULL AND mw.location_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM equipment_maintenance em WHERE em.window_source_id = mw.id)`
+    );
+    for (const w of wins) {
+      const month = (w.starts_at instanceof Date ? w.starts_at.toISOString().slice(0, 7) : String(w.starts_at).slice(0, 7));
+      const schedDate = (w.starts_at instanceof Date ? w.starts_at.toISOString().slice(0, 10) : String(w.starts_at).slice(0, 10));
+      const status = w.status === 'selesai' ? 'selesai' : 'rencana';
+      // unit dari lokasi (locations sudah ber-unit_id via multi-unit).
+      const [[loc]] = await conn.query('SELECT unit_id FROM locations WHERE id = ?', [w.location_id]);
+      await conn.query(
+        `INSERT INTO equipment_maintenance
+           (device_id, location_id, plan_month, scheduled_date, starts_at, ends_at, window_source_id, task, note, status, done_by, done_at, created_by, unit_id)
+         VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [w.location_id, month, schedDate, w.starts_at, w.ends_at, w.id, w.title || 'Maintenance', (w.reason || w.done_note || '').slice(0, 255) || null, status, w.done_by, w.done_at, w.created_by, w.unit_id ?? loc?.unit_id ?? null]
+      );
+      await conn.query('DELETE FROM maintenance_windows WHERE id = ?', [w.id]);
+    }
+    if (wins.length) console.log(`  ~ ${wins.length} jendela maintenance ber-lokasi digabung ke equipment_maintenance`);
+  }
   // equipment_poweron: dukung state on/off (dokumentasi wajib untuk keduanya).
   await addColumnIfMissing(conn, env.db.database, 'equipment_poweron', 'state', "ENUM('on','off') NOT NULL DEFAULT 'on' AFTER on_date");
   // Foto hidupkan/matikan mencurigakan (di luar radius/tanpa GPS) yang tetap disimpan → penalti performa 20%.

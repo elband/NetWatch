@@ -7,7 +7,7 @@ import { confirmDialog, alertDialog } from '../components/dialog';
 import { getGeo, stampPhoto, stampFiles, type GeoPoint } from '../utils/photoStamp';
 import { openImage } from '../components/ImageLightbox';
 import PowerIcon from '../components/PowerIcon';
-import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn, User } from '../types';
+import type { EquipmentRow, Inspection, InspectStatus, MaintenanceRow, Device, PowerOn, User, LocationItem } from '../types';
 
 const SLOTS: Array<'09' | '12' | '15'> = ['09', '12', '15'];
 const SLOT_LABEL: Record<string, string> = { '09': '09:00', '12': '12:00', '15': '15:00' };
@@ -868,6 +868,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
   const [showAdd, setShowAdd] = useState(false);
   const [photoModalFor, setPhotoModalFor] = useState<MaintenanceRow | null>(null);
   const [membersFor, setMembersFor] = useState<MaintenanceRow | null>(null);
+  const [locations, setLocations] = useState<LocationItem[]>([]);
   const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -876,6 +877,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
   }
   useEffect(load, [month]);
   useEffect(() => { api.get('/devices').then((res) => setDevices(res.data.devices)); }, []);
+  useEffect(() => { api.get('/locations').then((res) => setLocations(res.data.locations || [])).catch(() => {}); }, []);
 
   async function setStatus(id: number, status: string) {
     await api.put(`/equipment/maintenance/${id}`, { status });
@@ -1004,7 +1006,7 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
       )}
 
       {membersFor && <MaintenanceMembersModal item={membersFor} onClose={() => setMembersFor(null)} onSaved={() => { setMembersFor(null); load(); }} />}
-      {showAdd && <AddMaintenanceModal devices={devices} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
+      {showAdd && <AddMaintenanceModal devices={devices} locations={locations} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {photoModalFor && <MaintenancePhotosModal item={photoModalFor} onClose={() => { setPhotoModalFor(null); load(); }} onCompleted={(n) => { setPhotoModalFor(null); setMsg(`✅ Maintenance selesai. Notifikasi terkirim ke ${n} koordinator.`); setTimeout(() => setMsg(''), 6000); load(); }} />}
     </div>
   );
@@ -1092,8 +1094,12 @@ function MaintenanceMembersModal({ item, onClose, onSaved }: { item: Maintenance
   );
 }
 
-function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[]; onClose: () => void; onSaved: () => void }) {
+function AddMaintenanceModal({ devices, locations, onClose, onSaved }: { devices: Device[]; locations: LocationItem[]; onClose: () => void; onSaved: () => void }) {
+  // Target maintenance: PERALATAN (satu/lebih perangkat, dapat nilai PM) ATAU
+  // LOKASI (semua perangkat di lokasi; cocok untuk jendela downtime).
+  const [targetKind, setTargetKind] = useState<'device' | 'location'>('device');
   const [deviceIds, setDeviceIds] = useState<number[]>([]);
+  const [locationId, setLocationId] = useState<number | ''>('');
   const [q, setQ] = useState('');
   const [scheduledDate, setScheduledDate] = useState(todayKey());
   const [task, setTask] = useState('');
@@ -1108,16 +1114,20 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
   const [err, setErr] = useState('');
 
   async function save() {
-    if (deviceIds.length === 0 || !task.trim()) return setErr('Pilih minimal satu perangkat dan isi tugas.');
+    if (!task.trim()) return setErr('Isi tugas.');
+    if (targetKind === 'device' && deviceIds.length === 0) return setErr('Pilih minimal satu perangkat.');
+    if (targetKind === 'location' && !locationId) return setErr('Pilih satu lokasi.');
     if (useWindow && (!startsAt || !endsAt)) return setErr('Isi waktu mulai & selesai jendela downtime, atau matikan opsinya.');
     setBusy(true); setErr('');
     try {
-      // Geotag dokumentasi (bila gambar) — stamp sekali, dipakai untuk semua perangkat.
+      // Geotag dokumentasi (bila gambar) — stamp sekali, dipakai untuk semua target.
       const stampedDoc = doc ? (await stampFiles([doc], ['Rencana Maintenance']))[0] : null;
-      // Satu rencana maintenance dibuat untuk tiap perangkat yang dipilih.
-      for (const id of deviceIds) {
+      // Peralatan: satu entri per perangkat. Lokasi: satu entri untuk lokasi itu.
+      const targets = targetKind === 'device' ? deviceIds.map((id) => ({ deviceId: String(id) })) : [{ locationId: String(locationId) }];
+      for (const t of targets) {
         const fd = new FormData();
-        fd.append('deviceId', String(id));
+        if ('deviceId' in t) fd.append('deviceId', t.deviceId);
+        else fd.append('locationId', t.locationId);
         fd.append('scheduledDate', scheduledDate);
         fd.append('task', task.trim());
         if (note.trim()) fd.append('note', note.trim());
@@ -1135,6 +1145,23 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-4">+ Rencana Maintenance</h3>
+
+        {/* Target: Peralatan atau Lokasi */}
+        <div className="flex gap-1 mb-3 bg-surface2 border border-border rounded-lg p-0.5">
+          <button type="button" onClick={() => setTargetKind('device')} className={`flex-1 py-1.5 text-xs rounded-md ${targetKind === 'device' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}>🔧 Peralatan</button>
+          <button type="button" onClick={() => setTargetKind('location')} className={`flex-1 py-1.5 text-xs rounded-md ${targetKind === 'location' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}>📍 Lokasi</button>
+        </div>
+
+        {targetKind === 'location' ? (
+          <div className="mb-3">
+            <label className="block text-[11px] text-text2 mb-1">Lokasi *</label>
+            <select className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs" value={locationId} onChange={(e) => setLocationId(e.target.value ? Number(e.target.value) : '')}>
+              <option value="">— Pilih lokasi —</option>
+              {locations.map((l) => <option key={l.id} value={l.id}>{l.icon || '📍'} {l.name}</option>)}
+            </select>
+            <div className="text-[10px] text-text2 mt-1">Berlaku untuk semua perangkat di lokasi ini (cocok untuk jendela downtime).</div>
+          </div>
+        ) : (<>
         <label className="block text-[11px] text-text2 mb-1">Perangkat * <span className="text-text2">({deviceIds.length} dipilih)</span></label>
         <input
           value={q}
@@ -1173,6 +1200,7 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
             </>
           );
         })()}
+        </>)}
         <label className="block text-[11px] text-text2 mb-1">Tanggal *</label>
         <input type="date" className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
         <label className="block text-[11px] text-text2 mb-1">Tugas *</label>

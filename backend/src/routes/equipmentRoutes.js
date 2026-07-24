@@ -591,17 +591,23 @@ router.get('/maintenance', async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month)
     ? req.query.month
     : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-  // Filter unit lewat unit perangkat (JOIN devices sudah ada) — sumber unit paling andal.
-  const uf = unitFilter(req.unitId, 'd.unit_id');
+  // Target bisa perangkat ATAU lokasi → LEFT JOIN keduanya. Filter unit pakai
+  // m.unit_id (selalu diisi saat insert) agar baris ber-lokasi (device_id NULL)
+  // ikut tersaring benar. device_name = nama perangkat atau nama lokasi.
+  const uf = unitFilter(req.unitId, 'm.unit_id');
   const [rows] = await pool.query(
-    `SELECT m.*, d.name AS device_name, d.ip AS device_ip, d.type AS device_type,
+    `SELECT m.*,
+            COALESCE(d.name, CONCAT('📍 ', loc.name)) AS device_name,
+            d.ip AS device_ip, COALESCE(d.type, 'Lokasi') AS device_type,
+            loc.name AS location_name,
             ub.name AS done_by_name,
             (SELECT COUNT(*) FROM equipment_maintenance_photos p WHERE p.maintenance_id = m.id) AS photo_count
        FROM equipment_maintenance m
-       JOIN devices d ON d.id = m.device_id
+       LEFT JOIN devices d ON d.id = m.device_id
+       LEFT JOIN locations loc ON loc.id = m.location_id
        LEFT JOIN users ub ON ub.id = m.done_by
       WHERE m.plan_month = ?${uf.clause}
-      ORDER BY m.scheduled_date ASC, d.name ASC`,
+      ORDER BY m.scheduled_date ASC, device_name ASC`,
     [month, ...uf.params]
   );
   // Peserta diambil sekali untuk semua baris (bukan per baris) supaya tidak jadi
@@ -673,24 +679,34 @@ router.put('/maintenance/:id/members', requireRole('admin', 'koordinator'), asyn
 });
 
 router.post('/maintenance', requireRole('admin', 'koordinator'), maintUpload.single('doc'), async (req, res) => {
-  const { deviceId, scheduledDate, task, note, startsAt, endsAt } = req.body;
-  if (!deviceId || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate || '') || !task?.trim()) {
-    return res.status(400).json({ error: 'Perangkat, tanggal (YYYY-MM-DD), dan tugas wajib diisi.' });
+  const { deviceId, locationId, scheduledDate, task, note, startsAt, endsAt } = req.body;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate || '') || !task?.trim()) {
+    return res.status(400).json({ error: 'Tanggal (YYYY-MM-DD) dan tugas wajib diisi.' });
   }
+  if (!deviceId && !locationId) return res.status(400).json({ error: 'Pilih perangkat atau lokasi.' });
   // Jendela downtime opsional: bila salah satu diisi, dua-duanya wajib & end > start.
   const win = normWindow(startsAt, endsAt);
   if (win.error) return res.status(400).json({ error: win.error });
-  // Perangkat harus ada & berada di unit request; unit baris mengikuti unit perangkat.
-  const [[dev]] = await pool.query('SELECT unit_id FROM devices WHERE id = ?', [deviceId]);
-  if (!dev || !rowInUnit(dev, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
-  const rowUnitId = dev.unit_id ?? insertUnitId(req);
+
+  // Target = perangkat ATAU lokasi. Keduanya harus di unit request; unit baris
+  // mengikuti unit target.
+  let devId = null, locId = null, rowUnitId;
+  if (deviceId) {
+    const [[dev]] = await pool.query('SELECT unit_id FROM devices WHERE id = ?', [deviceId]);
+    if (!dev || !rowInUnit(dev, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
+    devId = deviceId; rowUnitId = dev.unit_id ?? insertUnitId(req);
+  } else {
+    const [[loc]] = await pool.query('SELECT unit_id FROM locations WHERE id = ?', [locationId]);
+    if (!loc || !rowInUnit(loc, req.unitId)) return res.status(404).json({ error: 'Lokasi tidak ditemukan.' });
+    locId = locationId; rowUnitId = loc.unit_id ?? insertUnitId(req);
+  }
   if (rowUnitId == null) return res.status(400).json({ error: 'Pilih unit terlebih dahulu.' });
   const month = scheduledDate.slice(0, 7);
   const docUrl = req.file ? `/uploads/maintenance/${req.file.filename}` : null;
   const [r] = await pool.query(
-    `INSERT INTO equipment_maintenance (device_id, plan_month, scheduled_date, starts_at, ends_at, task, note, doc_url, created_by, unit_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [deviceId, month, scheduledDate, win.startsAt, win.endsAt, task.trim(), note?.trim() || null, docUrl, req.user.id, rowUnitId]
+    `INSERT INTO equipment_maintenance (device_id, location_id, plan_month, scheduled_date, starts_at, ends_at, task, note, doc_url, created_by, unit_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [devId, locId, month, scheduledDate, win.startsAt, win.endsAt, task.trim(), note?.trim() || null, docUrl, req.user.id, rowUnitId]
   );
   res.status(201).json({ id: r.insertId, doc_url: docUrl });
 });
@@ -702,11 +718,15 @@ router.put('/maintenance/:id', requireRole('admin', 'koordinator', 'teknisi'), m
   const valid = ['rencana', 'selesai', 'batal'];
   if (!valid.includes(status)) return res.status(400).json({ error: 'Status tidak valid.' });
   const [rows] = await pool.query(
-    'SELECT m.*, d.name AS device_name, d.unit_id AS device_unit_id FROM equipment_maintenance m JOIN devices d ON d.id=m.device_id WHERE m.id=?',
+    `SELECT m.*, COALESCE(d.name, loc.name) AS device_name, COALESCE(d.unit_id, loc.unit_id) AS device_unit_id
+       FROM equipment_maintenance m
+       LEFT JOIN devices d ON d.id = m.device_id
+       LEFT JOIN locations loc ON loc.id = m.location_id
+      WHERE m.id = ?`,
     [req.params.id]
   );
   const m = rows[0];
-  // Fallback ke unit perangkat bila unit_id baris lama masih kosong (data legacy).
+  // Fallback ke unit target bila unit_id baris lama masih kosong (data legacy).
   if (!m || !rowInUnit({ unit_id: m.unit_id ?? m.device_unit_id }, req.unitId)) return res.status(404).json({ error: 'Data maintenance tidak ditemukan.' });
   const docUrl = req.file ? `/uploads/maintenance/${req.file.filename}` : null;
 
