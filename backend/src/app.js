@@ -159,8 +159,26 @@ export function createApp() {
   // Production: serve built frontend & SPA routing.
   if (env.isProd) {
     const distPath = path.join(__dirname, '..', '..', 'frontend', 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    app.use(express.static(distPath, {
+      setHeaders(res, filePath) {
+        // Aset ber-hash (nama memuat sidik jari konten) tak pernah berubah isinya
+        // → boleh di-cache selamanya. Shell PWA (service worker, index.html,
+        // manifest) HARUS selalu direvalidasi, kalau tidak versi baru tak pernah
+        // ketahuan & PWA terpasang menampilkan build lama terus.
+        const base = path.basename(filePath);
+        if (/(^sw\.js$|^workbox-.*\.js$|^registerSW\.js$|^manifest\.webmanifest$|^index\.html$)/.test(base)) {
+          res.setHeader('Cache-Control', 'no-cache');
+        } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }));
+    // Fallback SPA: index.html juga no-cache (revalidasi tiap muat) agar tautan
+    // aset terbaru selalu ikut terkirim setelah deploy.
+    app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   app.use((err, req, res, next) => {
