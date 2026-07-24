@@ -199,34 +199,89 @@ function ForgotPinModal({ onClose }: { onClose: () => void }) {
     } finally { setBusy(false); }
   }
 
+  // Hijau WhatsApp resmi — tombol utama memakai warna ini karena kanalnya WA.
+  const WA = '#25D366';
+  const inp = 'w-full bg-surface2 border border-border rounded-lg px-3.5 py-3 text-sm outline-none transition-colors focus:border-accent placeholder:text-text2/70';
+  const pinOk = /^\d{6}$/.test(newPin) && newPin === confirmPin && /^\d{6}$/.test(otp);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-sm font-bold">🔐 Reset PIN via WhatsApp</h3>
-          <button onClick={onClose} className="text-text2 hover:text-text text-xl leading-none">×</button>
-        </div>
-        <p className="text-[11px] text-text2 mb-4">{step === 1 ? 'Masukkan username / email / nomor WhatsApp Anda. Kode OTP dikirim ke WhatsApp terdaftar.' : 'Masukkan kode OTP dari WhatsApp lalu PIN baru (6 digit).'}</p>
+      <div className="bg-surface border border-border rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        {/* Pita hijau tipis menandai kanal WhatsApp. */}
+        <div className="h-1" style={{ background: `linear-gradient(90deg, ${WA}, ${WA}88)` }} />
 
-        {info && <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2 text-[11px] text-success mb-3">{info}</div>}
-        {err && <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-[11px] text-danger mb-3">⚠️ {err}</div>}
-
-        {step === 1 ? (
-          <div className="space-y-3">
-            <input autoFocus value={identifier} onChange={(e) => setIdentifier(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && requestOtp()} placeholder="Username / email / no. WhatsApp" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-accent" />
-            <button disabled={busy || !identifier.trim()} onClick={requestOtp} className="w-full bg-accent text-bg rounded-lg px-3 py-2.5 text-sm font-semibold disabled:opacity-50">{busy ? 'Mengirim…' : 'Kirim OTP'}</button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <input autoFocus value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="Kode OTP (6 digit)" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm tracking-widest text-center outline-none focus:border-accent" />
-            <input type="password" value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="PIN baru (6 digit)" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-accent" />
-            <input type="password" value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={(e) => e.key === 'Enter' && doReset()} inputMode="numeric" placeholder="Ulangi PIN baru" className="w-full bg-surface2 border border-border rounded-lg px-3 py-2.5 text-sm outline-none focus:border-accent" />
-            <div className="flex gap-2">
-              <button onClick={() => { setStep(1); setErr(''); setInfo(''); }} className="border border-border text-text2 rounded-lg px-3 py-2.5 text-sm hover:text-text">←</button>
-              <button disabled={busy} onClick={doReset} className="flex-1 bg-accent text-bg rounded-lg px-3 py-2.5 text-sm font-semibold disabled:opacity-50">{busy ? 'Memproses…' : 'Set PIN Baru'}</button>
+        <div className="p-6">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="w-10 h-10 rounded-xl shrink-0 flex items-center justify-center text-xl" style={{ background: `${WA}1f`, border: `1px solid ${WA}55` }}>🔐</span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold leading-tight">Reset PIN</h3>
+                <div className="text-[11px] text-text2">via WhatsApp</div>
+              </div>
             </div>
+            <button onClick={onClose} aria-label="Tutup" className="text-text2 hover:text-text text-xl leading-none shrink-0">×</button>
           </div>
-        )}
+
+          {/* Indikator langkah: jelas ada 2 tahap, dan di mana posisinya. */}
+          <div className="flex items-center gap-2 mb-4 text-[10px] font-semibold">
+            <span className={`flex items-center gap-1.5 ${step === 1 ? 'text-accent' : 'text-text2'}`}>
+              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${step === 1 ? 'bg-accent text-bg' : 'bg-success text-bg'}`}>{step === 1 ? '1' : '✓'}</span>
+              Minta OTP
+            </span>
+            <span className="flex-1 h-px bg-border" />
+            <span className={`flex items-center gap-1.5 ${step === 2 ? 'text-accent' : 'text-text2'}`}>
+              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${step === 2 ? 'bg-accent text-bg' : 'bg-surface2 border border-border text-text2'}`}>2</span>
+              PIN Baru
+            </span>
+          </div>
+
+          <p className="text-[11px] text-text2 mb-4 leading-relaxed">
+            {step === 1
+              ? 'Masukkan username, email, atau nomor WhatsApp Anda. Kode OTP dikirim ke WhatsApp yang terdaftar.'
+              : 'Masukkan kode OTP dari WhatsApp, lalu tetapkan PIN baru 6 digit.'}
+          </p>
+
+          {info && <div className="bg-success/10 border border-success/30 rounded-lg px-3 py-2 text-[11px] text-success mb-3 flex items-start gap-1.5"><span>✓</span><span>{info}</span></div>}
+          {err && <div className="bg-danger/10 border border-danger/30 rounded-lg px-3 py-2 text-[11px] text-danger mb-3 flex items-start gap-1.5"><span>⚠️</span><span>{err}</span></div>}
+
+          {step === 1 ? (
+            <div className="space-y-3">
+              <input autoFocus value={identifier} onChange={(e) => setIdentifier(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && requestOtp()} placeholder="Username / email / no. WhatsApp" className={inp} />
+              <button
+                disabled={busy || !identifier.trim()}
+                onClick={requestOtp}
+                className="w-full rounded-lg px-3 py-3 text-sm font-bold text-white transition-all disabled:cursor-not-allowed active:scale-[0.98] flex items-center justify-center gap-2"
+                style={busy || !identifier.trim()
+                  ? { background: 'var(--color-surface2)', color: 'var(--color-text2)', border: '1px solid var(--color-border)' }
+                  : { background: WA, boxShadow: `0 6px 18px ${WA}44` }}
+              >
+                <span aria-hidden>📲</span>{busy ? 'Mengirim…' : 'Kirim Kode OTP'}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] text-text2 mb-1 uppercase tracking-wide">Kode OTP</label>
+                <input autoFocus value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="••••••" className={`${inp} text-center text-lg tracking-[0.5em] font-mono`} />
+              </div>
+              <input type="password" value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="PIN baru (6 digit)" className={inp} />
+              <input type="password" value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={(e) => e.key === 'Enter' && doReset()} inputMode="numeric" placeholder="Ulangi PIN baru" className={inp} />
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => { setStep(1); setErr(''); setInfo(''); }} className="border border-border text-text2 rounded-lg px-4 py-3 text-sm hover:text-text hover:border-text2 transition-colors">← Kembali</button>
+                <button
+                  disabled={busy || !pinOk}
+                  onClick={doReset}
+                  className="flex-1 rounded-lg px-3 py-3 text-sm font-bold transition-all disabled:cursor-not-allowed active:scale-[0.98]"
+                  style={busy || !pinOk
+                    ? { background: 'var(--color-surface2)', color: 'var(--color-text2)', border: '1px solid var(--color-border)' }
+                    : { background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+                >
+                  {busy ? 'Memproses…' : 'Simpan PIN Baru'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
