@@ -3,7 +3,6 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import MaintenancePhotosModal from '../components/MaintenancePhotosModal';
-import MaintenanceWindows from './MaintenanceWindows';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import { getGeo, stampPhoto, stampFiles, type GeoPoint } from '../utils/photoStamp';
 import { openImage } from '../components/ImageLightbox';
@@ -298,6 +297,8 @@ function CameraCapture({ onCapture, hasPhoto, device, radiusM = DEFAULT_RADIUS_M
 }
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+// Format ringkas jendela downtime: "24 Jul 14.37".
+const fmtWin = (s: string) => new Date(s.replace(' ', 'T')).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 // Tanggal singkat "05 Jul" dari kolom DATE (bisa string/ISO). '' bila kosong/invalid.
 const fmtDay = (s?: string | null) => { if (!s) return ''; const d = new Date(String(s).slice(0, 10) + 'T00:00:00'); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }); };
 
@@ -333,13 +334,9 @@ export default function EquipmentPerf() {
         </div>
       </div>
       {tab === 'inspeksi' && <InspeksiTab isManager={isManager} />}
-      {tab === 'maintenance' && (
-        <div className="space-y-6">
-          {/* Maintenance Bulanan + Jendela Maintenance digabung jadi satu halaman utuh (tanpa sekat). */}
-          <MaintenanceTab isManager={isManager} />
-          <MaintenanceWindows embedded />
-        </div>
-      )}
+      {/* Maintenance terpadu: satu entri = tugas PM + opsi jendela downtime.
+          Modul "Jendela Maintenance" terpisah dilebur ke sini. */}
+      {tab === 'maintenance' && <MaintenanceTab isManager={isManager} />}
     </div>
   );
 }
@@ -948,8 +945,19 @@ function MaintenanceTab({ isManager }: { isManager: boolean }) {
                 <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded border font-semibold capitalize ${stMeta[m.status]}`}>{m.status}</span>
               </div>
 
-              {/* Tanggal */}
+              {/* Tanggal + jendela downtime (bila ada) */}
               <div className="text-text2 text-[11px] flex items-center gap-1"><span>📅</span><span className="font-mono">{m.scheduled_date}</span></div>
+              {m.starts_at && m.ends_at && (() => {
+                const now = Date.now();
+                const active = now >= new Date(m.starts_at.replace(' ', 'T')).getTime() && now <= new Date(m.ends_at.replace(' ', 'T')).getTime();
+                return (
+                  <div className={`text-[10px] rounded-md border px-2 py-1 flex items-center gap-1.5 ${active ? 'border-amber-500/40 text-amber-400 bg-amber-500/10' : 'border-border text-text2'}`}>
+                    <span>🛡️</span>
+                    <span>Jendela downtime {active && <b>· berlangsung</b>}</span>
+                    <span className="font-mono ml-auto">{fmtWin(m.starts_at)} → {fmtWin(m.ends_at)}</span>
+                  </div>
+                );
+              })()}
 
               {/* Tugas */}
               <div className="text-[11px]">
@@ -1091,11 +1099,17 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
   const [task, setTask] = useState('');
   const [note, setNote] = useState('');
   const [doc, setDoc] = useState<File | null>(null);
+  // Jendela downtime opsional: saat aktif, perangkat tak memicu insiden/alarm &
+  // tak menurunkan SLA (menggantikan modul "Jendela Maintenance" lama).
+  const [useWindow, setUseWindow] = useState(false);
+  const [startsAt, setStartsAt] = useState('');
+  const [endsAt, setEndsAt] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   async function save() {
     if (deviceIds.length === 0 || !task.trim()) return setErr('Pilih minimal satu perangkat dan isi tugas.');
+    if (useWindow && (!startsAt || !endsAt)) return setErr('Isi waktu mulai & selesai jendela downtime, atau matikan opsinya.');
     setBusy(true); setErr('');
     try {
       // Geotag dokumentasi (bila gambar) — stamp sekali, dipakai untuk semua perangkat.
@@ -1107,6 +1121,7 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
         fd.append('scheduledDate', scheduledDate);
         fd.append('task', task.trim());
         if (note.trim()) fd.append('note', note.trim());
+        if (useWindow) { fd.append('startsAt', startsAt); fd.append('endsAt', endsAt); }
         if (stampedDoc) fd.append('doc', stampedDoc);
         await api.post('/equipment/maintenance', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
@@ -1164,6 +1179,26 @@ function AddMaintenanceModal({ devices, onClose, onSaved }: { devices: Device[];
         <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" placeholder="Pembersihan, cek kondisi…" value={task} onChange={(e) => setTask(e.target.value)} />
         <label className="block text-[11px] text-text2 mb-1">Catatan</label>
         <input className="w-full bg-surface2 border border-border rounded-md px-3 py-2 text-xs mb-3" value={note} onChange={(e) => setNote(e.target.value)} />
+
+        {/* Opsi jendela downtime — menyatukan fungsi "Jendela Maintenance" lama. */}
+        <label className="flex items-center gap-2 text-[11px] mb-2 cursor-pointer">
+          <input type="checkbox" checked={useWindow} onChange={(e) => setUseWindow(e.target.checked)} className="accent-[var(--color-accent)]" />
+          <span className="font-semibold">🛡️ Jadikan jendela downtime</span>
+          <span className="text-text2">(tekan alarm & tak turunkan SLA selama berlangsung)</span>
+        </label>
+        {useWindow && (
+          <div className="grid grid-cols-2 gap-2 mb-3 pl-1">
+            <div>
+              <label className="block text-[10px] text-text2 mb-1">Mulai</label>
+              <input type="datetime-local" className="w-full bg-surface2 border border-border rounded-md px-2 py-2 text-xs" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-[10px] text-text2 mb-1">Selesai</label>
+              <input type="datetime-local" className="w-full bg-surface2 border border-border rounded-md px-2 py-2 text-xs" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
+            </div>
+          </div>
+        )}
+
         <label className="block text-[11px] text-text2 mb-1">📎 Dokumentasi (foto/PDF — bisa langsung dari kamera)</label>
         <input type="file" accept="image/*,application/pdf" capture="environment" onChange={(e) => setDoc(e.target.files?.[0] || null)}
           className="w-full text-[11px] text-text2 mb-2 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-surface2 file:text-text file:cursor-pointer" />

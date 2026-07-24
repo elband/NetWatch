@@ -762,6 +762,9 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance (
   device_id INT NOT NULL,
   plan_month VARCHAR(7) NOT NULL,
   scheduled_date DATE NOT NULL,
+  starts_at DATETIME DEFAULT NULL,        -- opsional: jendela downtime (tekan alarm/SLA)
+  ends_at DATETIME DEFAULT NULL,
+  window_source_id INT DEFAULT NULL,      -- jejak migrasi dari maintenance_windows (idempoten)
   task VARCHAR(255) NOT NULL,
   status ENUM('rencana','selesai','batal') NOT NULL DEFAULT 'rencana',
   note VARCHAR(255) DEFAULT NULL,

@@ -572,7 +572,21 @@ router.post('/poweroff', withInspectionPhoto, async (req, res) => {
   res.json({ poweroff: rows[0], device: updatedDev, verified, distance, warning, flagged });
 });
 
-// ===================== MAINTENANCE BULANAN =====================
+// ===================== MAINTENANCE (terpadu: PM + opsi jendela downtime) =====================
+// Normalisasi jendela downtime opsional. Kosong dua-duanya = tanpa jendela.
+// Salah satu saja / end <= start = error. Ubah 'YYYY-MM-DDTHH:MM' → format MySQL.
+function normWindow(startsAt, endsAt) {
+  const has = (v) => v != null && String(v).trim() !== '';
+  if (!has(startsAt) && !has(endsAt)) return { startsAt: null, endsAt: null };
+  if (!has(startsAt) || !has(endsAt)) return { error: 'Jendela downtime butuh waktu mulai DAN selesai.' };
+  const toSql = (v) => { const s = String(v).trim().replace('T', ' '); return s.length === 16 ? `${s}:00` : s; };
+  const s = toSql(startsAt), e = toSql(endsAt);
+  if (new Date(s.replace(' ', 'T')).getTime() >= new Date(e.replace(' ', 'T')).getTime()) {
+    return { error: 'Waktu selesai jendela harus setelah waktu mulai.' };
+  }
+  return { startsAt: s, endsAt: e };
+}
+
 router.get('/maintenance', async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month)
     ? req.query.month
@@ -659,10 +673,13 @@ router.put('/maintenance/:id/members', requireRole('admin', 'koordinator'), asyn
 });
 
 router.post('/maintenance', requireRole('admin', 'koordinator'), maintUpload.single('doc'), async (req, res) => {
-  const { deviceId, scheduledDate, task, note } = req.body;
+  const { deviceId, scheduledDate, task, note, startsAt, endsAt } = req.body;
   if (!deviceId || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate || '') || !task?.trim()) {
     return res.status(400).json({ error: 'Perangkat, tanggal (YYYY-MM-DD), dan tugas wajib diisi.' });
   }
+  // Jendela downtime opsional: bila salah satu diisi, dua-duanya wajib & end > start.
+  const win = normWindow(startsAt, endsAt);
+  if (win.error) return res.status(400).json({ error: win.error });
   // Perangkat harus ada & berada di unit request; unit baris mengikuti unit perangkat.
   const [[dev]] = await pool.query('SELECT unit_id FROM devices WHERE id = ?', [deviceId]);
   if (!dev || !rowInUnit(dev, req.unitId)) return res.status(404).json({ error: 'Perangkat tidak ditemukan.' });
@@ -671,9 +688,9 @@ router.post('/maintenance', requireRole('admin', 'koordinator'), maintUpload.sin
   const month = scheduledDate.slice(0, 7);
   const docUrl = req.file ? `/uploads/maintenance/${req.file.filename}` : null;
   const [r] = await pool.query(
-    `INSERT INTO equipment_maintenance (device_id, plan_month, scheduled_date, task, note, doc_url, created_by, unit_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [deviceId, month, scheduledDate, task.trim(), note?.trim() || null, docUrl, req.user.id, rowUnitId]
+    `INSERT INTO equipment_maintenance (device_id, plan_month, scheduled_date, starts_at, ends_at, task, note, doc_url, created_by, unit_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [deviceId, month, scheduledDate, win.startsAt, win.endsAt, task.trim(), note?.trim() || null, docUrl, req.user.id, rowUnitId]
   );
   res.status(201).json({ id: r.insertId, doc_url: docUrl });
 });

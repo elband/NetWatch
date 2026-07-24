@@ -9,11 +9,24 @@ import { pool } from '../db/pool.js';
 // Muat seluruh jendela maintenance yang sedang aktif (sekali per sweep),
 // lalu kembalikan predikat isUnder(device) untuk dipakai di loop pingService.
 export async function loadActiveMaintenance() {
+  // Dua sumber jendela downtime aktif (union):
+  //  1. equipment_maintenance — entri maintenance terpadu yang punya jendela
+  //     (starts_at/ends_at) & belum dibatalkan. Ini jalur baru pasca-unifikasi.
+  //  2. maintenance_windows — sisa jendela lokasi/site-wide (tanpa device_id)
+  //     yang tak bisa dipindah ke equipment_maintenance (butuh device_id).
   const [rows] = await pool.query(
-    `SELECT mw.device_id, mw.location_id, l.name AS loc_name
-       FROM maintenance_windows mw
-       LEFT JOIN locations l ON l.id = mw.location_id
-      WHERE NOW() BETWEEN mw.starts_at AND mw.ends_at`
+    `SELECT device_id, location_id, loc_name FROM (
+        SELECT em.device_id, NULL AS location_id, NULL AS loc_name
+          FROM equipment_maintenance em
+         WHERE em.starts_at IS NOT NULL AND em.ends_at IS NOT NULL
+           AND em.status <> 'batal'
+           AND NOW() BETWEEN em.starts_at AND em.ends_at
+        UNION ALL
+        SELECT mw.device_id, mw.location_id, l.name AS loc_name
+          FROM maintenance_windows mw
+          LEFT JOIN locations l ON l.id = mw.location_id
+         WHERE NOW() BETWEEN mw.starts_at AND mw.ends_at
+      ) w`
   );
   const deviceIds = new Set();
   const locNames = new Set();

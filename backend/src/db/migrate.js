@@ -130,6 +130,37 @@ async function migrate() {
   await addColumnIfMissing(conn, env.db.database, 'device_metrics', 'in_maint', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER mem');
   // Dokumentasi (foto/PDF) untuk rencana/pelaksanaan maintenance.
   await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'doc_url', 'VARCHAR(255) DEFAULT NULL AFTER note');
+  // ── Unifikasi: Maintenance = SATU entri (tugas PM + opsi jendela downtime) ──
+  // Jendela downtime opsional pada tiap maintenance: saat NOW di antara starts_at
+  // & ends_at, perangkat "under maintenance" (alarm ditekan, SLA tak turun) —
+  // fungsi lama maintenance_windows kini nempel di sini. window_source_id menandai
+  // baris hasil migrasi dari maintenance_windows agar migrasi idempoten.
+  await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'starts_at', 'DATETIME DEFAULT NULL AFTER scheduled_date');
+  await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'ends_at', 'DATETIME DEFAULT NULL AFTER starts_at');
+  await addColumnIfMissing(conn, env.db.database, 'equipment_maintenance', 'window_source_id', 'INT DEFAULT NULL AFTER ends_at');
+  // Pindahkan jendela maintenance PER-PERANGKAT lama → equipment_maintenance, lalu
+  // hapus aslinya (cegah dobel-hitung PM di perfScore & dobel-suppress). Jendela
+  // lokasi/site-wide (tanpa device_id) TETAP di maintenance_windows.
+  {
+    const [wins] = await conn.query(
+      `SELECT mw.* FROM maintenance_windows mw
+        WHERE mw.device_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM equipment_maintenance em WHERE em.window_source_id = mw.id)`
+    );
+    for (const w of wins) {
+      const month = (w.starts_at instanceof Date ? w.starts_at.toISOString().slice(0, 7) : String(w.starts_at).slice(0, 7));
+      const schedDate = (w.starts_at instanceof Date ? w.starts_at.toISOString().slice(0, 10) : String(w.starts_at).slice(0, 10));
+      const status = w.status === 'selesai' ? 'selesai' : 'rencana';
+      await conn.query(
+        `INSERT INTO equipment_maintenance
+           (device_id, plan_month, scheduled_date, starts_at, ends_at, window_source_id, task, note, status, done_by, done_at, created_by, unit_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [w.device_id, month, schedDate, w.starts_at, w.ends_at, w.id, w.title || 'Maintenance', (w.reason || w.done_note || '').slice(0, 255) || null, status, w.done_by, w.done_at, w.created_by, w.unit_id ?? null]
+      );
+      await conn.query('DELETE FROM maintenance_windows WHERE id = ?', [w.id]);
+    }
+    if (wins.length) console.log(`  ~ ${wins.length} jendela maintenance per-perangkat digabung ke equipment_maintenance`);
+  }
   // equipment_poweron: dukung state on/off (dokumentasi wajib untuk keduanya).
   await addColumnIfMissing(conn, env.db.database, 'equipment_poweron', 'state', "ENUM('on','off') NOT NULL DEFAULT 'on' AFTER on_date");
   // Foto hidupkan/matikan mencurigakan (di luar radius/tanpa GPS) yang tetap disimpan → penalti performa 20%.

@@ -399,6 +399,9 @@ export interface MaintenanceRow {
   photo_count?: number;
   /** Semua yang ikut mengerjakan — dasar kredit PM di skor performa. */
   members?: { id: number; name: string }[];
+  /** Jendela downtime opsional (tekan alarm/SLA saat aktif). */
+  starts_at?: string | null;
+  ends_at?: string | null;
 }
 
 export interface IncidentReport {
