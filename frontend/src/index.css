@@ -70,12 +70,15 @@ body {
 .nw-safe-top { padding-top: calc(0.5rem + env(safe-area-inset-top, 0px)); }
 .nw-safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
 /* Ruang bawah untuk konten agar tidak tertutup bottom-nav (hanya < lg).
-   Lebih tinggi dari bar-nya sendiri karena tombol "Layanan" di tengah menonjol
-   ~28px ke atas — tanpa ini baris terakhir halaman tertutup tombol itu. */
-.nw-main-pad { padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px)); }
+   Harus melebihi PUNCAK elemen mengambang tertinggi — tombol Insiden yang
+   duduk di .nw-above-nav (≈124px dari dasar) — bukan cuma tinggi bar-nya. Tanpa
+   ini baris terakhir di kanan (mis. link "Rincian…") terperangkap di balik
+   tombol & tak bisa di-scroll keluar. */
+.nw-main-pad { padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px)); }
 @media (min-width: 1024px) { .nw-main-pad { padding-bottom: 1.25rem; } }
-/* Elemen mengambang yang harus duduk tepat di atas bottom-nav (mis. banner pasang). */
-.nw-above-nav { bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
+/* Elemen mengambang yang duduk tepat DI ATAS bottom-nav (tombol Insiden, banner
+   pasang). Merapat ke bar agar zona yang ia tutupi setipis mungkin. */
+.nw-above-nav { bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); }
 @media (min-width: 1024px) { .nw-above-nav { bottom: 1rem; } }
 
 /* Permukaan "kaca": header, bottom-nav, sheet. Fallback ke surface solid bila
