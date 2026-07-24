@@ -372,7 +372,7 @@ export default function Noc() {
             <span style={{ fontSize: 20 }}>🔔</span>
             {kpi.activeInc > 0 && <span style={{ position: 'absolute', top: -4, right: -6, background: C.offline, color: '#fff', fontSize: 10, fontWeight: 800, borderRadius: 999, padding: '0 5px' }}>{kpi.activeInc}</span>}
           </div>
-          <div title="Status insiden kritis" style={{ display: 'flex', alignItems: 'center', gap: 6, background: kpi.offline > 0 ? C.offline : '#1e293b', color: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 800, animation: kpi.offline > 0 ? 'nocblink 1s infinite' : 'none' }}>🚨 {kpi.offline > 0 ? 'GANGGUAN' : 'AMAN'}</div>
+          <div title="Status insiden kritis" style={{ display: 'flex', alignItems: 'center', gap: 6, background: kpi.offline > 0 ? C.offline : '#1e293b', color: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 800, animation: kpi.offline > 0 ? 'nocblink 1s infinite' : 'none' }}>⚠️ {kpi.offline > 0 ? 'GANGGUAN' : 'AMAN'}</div>
         </div>
       </div>
 
@@ -585,7 +585,7 @@ export default function Noc() {
         {/* SIDEBAR KANAN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
           <div style={{ ...card, flex: 1.4, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <div style={cardTitle}>🚨 GANGGUAN AKTIF · {data?.activeIncidents.length || 0} <span style={{ fontWeight: 500, color: C.dim }}>· auto-scroll</span></div>
+            <div style={cardTitle}>⚠️ GANGGUAN AKTIF · {data?.activeIncidents.length || 0} <span style={{ fontWeight: 500, color: C.dim }}>· auto-scroll</span></div>
             <div ref={incScrollRef} className="noc-scroll" style={{ overflow: 'auto', flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 7 }}>
               {(data?.activeIncidents || []).length === 0 ? <div style={{ fontSize: 11, color: C.dim }}>Tidak ada insiden aktif. 🎉</div> : data!.activeIncidents.map((i) => {
                 const col = incColor(i.status);
@@ -708,7 +708,7 @@ export default function Noc() {
       {/* 13. TOAST */}
       {toast && (
         <div style={{ position: 'fixed', right: 16, bottom: 46, zIndex: 900, background: C.panel, border: `1px solid ${C.offline}`, borderLeft: `5px solid ${C.offline}`, borderRadius: 10, padding: '12px 16px', maxWidth: 340, boxShadow: `0 8px 30px rgba(0,0,0,.6)`, animation: 'nocslide .3s ease' }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: C.offline }}>🚨 CRITICAL ALERT</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: C.offline }}>⚠️ CRITICAL ALERT</div>
           <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{toast.name} OFFLINE</div>
           <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>{toast.loc || '—'} · {toast.ip}</div>
         </div>
@@ -719,7 +719,7 @@ export default function Noc() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setAlert(null)}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 470, background: C.panel, border: `2px solid ${stColor(alert.status)}`, borderRadius: 16, padding: 22, boxShadow: `0 0 40px ${stColor(alert.status)}55`, animation: 'nocpop .25s ease' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={{ fontSize: 28 }}>{alert.status === 'offline' ? '🚨' : 'ℹ️'}</span>
+              <span style={{ fontSize: 28 }}>{alert.status === 'offline' ? '⚠️' : 'ℹ️'}</span>
               <div><div style={{ fontSize: 17, fontWeight: 900, color: stColor(alert.status) }}>{alert.status === 'offline' ? 'GANGGUAN TERDETEKSI' : 'RINCIAN PERANGKAT'}</div>
                 <div style={{ fontSize: 11, color: C.dim }}>Lokasi: <b style={{ color: C.text }}>{locations.find((l) => l.id === alert.location_id)?.name || alert.loc || '—'}</b></div></div>
             </div>

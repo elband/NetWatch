@@ -358,7 +358,7 @@ export default function SuratKeluar() {
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="text-[17px] font-bold">📤 Manajemen Surat Keluar</div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex bg-surface2 border border-border rounded-lg p-0.5">
             <button onClick={() => setFilter('all')} className={`px-2.5 py-1 text-[11px] rounded ${filter === 'all' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}>Semua</button>
             <button onClick={() => setFilter('tte')} className={`px-2.5 py-1 text-[11px] rounded ${filter === 'tte' ? 'bg-accent text-bg font-semibold' : 'text-text2'}`}>Ber-TTE</button>

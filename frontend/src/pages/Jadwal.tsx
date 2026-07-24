@@ -117,22 +117,22 @@ export default function Jadwal() {
           <div className="text-[17px] font-bold">📅 Jadwal Dinas Teknisi</div>
           <div className="text-[11px] text-text2 mt-0.5">Hari ini {DAY_NAMES[today.getDay()]}, {today.getDate()} {monthNames[today.getMonth()]} {today.getFullYear()}</div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button className="border border-border text-text2 rounded-md px-2.5 py-1 text-xs" onClick={() => setMonthOffset((m) => m - 1)}>← Bulan Lalu</button>
-          <span className="text-[13px] font-semibold min-w-[130px] text-center">{monthNames[month]} {year}</span>
+          <span className="text-[13px] font-semibold min-w-[110px] sm:min-w-[130px] text-center">{monthNames[month]} {year}</span>
           <button className="border border-border text-text2 rounded-md px-2.5 py-1 text-xs" onClick={() => setMonthOffset((m) => m + 1)}>Bulan Depan →</button>
         </div>
       </div>
 
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div className="flex items-center gap-3 text-[10px] text-text2">
+        <div className="flex items-center gap-3 flex-wrap text-[10px] text-text2">
           {(['Normal', 'pagi', 'siang', 'libur', 'dinas_luar', 'cuti'] as const).map((s) => (
             <span key={s} className={`px-2 py-0.5 rounded font-bold ${SHIFT_COLOR[s]}`}>{SHIFT_ABBR[s]} = {SHIFT_LABEL[s]}</span>
           ))}
           {canEdit && <span className="text-text2">· klik sel untuk ganti shift · DL & C (Cuti) hanya dari pengajuan teknisi yang disetujui</span>}
         </div>
         {canEdit && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setShowRules(true)} className="border border-accent2/40 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">⏰ Atur Jam Dinas</button>
             <button onClick={downloadTemplate} className="border border-border text-text2 rounded-md px-3 py-1.5 text-xs hover:text-text">⬇️ Template Excel</button>
             <button onClick={() => fileRef.current?.click()} className="border border-accent2/40 text-accent2 rounded-md px-3 py-1.5 text-xs font-semibold">⬆️ Import Excel</button>

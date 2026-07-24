@@ -9,6 +9,7 @@ import ActivityModal, { activityStateBadge, needsDoc } from '../components/Activ
 import ActivityDocModal from '../components/ActivityDocModal';
 import LocationMap from '../components/LocationMap';
 import AbsenCard from '../components/AbsenCard';
+import QuickAccess from '../components/QuickAccess';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
 import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
 import { openImage } from '../components/ImageLightbox';
@@ -149,6 +150,9 @@ export default function MyDashboard() {
     <div className="space-y-4 nw-stagger">
       {/* ===== Absensi hari ini ===== */}
       <AbsenCard />
+
+      {/* ===== Pintasan menu tersering (gaya home screen aplikasi) ===== */}
+      <QuickAccess />
 
       {/* ===== Performa bulan ini ===== */}
       <div className="nw-card bg-gradient-to-br from-accent/10 to-accent2/8 border border-accent/25 rounded-xl p-5">

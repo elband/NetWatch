@@ -6,6 +6,9 @@ const COLORS: Record<string, string> = {
   warning: 'text-warn bg-warn/10',
 };
 
+// Nada status (deviceTone/TONE_BAR) ada di utils/deviceStatus.ts — urutan cek di
+// sana wajib cocok dengan rangkaian if di bawah ini.
+
 export function DeviceStatusBadge({ status, offReason, monitorEnabled, underMaintenance }: { status: DeviceStatus; offReason?: string | null; monitorEnabled?: number; underMaintenance?: number | boolean }) {
   // Jendela maintenance terjadwal: tampil khas (oranye), bukan alarm.
   if (underMaintenance) {

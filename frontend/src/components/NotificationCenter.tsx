@@ -11,7 +11,7 @@ const PRIO: Record<NotifPriority, { color: string; label: string }> = {
   info: { color: '#58a6ff', label: 'Info' },
 };
 const ICON: Record<string, string> = {
-  ticket_new: '🚨', ticket_assigned: '🎫', ticket_sla: '⏰', ticket_done: '✅', ticket_collab: '👥',
+  ticket_new: '⚠️', ticket_assigned: '🎫', ticket_sla: '⏰', ticket_done: '✅', ticket_collab: '👥',
   diklat_new: '🎓', diklat_approved: '🎓', diklat_rejected: '🎓',
   public_new: '📩', public_critical: '🛑', doc_review: '📄', sop_new: '📘', sop_expiring: '📘',
   knr_new: '📝', approval_pending: '🗳️',

@@ -65,7 +65,7 @@ export default function WaLog() {
         {log.map((w) => (
           <div key={w.id} className="flex gap-3 py-3 border-b border-border/40 last:border-0">
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm flex-shrink-0 bg-accent2/15">
-              {w.type === 'alert' ? '🚨' : w.type === 'done' ? '✅' : '📨'}
+              {w.type === 'alert' ? '⚠️' : w.type === 'done' ? '✅' : '📨'}
             </div>
             <div className="flex-1">
               <div className="text-[11px] font-semibold">→ {w.to_label} <span className={`ml-2 text-[10px] ${STATUS_COLOR[w.status]}`}>{w.status}</span></div>

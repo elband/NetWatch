@@ -11,6 +11,7 @@ import { promptDialog } from '../components/dialog';
 import { TrendChart, SlaBreakdown, AIInsight, RecentIncidents, scoreMeta, DeltaBadge, Spark } from '../components/DashboardExtras';
 import ScoreGauge, { ScoreBreakdown, ScoreExplain, type ScoreComponent } from '../components/ScoreGauge';
 import { openImage } from '../components/ImageLightbox';
+import QuickAccess from '../components/QuickAccess';
 import type { Incident, Device, LocationItem, ServiceItem, MonthlyStats, Activity } from '../types';
 
 interface MyScore { score: number | null; grade: string; role: string; components: ScoreComponent[]; tips?: string[] }
@@ -218,6 +219,9 @@ export default function CoordDashboard() {
 
       {/* Ringkasan lintas unit — hanya Super Admin dalam mode "Semua Unit" */}
       <UnitSummaryStrip />
+
+      {/* ===== Pintasan menu tersering (gaya home screen aplikasi) ===== */}
+      <QuickAccess />
 
       {/* ===== HERO COMMAND BAR ===== */}
       <div className="rounded-2xl border border-accent/20 bg-gradient-to-br from-accent/10 via-surface to-accent2/10 p-5">

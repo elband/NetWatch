@@ -14,7 +14,7 @@ const PRIO: Record<NotifPriority, { color: string; label: string; emoji: string 
 const PRIO_KEYS: NotifPriority[] = ['kritis', 'warning', 'selesai', 'info'];
 
 const ICON: Record<string, string> = {
-  ticket_new: '🚨', ticket_assigned: '🎫', ticket_sla: '⏰', ticket_done: '✅', ticket_collab: '👥',
+  ticket_new: '⚠️', ticket_assigned: '🎫', ticket_sla: '⏰', ticket_done: '✅', ticket_collab: '👥',
   diklat_new: '🎓', diklat_approved: '🎓', diklat_rejected: '🎓',
   public_new: '📩', public_critical: '🛑', doc_review: '📄', sop_new: '📘', sop_expiring: '📘',
   knr_new: '📝', approval_pending: '🗳️',

@@ -98,13 +98,18 @@ export default function Users() {
         <button className="bg-accent text-bg rounded-md px-3 py-1.5 text-xs font-semibold" onClick={openCreate}>+ Tambah User</button>
       </div>
 
+      {/* Kartu user memakai flex-wrap: di ponsel tombol aksi turun ke baris
+          sendiri, tidak mendorong kartu melebihi lebar layar. */}
       <div className="flex flex-col gap-2.5">
         {users.map((u) => (
-          <div key={u.id} className="bg-surface2 border border-border rounded-[10px] p-4 flex items-center gap-3.5">
+          <div key={u.id} className="bg-surface2 border border-border rounded-[10px] p-4 flex items-center gap-3.5 flex-wrap">
             <div className="w-11 h-11 rounded-full flex items-center justify-center text-lg flex-shrink-0" style={{ background: `${ROLE_COLOR[u.role]}22`, border: `2px solid ${ROLE_COLOR[u.role]}` }}>
               {u.emoji}
             </div>
-            <div className="flex-1">
+            {/* min-w bukan min-w-0: tanpa lantai lebar, flex-1 menyusut sampai
+                nol dan nama/email pecah satu huruf per baris. Dengan lantai ini
+                justru tombol aksi yang mengalah & turun ke baris berikutnya. */}
+            <div className="flex-1 min-w-[200px]">
               <div className="text-[13px] font-semibold flex items-center flex-wrap gap-1">
                 {u.name}
                 {(u.roles?.length ? u.roles : [u.role]).map((r) => (
@@ -113,13 +118,13 @@ export default function Users() {
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">{unitLabel(u.unit_id)}</span>
                 {!u.active && <span className="text-[10px] text-danger ml-1">● Nonaktif</span>}
               </div>
-              <div className="text-[11px] text-text2">
+              <div className="text-[11px] text-text2 break-words">
                 @{u.username} · {u.email} · {u.jabatan}
                 {u.nip ? <span className="ml-2 text-[10px] text-text2">🆔 NIP {u.nip}</span> : <span className="ml-2 text-[10px] text-warn">🆔 NIP belum diset</span>}
                 {u.has_pin ? <span className="ml-2 text-[10px] text-success">🔐 PIN aktif</span> : <span className="ml-2 text-[10px] text-warn">🔓 PIN belum diset</span>}
               </div>
             </div>
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5 flex-wrap">
               <button className="border border-border text-text2 rounded px-2.5 py-1 text-xs hover:text-text" onClick={() => openEdit(u)}>✎ Edit</button>
               <button className={`rounded px-2.5 py-1 text-xs border ${u.active ? 'border-warn/30 text-warn bg-warn/10' : 'border-success/30 text-success bg-success/10'}`} onClick={() => toggleActive(u.id)}>
                 {u.active ? 'Nonaktifkan' : 'Aktifkan'}

@@ -108,7 +108,7 @@ export default function LogbookDevice() {
             <Stat label="🔍 Inspeksi" value={String(d.recap.inspeksi.total)} sub={`${d.recap.inspeksi.baik}B / ${d.recap.inspeksi.perhatian}P / ${d.recap.inspeksi.rusak}R`} />
             <Stat label="⚡ Hidup / Mati" value={`${d.recap.power.on} / ${d.recap.power.off}`} sub="hidup / mati" />
             <Stat label="🛠️ Maintenance" value={String(d.recap.maintenance.total)} sub={`${d.recap.maintenance.selesai} selesai`} />
-            <Stat label="🚨 Insiden" value={String(d.recap.insiden.total)} sub={d.recap.insiden.downtime_min ? `${d.recap.insiden.downtime_min} mnt down` : 'tanpa downtime'} />
+            <Stat label="⚠️ Insiden" value={String(d.recap.insiden.total)} sub={d.recap.insiden.downtime_min ? `${d.recap.insiden.downtime_min} mnt down` : 'tanpa downtime'} />
           </div>
 
           {/* Tren uptime harian */}

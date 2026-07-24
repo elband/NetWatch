@@ -79,7 +79,7 @@ export default function MyIncidents() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[17px] font-bold">🚨 Insiden Saya</div>
+        <div className="text-[17px] font-bold">⚠️ Insiden Saya</div>
         <button onClick={load} className="text-xs text-text2 hover:text-text border border-border rounded px-2.5 py-1">⟳ Muat ulang</button>
       </div>
 

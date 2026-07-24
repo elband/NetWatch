@@ -4,11 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import { api, getActiveUnitId, setActiveUnitId } from '../api/client';
 import { hasRole, userRoles } from '../utils/roles';
 import { useShiftWindows, shiftLabel } from '../utils/shifts';
-import { NAV_ITEMS, PAGE_TITLES, UNIT_ONLY, type NavEntry } from './NavConfig';
+import { PAGE_TITLES, useNavItems, type NavEntry } from './NavConfig';
 import NotificationCenter from './NotificationCenter';
 import ThemeToggle from './ThemeToggle';
 import ImageLightbox from './ImageLightbox';
 import PowerIcon from './PowerIcon';
+import MobileNav from './MobileNav';
+import InstallPrompt from './InstallPrompt';
 import type { Role, Unit, User } from '../types';
 
 const ROLE_COLOR: Record<string, string> = {
@@ -17,46 +19,6 @@ const ROLE_COLOR: Record<string, string> = {
   teknisi: '#0ea5e9',
   viewer: '#a78bfa',
 };
-const ROLE_ORDER: Role[] = ['admin', 'koordinator', 'teknisi', 'viewer'];
-
-// Gabungkan menu dari semua peran user: item unik per id (dan per label, agar
-// "Dashboard" admin & koordinator tidak muncul dobel), dikelompokkan per section
-// (kemunculan pertama), section kosong dibuang. Item eksklusif-unit yang bukan
-// unit aktif disaring DI SINI, sebelum dedup label — supaya dua item beda unit
-// yang berbagi label (mis. "Performa Peralatan": equipment=ELB vs
-// aset-availability=AAB) tidak saling menggugurkan. unitCode null = tak disaring.
-function mergedNav(roles: Role[], unitCode: string | null): NavEntry[] {
-  const seen = new Set<string>();
-  const seenLabels = new Set<string>();
-  const groups = new Map<string, Extract<NavEntry, { id: string }>[]>();
-  const order: string[] = [];
-  let cur = 'Menu';
-  for (const role of ROLE_ORDER) {
-    if (!roles.includes(role)) continue;
-    for (const e of NAV_ITEMS[role] || []) {
-      if ('section' in e && e.section) {
-        cur = e.section;
-        if (!groups.has(cur)) { groups.set(cur, []); order.push(cur); }
-      } else if ('id' in e) {
-        // Buang item milik unit lain lebih dulu, agar ia tak "mengklaim" id/label
-        // lalu tersaring (bikin menu unit aktif kehilangan item berlabel sama).
-        if (unitCode && UNIT_ONLY[e.id] && !UNIT_ONLY[e.id].includes(unitCode)) continue;
-        if (seen.has(e.id) || seenLabels.has(e.label)) continue;
-        seen.add(e.id);
-        seenLabels.add(e.label);
-        if (!groups.has(cur)) { groups.set(cur, []); order.push(cur); }
-        groups.get(cur)!.push(e);
-      }
-    }
-  }
-  const out: NavEntry[] = [];
-  for (const title of order) {
-    const its = groups.get(title)!;
-    if (its.length) { out.push({ section: title }); out.push(...its); }
-  }
-  return out;
-}
-
 export default function AppLayout() {
   const { user, logout, updateSession } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
@@ -67,9 +29,9 @@ export default function AppLayout() {
   const isTech = hasRole(user, 'teknisi');
   const isManager = hasRole(user, 'koordinator', 'admin');
   const [notif, setNotif] = useState(0);
-  // Daftar unit — untuk memetakan unit aktif → kode & menyaring menu per unit.
-  const [unitList, setUnitList] = useState<Unit[]>([]);
-  useEffect(() => { api.get('/units').then((r) => setUnitList(r.data.units || [])).catch(() => {}); }, []);
+  // Menu efektif (gabungan peran, sudah disaring per unit) — sumber tunggal untuk
+  // popover profil, bottom-nav mobile, dan kartu Akses Cepat.
+  const navItems = useNavItems(user);
   useEffect(() => {
     if (isTech) api.get('/incidents/duty-status').then((res) => setDuty(res.data)).catch(() => {});
   }, [isTech]);
@@ -85,20 +47,15 @@ export default function AppLayout() {
 
   if (!user) return null;
   const allRoles = userRoles(user);
-  // Unit aktif: super admin pakai pilihan switcher (null = Semua Unit → tak disaring);
-  // role lain terkunci ke unitnya sendiri. Kode unit dipetakan dari daftar unit.
-  const effUnitId = hasRole(user, 'admin') ? getActiveUnitId() : (user.unit_id ?? null);
-  const effUnitCode = effUnitId ? (unitList.find((u) => u.id === effUnitId)?.code ?? null) : null;
-  // Penyaringan per unit terjadi di dalam mergedNav (sebelum dedup label).
-  const merged = mergedNav(allRoles, effUnitCode);
-  const navItems = merged.length ? merged : NAV_ITEMS.viewer;
   const currentId = location.pathname.replace('/', '') || navItems.find((n): n is Extract<NavEntry, { id: string }> => 'id' in n)?.id;
   const title = PAGE_TITLES[currentId || ''] || 'Dashboard';
   const firstName = (user.name || '').split(' ')[0];
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="bg-surface border-b border-border min-h-[58px] px-4 sm:px-6 py-2 flex items-center gap-3 sm:gap-4 sticky top-0 z-30">
+      {/* Header "kaca": tembus pandang + blur agar konten terlihat mengalir di
+          bawahnya. nw-safe-top menambah ruang notch saat dipasang sbg aplikasi. */}
+      <header className="nw-glass border-b border-border min-h-[58px] px-4 sm:px-6 pb-2 nw-safe-top flex items-center gap-3 sm:gap-4 sticky top-0 z-30">
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded-[7px] flex items-center justify-center text-[15px] bg-gradient-to-br from-accent to-accent2">📡</div>
           <div className="hidden sm:block leading-tight">
@@ -109,6 +66,11 @@ export default function AppLayout() {
         <div className="flex-1 min-w-0">
           <div className="font-head text-sm font-bold truncate"><HeaderGreeting firstName={firstName} /></div>
           <div className="text-[10px] text-text2 truncate">{user.jabatan || title}</div>
+          {/* Di ≥ sm tanggal & jam punya blok sendiri di kanan header; di bawah
+              itu keduanya tak muat dan disembunyikan, jadi versi ringkasnya
+              turun ke baris sendiri di sini. Baris terpisah, bukan disambung ke
+              jabatan, supaya jam tidak jadi bagian yang kepotong duluan. */}
+          <div className="sm:hidden text-[10px] text-text2 font-mono truncate"><HeaderStampMobile /></div>
         </div>
         <div className="text-center hidden sm:block">
           <div className="text-text2 text-[9px] uppercase">📅 Tanggal</div>
@@ -120,12 +82,14 @@ export default function AppLayout() {
               <div className="text-text2 text-[9px] uppercase">{duty?.onDuty ? '☀️' : '🌙'} Shift</div>
               <div className="text-[11px] font-semibold">{duty?.shift ? shiftLabel(duty.shift, shiftWindows) : 'Di luar jadwal'}</div>
             </div>
-            <span className="flex items-center gap-1.5">
+            {/* Di layar sempit hanya titik statusnya yang tampil — teksnya
+                membungkus dua baris & menghabiskan ruang sapaan di 390px. */}
+            <span className="flex items-center gap-1.5 shrink-0" title={duty?.onDuty ? 'On-Duty' : 'Off-Duty'}>
               <span className="relative flex h-2.5 w-2.5">
                 {duty?.onDuty && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />}
                 <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${duty?.onDuty ? 'bg-success' : 'bg-warn'}`} />
               </span>
-              <span className={`text-[11px] font-semibold ${duty?.onDuty ? 'text-success' : 'text-warn'}`}>{duty?.onDuty ? 'On-Duty' : 'Off-Duty'}</span>
+              <span className={`hidden sm:inline text-[11px] font-semibold whitespace-nowrap ${duty?.onDuty ? 'text-success' : 'text-warn'}`}>{duty?.onDuty ? 'On-Duty' : 'Off-Duty'}</span>
             </span>
           </>
         )}
@@ -135,15 +99,23 @@ export default function AppLayout() {
         <span className="text-[11px] text-text2 font-mono hidden sm:inline"><HeaderClock /></span>
       </header>
 
-      <main className="flex-1 p-5">
+      <main className="flex-1 p-5 nw-main-pad">
         <div key={location.pathname} className="nw-page-in"><Outlet /></div>
       </main>
 
       <ImageLightbox />
 
+      {/* Navigasi bawah ala aplikasi — hanya < lg. Di layar besar tombol profil
+          mengambang di bawah yang jadi navigasi (dan MobileNav menghilang), jadi
+          keduanya tak pernah tampil bersamaan/bertabrakan. */}
+      <MobileNav navItems={navItems} user={user} allRoles={allRoles} notif={notif} notifKind={isManager ? 'kegiatan' : 'insiden'} onEditProfile={() => setShowProfile(true)} onLogout={logout} />
 
       {/* Tombol profil mengambang: bisa digeser ke mana saja, klik = menu (gabungan ☰ + profil). */}
-      <FloatingMenu navItems={navItems} user={user} allRoles={allRoles} notif={notif} onEditProfile={() => setShowProfile(true)} onLogout={logout} />
+      <div className="hidden lg:block">
+        <FloatingMenu navItems={navItems} user={user} allRoles={allRoles} notif={notif} onEditProfile={() => setShowProfile(true)} onLogout={logout} />
+      </div>
+
+      <InstallPrompt />
 
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} onSaved={updateSession} />}
     </div>
@@ -168,7 +140,7 @@ function UnitSwitcher({ user }: { user: User }) {
         value={active ?? ''}
         onChange={(e) => { setActiveUnitId(e.target.value ? Number(e.target.value) : null); window.location.reload(); }}
         title="Unit aktif (Super Admin)"
-        className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-[11px] font-semibold max-w-[150px] shrink-0"
+        className="bg-surface2 border border-border rounded-md px-2 py-1.5 text-[11px] font-semibold max-w-[104px] sm:max-w-[150px] shrink-0"
       >
         <option value="">🌐 Semua Unit</option>
         {units.filter((u) => u.active !== 0 && u.active !== false).map((u) => (
@@ -316,6 +288,17 @@ function HeaderDate() {
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(t); }, []);
   return <>{now.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</>;
 }
+// Tanggal + jam ringkas untuk layar sempit: "Jum, 24 Jul · 14.32.10".
+// Timer diisolasi di komponennya sendiri (alasan sama seperti HeaderClock di
+// bawah) agar detik yang berdetak tidak me-render ulang seluruh halaman.
+function HeaderStampMobile() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+  const tanggal = now.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
+  const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return <>📅 {tanggal} · 🕒 {jam}</>;
+}
+
 function HeaderClock() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);

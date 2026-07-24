@@ -7,7 +7,7 @@ import ThemeToggle from '../components/ThemeToggle';
 
 const HIGHLIGHTS = [
   { icon: '📡', title: 'Monitoring Real-time', desc: 'Pantau status & latency perangkat jaringan secara langsung.' },
-  { icon: '🚨', title: 'Manajemen Insiden', desc: 'Lacak insiden hingga laporan kerusakan & perbaikan.' },
+  { icon: '⚠️', title: 'Manajemen Insiden', desc: 'Lacak insiden hingga laporan kerusakan & perbaikan.' },
   { icon: '📊', title: 'Analitik Performa', desc: 'Skor & SLA teknisi dalam satu dasbor terpadu.' },
 ];
 

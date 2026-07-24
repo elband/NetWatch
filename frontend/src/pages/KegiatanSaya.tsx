@@ -31,7 +31,7 @@ interface Item {
 }
 
 const KIND_META: Record<Kind, { icon: string; label: string }> = {
-  insiden: { icon: '🚨', label: 'Insiden' },
+  insiden: { icon: '⚠️', label: 'Insiden' },
   kegiatan: { icon: '📋', label: 'Kegiatan Lain' },
   'non-rutin': { icon: '📝', label: 'Non-Rutin' },
 };
@@ -185,7 +185,7 @@ export default function KegiatanSaya() {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
         <Stat l="Total Kegiatan" v={stat.total} c="#60a5fa" ic="🗂️" />
-        <Stat l="Insiden Ditangani" v={stat.insiden} c="#f97316" ic="🚨" />
+        <Stat l="Insiden Ditangani" v={stat.insiden} c="#f97316" ic="⚠️" />
         <Stat l="Kegiatan Lain" v={stat.kegiatan} c="#a78bfa" ic="📋" />
         <Stat l="Selesai" v={stat.selesai} c="#22c55e" ic="✅" />
         <Stat l="Perlu Tindakan" v={stat.perlu} c="#eab308" ic="⏳" />

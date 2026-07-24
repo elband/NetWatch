@@ -56,7 +56,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5 nw-stagger">
         <div className="nw-card bg-surface border border-border rounded-[10px] overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex justify-between items-center">
-            <span className="text-[13px] font-semibold">🚨 Insiden Aktif</span>
+            <span className="text-[13px] font-semibold">⚠️ Insiden Aktif</span>
             <Link to="/incidents" className="text-xs text-text2 hover:text-text">Semua →</Link>
           </div>
           <table className="w-full text-xs">

@@ -152,7 +152,7 @@ export default function Incidents() {
       {/* ===== Header ===== */}
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <div className="text-[17px] font-bold">🚨 Manajemen Insiden</div>
+          <div className="text-[17px] font-bold">⚠️ Manajemen Insiden</div>
           <div className="text-[11px] text-text2 mt-0.5">{active + inProgress} insiden aktif</div>
         </div>
         <button

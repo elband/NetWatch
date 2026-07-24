@@ -10,6 +10,8 @@ interface ThemeState {
 
 const ThemeContext = createContext<ThemeState | null>(null);
 const STORAGE_KEY = 'netwatch_theme';
+// Samakan dengan --color-bg di index.css (dan theme_color manifest untuk gelap).
+const THEME_COLOR = { dark: '#0d1117', light: '#ffffff' };
 
 function getInitial(): Theme {
   try {
@@ -29,6 +31,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     try { localStorage.setItem(STORAGE_KEY, theme); } catch { /* abaikan */ }
+    // Warnai bilah status OS saat dipasang sebagai aplikasi (PWA) — kalau tidak,
+    // mode terang tetap memakai bilah gelap dari nilai statis di index.html.
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'light' ? THEME_COLOR.light : THEME_COLOR.dark);
   }, [theme]);
 
   const setTheme = (t: Theme) => setThemeState(t);

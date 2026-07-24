@@ -23,6 +23,10 @@
   /* Latar "kaca" untuk popover/menu mengambang & panel notifikasi.
      Dioverride per-tema agar panel kaca ikut mode terang/gelap. */
   --glass-bg: rgba(22, 27, 34, 0.92);
+  /* Dua warna denyut cahaya tombol Layanan (nw-flipflop). Ditulis rgba
+     eksplisit, bukan turunan --color-accent, karena box-shadow butuh alpha. */
+  --glow-a: rgba(0, 212, 170, 0.5);
+  --glow-b: rgba(88, 166, 255, 0.5);
 }
 
 /* ===== Tema: token dioverride per data-theme pada <html>.
@@ -45,6 +49,10 @@ html[data-theme="light"] {
   --color-success: #1a7f37;
   --color-warn: #9a6700;
   --glass-bg: rgba(255, 255, 255, 0.9);
+  /* Mode terang: aksen lebih gelap & latar putih, jadi denyut dibuat lebih
+     pekat — alpha 0.5 versi gelap nyaris tak terlihat di atas putih. */
+  --glow-a: rgba(13, 148, 136, 0.6);
+  --glow-b: rgba(9, 105, 218, 0.6);
 }
 
 body {
@@ -53,6 +61,56 @@ body {
   color: var(--color-text);
   font-family: var(--font-sans);
   transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* ===== Shell mobile / PWA =====
+   index.html memakai viewport-fit=cover, jadi konten boleh melebar ke bawah
+   notch & home-indicator. Utility di bawah mengembalikan ruang aman itu agar
+   header dan bottom-nav tidak tertutup takik layar saat dipasang sbg aplikasi. */
+.nw-safe-top { padding-top: calc(0.5rem + env(safe-area-inset-top, 0px)); }
+.nw-safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* Ruang bawah untuk konten agar tidak tertutup bottom-nav (hanya < lg).
+   Lebih tinggi dari bar-nya sendiri karena tombol "Layanan" di tengah menonjol
+   ~28px ke atas — tanpa ini baris terakhir halaman tertutup tombol itu. */
+.nw-main-pad { padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 1024px) { .nw-main-pad { padding-bottom: 1.25rem; } }
+/* Elemen mengambang yang harus duduk tepat di atas bottom-nav (mis. banner pasang). */
+.nw-above-nav { bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 1024px) { .nw-above-nav { bottom: 1rem; } }
+
+/* Permukaan "kaca": header, bottom-nav, sheet. Fallback ke surface solid bila
+   backdrop-filter tak didukung, supaya teks tetap terbaca. */
+.nw-glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .nw-glass { background: var(--color-surface); }
+}
+
+@keyframes nw-sheet-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+@keyframes nw-spin { to { transform: rotate(360deg); } }
+
+/* Denyut cahaya "flip-flop": satu gelombang memancar keluar lalu hilang, warna
+   bergantian A → B → A. Dua keyframe berdempetan (49.9/50) memberi pergantian
+   seketika, sehingga tiap denyut mulai lagi dari nol — tanpa itu gelombangnya
+   terlihat mengempis balik ke dalam, bukan memancar. */
+@keyframes nw-flipflop {
+  0%     { box-shadow: 0 0 0 0 var(--glow-a); }
+  49.9%  { box-shadow: 0 0 0 12px rgba(0, 0, 0, 0); }
+  50%    { box-shadow: 0 0 0 0 var(--glow-b); }
+  99.9%  { box-shadow: 0 0 0 12px rgba(0, 0, 0, 0); }
+  100%   { box-shadow: 0 0 0 0 var(--glow-a); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nw-sheet { animation: nw-sheet-up 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+  .nw-flipflop { animation: nw-flipflop 2.8s ease-out infinite; }
+  /* Putaran lambat (6 dtk) — sengaja jauh lebih pelan dari spinner "memuat"
+     (~1 dtk) supaya terbaca sebagai ikon hidup, bukan sistem sedang sibuk.
+     Di luar blok no-preference ikon diam total. */
+  .nw-spin { animation: nw-spin 6s linear infinite; transform-origin: 50% 50%; }
 }
 
 /* Judul/heading pakai Poppins. Tag heading semantik + utility .font-head

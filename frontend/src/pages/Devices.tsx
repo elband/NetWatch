@@ -5,12 +5,65 @@ import { getSocket } from '../api/socket';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../utils/roles';
 import { DeviceStatusBadge } from '../components/StatusBadge';
+import { TONE_BAR, deviceTone } from '../utils/deviceStatus';
 import { confirmDialog, alertDialog } from '../components/dialog';
 import DeviceMetricsModal from '../components/DeviceMetricsModal';
 import type { Device } from '../types';
 
-function meterColor(v: number) {
-  return v > 85 ? 'bg-danger' : v > 70 ? 'bg-warn' : 'bg-success';
+/**
+ * Tombol aksi kartu perangkat — netral secara bawaan.
+ *
+ * Sebelumnya tiap tombol punya hue sendiri (sky/emerald/indigo/amber/accent2),
+ * jadi enam warna bersaing di satu baris dan tak satu pun berarti apa-apa. Warna
+ * kini disimpan untuk yang benar-benar bermakna: keadaan menyala (Monitor,
+ * 24 Jam) dan tindakan berkonsekuensi (Alarmkan, Insiden, Hapus).
+ */
+const ACT = 'inline-flex items-center gap-1 rounded-md border border-border bg-surface2 text-text2 px-2 py-1 text-[10px] transition-colors hover:text-text hover:border-accent/40';
+
+// Ambang beban: >85% kritis, >70% tinggi. Dipakai warna DAN label — lihat Meter.
+const WARN_AT = 70;
+const CRIT_AT = 85;
+
+/**
+ * Meter beban (CPU/RAM).
+ *
+ * Warna saja TIDAK cukup: hijau vs amber pada palet ini hanya terpisah ΔE 5.1
+ * untuk protanopia — pembaca buta warna merah tak bisa membedakan "normal" dari
+ * "tinggi". Karena itu keadaan juga disampaikan lewat (a) label teks di samping
+ * angka dan (b) dua garis ambang di rel meter, sehingga POSISI ujung bar sudah
+ * memberi tahu sudah lewat batas atau belum tanpa melihat warna sama sekali.
+ *
+ * `unknown` = SNMP mati / belum ada bacaan. Ditampilkan "—", bukan 0%, supaya
+ * tak terbaca sebagai "beban nol" (bar hijau penuh percaya diri padahal buta).
+ */
+function Meter({ label, value, unknown }: { label: string; value: number; unknown?: boolean }) {
+  const v = Math.max(0, Math.min(100, value || 0));
+  const crit = !unknown && v > CRIT_AT;
+  const high = !unknown && v > WARN_AT && !crit;
+  const bar = crit ? 'bg-danger' : high ? 'bg-warn' : 'bg-success';
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1 text-[10px]">
+        <span className="text-text2">{label}</span>
+        <span className="flex items-baseline gap-1.5">
+          {(crit || high) && <span className="text-[9px] font-semibold uppercase tracking-wide text-text2">{crit ? 'kritis' : 'tinggi'}</span>}
+          <span className="font-mono font-semibold tabular-nums text-text">{unknown ? '—' : `${v}%`}</span>
+        </span>
+      </div>
+      <div className="relative h-1.5 rounded-full bg-border/70 overflow-hidden">
+        {!unknown && (
+          <>
+            <div className={`absolute inset-y-0 left-0 rounded-full ${bar}`} style={{ width: `${v}%` }} />
+            {/* Garis ambang digambar DI ATAS bar: penanda posisi, bukan warna.
+                Hanya saat ada bacaan — pada rel kosong ia cuma terbaca sebagai
+                rel yang patah tiga. */}
+            <span className="absolute inset-y-0 w-px bg-bg/60" style={{ left: `${WARN_AT}%` }} aria-hidden />
+            <span className="absolute inset-y-0 w-px bg-bg/60" style={{ left: `${CRIT_AT}%` }} aria-hidden />
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const DEVICE_TYPES = ['Switch', 'Router', 'Firewall', 'AP', 'Server', 'NAS', 'CCTV', 'PC Client', 'Printer'];
@@ -234,14 +287,16 @@ export default function Devices() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <div>
           <div className="text-[17px] font-bold">🖥️ Manajemen Perangkat</div>
           <div className="text-[11px] text-text2 mt-0.5">{devices.length} perangkat terdaftar</div>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Di ponsel toolbar turun ke baris sendiri & kolom cari melar; kalau
+            tidak, tombol "+ Tambah Perangkat" mendorong halaman melebihi layar. */}
+        <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
           <input
-            className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs w-[200px] outline-none focus:border-accent"
+            className="bg-surface2 border border-border rounded-md px-3 py-2 text-xs flex-1 sm:flex-none sm:w-[200px] min-w-0 outline-none focus:border-accent"
             placeholder="🔍 Cari..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -260,12 +315,17 @@ export default function Devices() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {filtered.map((d) => (
-            <div key={d.id} className="bg-surface border border-border rounded-xl p-3.5 flex flex-col gap-2.5">
+            <div key={d.id} className="nw-card relative bg-surface border border-border rounded-xl overflow-hidden pl-1 flex flex-col hover:border-accent/40">
+              {/* Pita status di tepi kiri: memberi ritme visual pada grid dan
+                  membuat status terbaca dari sudut mata, sebelum badge dibaca. */}
+              <span className={`absolute left-0 inset-y-0 w-1 ${TONE_BAR[deviceTone({ status: d.status, offReason: d.off_reason, monitorEnabled: d.monitor_enabled, underMaintenance: d.under_maintenance })]}`} aria-hidden />
+
+              <div className="p-3.5 flex flex-col gap-2.5">
               {/* Header: foto/ikon + nama + status */}
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2.5 min-w-0">
                   {(d.photo_url || d.icon) && (
-                    <span className="w-10 h-10 rounded-md border border-border bg-surface2 flex items-center justify-center overflow-hidden shrink-0 text-lg">
+                    <span className="w-10 h-10 rounded-lg border border-border bg-surface2 flex items-center justify-center overflow-hidden shrink-0 text-lg">
                       {d.photo_url ? <img src={d.photo_url} alt="" className="w-full h-full object-cover" /> : d.icon}
                     </span>
                   )}
@@ -287,17 +347,26 @@ export default function Devices() {
                 {d.inspect_required === 0 && <span className="px-1.5 py-0.5 rounded bg-surface2 text-text2 border border-border" title="Tidak wajib diinspeksi">⊘ non-inspeksi</span>}
               </div>
 
-              {/* Metrik */}
-              <div className="pt-2 border-t border-border/50 space-y-1.5">
-                <div className="flex justify-between text-[10px] text-text2"><span>Ping</span><span className={`font-mono font-semibold ${d.ping_ms === 0 ? 'text-danger' : d.ping_ms > 20 ? 'text-warn' : 'text-success'}`}>{d.ping_ms === 0 ? '–' : `${d.ping_ms}ms`}</span></div>
-                <div>
-                  <div className="flex justify-between text-[10px] text-text2 mb-0.5"><span>CPU</span><span>{d.cpu}%</span></div>
-                  <div className="h-1 bg-border rounded-full overflow-hidden"><div className={`h-full ${meterColor(d.cpu)}`} style={{ width: `${d.cpu}%` }} /></div>
+              {/* Metrik — latensi jadi angka utama (paling sering dibaca sekilas),
+                  CPU/RAM sebagai meter pendukung di bawahnya. */}
+              <div className="pt-2.5 border-t border-border/50 space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] text-text2">Latensi</span>
+                  <span className="flex items-baseline gap-1.5 min-w-0">
+                    {/* Kata keadaan, bukan warna saja — merah/amber/hijau tak
+                        terbedakan oleh sebagian pembaca. */}
+                    <span className="text-[9px] font-semibold uppercase tracking-wide text-text2 truncate">
+                      {d.ping_ms === 0 ? 'tak merespons' : d.ping_ms > 20 ? 'lambat' : 'baik'}
+                    </span>
+                    <span className={`font-mono text-base font-bold tabular-nums leading-none ${d.ping_ms === 0 ? 'text-danger' : d.ping_ms > 20 ? 'text-warn' : 'text-success'}`}>
+                      {d.ping_ms === 0 ? '–' : d.ping_ms}
+                    </span>
+                    {d.ping_ms !== 0 && <span className="text-[10px] text-text2">ms</span>}
+                  </span>
                 </div>
-                <div>
-                  <div className="flex justify-between text-[10px] text-text2 mb-0.5"><span>RAM</span><span>{d.mem}%</span></div>
-                  <div className="h-1 bg-border rounded-full overflow-hidden"><div className={`h-full ${meterColor(d.mem)}`} style={{ width: `${d.mem}%` }} /></div>
-                </div>
+                <Meter label="CPU" value={d.cpu} unknown={!d.snmp_enabled} />
+                <Meter label="RAM" value={d.mem} unknown={!d.snmp_enabled} />
+                {!d.snmp_enabled && <div className="text-[9px] text-text2">CPU/RAM butuh SNMP aktif</div>}
               </div>
 
               {/* Aksi */}
@@ -306,9 +375,7 @@ export default function Devices() {
                   <button
                     onClick={() => toggleMonitor(d)}
                     title={d.monitor_enabled === 0 ? 'Aktifkan monitoring otomatis' : 'Jeda monitoring (mode standby)'}
-                    className={d.monitor_enabled === 0
-                      ? 'bg-success/10 text-success border border-success/40 rounded px-2 py-0.5 text-[10px]'
-                      : 'bg-surface2 text-text2 border border-border rounded px-2 py-0.5 text-[10px]'}
+                    className={d.monitor_enabled === 0 ? `${ACT} border-success/40 text-success bg-success/10` : ACT}
                   >
                     {d.monitor_enabled === 0 ? '▶️ Monitor' : '⏸️ Standby'}
                   </button>
@@ -317,45 +384,40 @@ export default function Devices() {
                   <button
                     onClick={() => toggleAlwaysOn(d)}
                     title={d.always_on === 1 ? 'Batalkan status selalu aktif — perangkat kembali ikut alur Hidupkan/Matikan' : 'Tandai selalu aktif 24 jam — dikecualikan dari Hidupkan/Matikan (tidak dimatikan maupun dihidupkan)'}
-                    className={d.always_on === 1
-                      ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/40 rounded px-2 py-0.5 text-[10px]'
-                      : 'bg-surface2 text-text2 border border-border rounded px-2 py-0.5 text-[10px]'}
+                    className={d.always_on === 1 ? `${ACT} border-accent2/40 text-accent2 bg-accent2/10` : ACT}
                   >
                     {d.always_on === 1 ? '🕒 24 Jam ✓' : '🕒 24 Jam'}
                   </button>
                 )}
                 {canAlarm && d.status === 'offline' && d.off_reason === 'dimatikan' && (
-                  <button onClick={() => requestAlarm(d)} title="Minta dialarmkan (override aturan jam malam)" className="bg-amber-500/10 text-amber-400 border border-amber-500/40 rounded px-2 py-0.5 text-[10px]">
+                  <button onClick={() => requestAlarm(d)} title="Minta dialarmkan (override aturan jam malam)" className={`${ACT} border-warn/40 text-warn bg-warn/10`}>
                     🔔 Alarmkan
                   </button>
                 )}
                 {canEdit && d.status !== 'online' && d.off_reason !== 'dimatikan' && d.off_reason !== 'poweroff' && (
-                  <button onClick={() => createIncident(d.id)} className="bg-danger/10 text-danger border border-danger/30 rounded px-2 py-0.5 text-[10px]">
+                  <button onClick={() => createIncident(d.id)} className={`${ACT} border-danger/40 text-danger bg-danger/10`}>
                     ⚠️ Insiden
                   </button>
                 )}
                 {d.ssh_username && d.ip && (
-                  <Link
-                    to={`/ssh?device=${d.id}`}
-                    className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/40 rounded px-2 py-0.5 text-[10px] hover:bg-emerald-500/20 transition-colors"
-                    title={`Remote SSH ke ${d.ssh_host || d.ip}`}
-                  >
+                  <Link to={`/ssh?device=${d.id}`} className={ACT} title={`Remote SSH ke ${d.ssh_host || d.ip}`}>
                     🖥️ SSH
                   </Link>
                 )}
-                <button onClick={() => setMetricsDevice(d)} title="Lihat tren metrik (latency, uptime, CPU/RAM)" className="bg-sky-500/10 text-sky-400 border border-sky-500/40 rounded px-2 py-0.5 text-[10px]">
+                <button onClick={() => setMetricsDevice(d)} title="Lihat tren metrik (latency, uptime, CPU/RAM)" className={ACT}>
                   📈 Tren
                 </button>
                 {canEditDevice && (
-                  <button onClick={() => openEdit(d)} title="Edit perangkat" className="bg-accent2/10 text-accent2 border border-accent2/40 rounded px-2 py-0.5 text-[10px]">
+                  <button onClick={() => openEdit(d)} title="Edit perangkat" className={ACT}>
                     ✏️ Edit
                   </button>
                 )}
                 {canEdit && (
-                  <button onClick={() => removeDevice(d)} title="Hapus perangkat" className="bg-danger/10 text-danger border border-danger/40 rounded px-2 py-0.5 text-[10px]">
+                  <button onClick={() => removeDevice(d)} title="Hapus perangkat" className={`${ACT} hover:border-danger/40 hover:text-danger`}>
                     🗑️ Hapus
                   </button>
                 )}
+              </div>
               </div>
             </div>
           ))}

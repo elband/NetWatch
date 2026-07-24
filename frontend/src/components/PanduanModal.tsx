@@ -82,7 +82,7 @@ export default function PanduanModal({ onClose }: Props) {
               <div className="mt-12 grid grid-cols-3 gap-4 w-full max-w-lg">
                 {[
                   { icon: '📡', label: 'Monitoring Real-time' },
-                  { icon: '🚨', label: 'Manajemen Insiden' },
+                  { icon: '⚠️', label: 'Manajemen Insiden' },
                   { icon: '📊', label: 'Analitik Performa' },
                   { icon: '📝', label: 'Laporan Digital' },
                   { icon: '👥', label: 'Manajemen Tim' },

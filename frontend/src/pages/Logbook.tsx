@@ -13,7 +13,7 @@ const KIND_META: Record<LogEvent['kind'], { icon: string; label: string; cls: st
   inspeksi: { icon: '🔍', label: 'Inspeksi', cls: 'text-accent2 bg-accent2/10 border-accent2/30' },
   power: { icon: '⚡', label: 'Hidup/Mati', cls: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30' },
   maintenance: { icon: '🛠️', label: 'Maintenance', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
-  insiden: { icon: '🚨', label: 'Insiden', cls: 'text-danger bg-danger/10 border-danger/30' },
+  insiden: { icon: '⚠️', label: 'Insiden', cls: 'text-danger bg-danger/10 border-danger/30' },
 };
 // Badge Jenis per-event. Aksi power dipisah jadi Hidupkan/Matikan (bukan satu kategori
 // gabungan "Hidup/Mati") agar tiap kegiatan tampil sebagai jenis tersendiri.
@@ -101,7 +101,7 @@ export default function Logbook() {
                   <Chip label={`🔍 ${d.recap.inspeksi.total} inspeksi`} sub={`${d.recap.inspeksi.baik}B/${d.recap.inspeksi.perhatian}P/${d.recap.inspeksi.rusak}R`} />
                   <Chip label={`⚡ ${d.recap.power.on}× hidup · ${d.recap.power.off}× mati`} />
                   <Chip label={`🛠️ ${d.recap.maintenance.total} maint.`} sub={`${d.recap.maintenance.selesai} selesai`} />
-                  <Chip label={`🚨 ${d.recap.insiden.total} insiden`} sub={d.recap.insiden.downtime_min ? `${d.recap.insiden.downtime_min} mnt down` : undefined} />
+                  <Chip label={`⚠️ ${d.recap.insiden.total} insiden`} sub={d.recap.insiden.downtime_min ? `${d.recap.insiden.downtime_min} mnt down` : undefined} />
                 </div>
               </div>
               <span className="text-text2 text-[11px] shrink-0 mt-1 flex items-center gap-1 whitespace-nowrap">{d.events.length} aktivitas <span className="text-accent">→</span></span>
