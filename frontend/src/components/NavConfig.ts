@@ -166,8 +166,10 @@ export const BOTTOM_IDS: Record<Role, string[]> = {
 // Kandidat kartu "Akses Cepat" di dashboard, urut prioritas (maks 8 tampil).
 export const QUICK_IDS: Record<Role, string[]> = {
   teknisi: ['my-incidents', 'kegiatan-saya', 'aset', 'equipment', 'sparepart', 'logbook', 'jadwal', 'skp', 'dokumen', 'diklat', 'devices', 'peta'],
-  koordinator: ['incidents', 'jadwal', 'performa', 'attendance', 'surat', 'laporan-bulanan', 'skp', 'perencanaan', 'users', 'devices', 'sla', 'master'],
-  admin: ['incidents', 'jadwal', 'performa', 'attendance', 'surat', 'laporan-bulanan', 'users', 'perencanaan', 'devices', 'sla', 'master', 'settings'],
+  // "Performa Peralatan" = equipment (ELB) / aset-availability (AAB); keduanya
+  // dicantumkan, penyaringan unit menampilkan yang sesuai unit aktif.
+  koordinator: ['incidents', 'jadwal', 'performa', 'equipment', 'aset-availability', 'attendance', 'surat', 'laporan-bulanan', 'skp', 'perencanaan', 'users', 'devices', 'sla', 'master'],
+  admin: ['incidents', 'jadwal', 'performa', 'equipment', 'aset-availability', 'attendance', 'surat', 'laporan-bulanan', 'users', 'perencanaan', 'devices', 'sla', 'master', 'settings'],
   viewer: ['devices', 'monitor', 'peta', 'sla', 'notifikasi'],
 };
 
